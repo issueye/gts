@@ -582,6 +582,59 @@ first + ":" + second + ":" + endKind + ":" + okKind;
 	}
 }
 
+func TestStdPTYSpawnInteractive(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "pty_spawn.gs")
+	appSource := strings.ReplaceAll(`
+let pty = require("@std/pty");
+let process = require("@std/process");
+let cmdName = "bash";
+let cmdArgs = ["-lc", "echo got:pty"];
+if (process.env.OS === "Windows_NT") {
+  cmdName = "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+  cmdArgs = ["-NoProfile", "-Command", "Write-Output 'got:pty'"];
+}
+let term = pty.spawn(cmdName, cmdArgs, { cwd: "__DIR__", cols: 80, rows: 24 });
+let output = "";
+for (let i = 0; i < 8; i = i + 1) {
+  let chunk = term.readText(4096);
+  if (chunk === null) {
+    i = 8;
+  } else {
+    output = output + chunk;
+    if (output.includes("got:pty")) {
+      i = 8;
+    }
+  }
+}
+term.resize(100, 30);
+let result = term.wait();
+term.close();
+let gotKind = "bad";
+if (output.includes("got:pty")) {
+  gotKind = "got";
+}
+let okKind = "bad";
+if (result.success) {
+  okKind = "ok";
+}
+gotKind + ":" + okKind;
+`, "__DIR__", strings.ReplaceAll(dir, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "got:ok" {
+		t.Fatalf("want got:ok, got %T %v", result, result)
+	}
+}
+
 func TestStdStreamAndSSEModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "stream_sse.gs")

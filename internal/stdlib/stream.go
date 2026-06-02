@@ -38,6 +38,10 @@ func streamFromString(env *object.Environment, pos ast.Position, args ...object.
 
 func newReadableStream(reader io.Reader, closer io.Closer) *object.Hash {
 	stream := &readableStream{reader: bufio.NewReader(reader), closer: closer}
+	return readableStreamObject(stream)
+}
+
+func readableStreamObject(stream *readableStream) *object.Hash {
 	obj := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 	setHashMember(obj, "__stream", &object.GoObject{Value: stream})
 	setHashMember(obj, "read", &object.Builtin{Name: "stream.read", Fn: streamRead, Extra: &object.GoObject{Value: stream}})
