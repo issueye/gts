@@ -221,6 +221,106 @@ func TestEval_ForLetInitializer(t *testing.T) {
 	testNumber(t, evaluated, "3")
 }
 
+func TestEval_ForInUsesIterators(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "array keys",
+			input:    `let out = ""; for (let k in [10, 20, 30]) { out = out + k; } out;`,
+			expected: "012",
+		},
+		{
+			name:     "string indexes",
+			input:    `let total = 0; for (let k in "abc") { total = total + k; } total;`,
+			expected: "3",
+		},
+		{
+			name: "object keys",
+			input: `
+let seen = 0;
+for (let k in { a: 1, b: 2 }) {
+  if (k === "a") { seen = seen + 1; }
+  if (k === "b") { seen = seen + 2; }
+}
+seen;
+`,
+			expected: "3",
+		},
+		{
+			name: "map keys",
+			input: `
+let seen = 0;
+let m = new Map([["a", 1], ["b", 2]]);
+for (let k in m) {
+  if (k === "a") { seen = seen + 1; }
+  if (k === "b") { seen = seen + 2; }
+}
+seen;
+`,
+			expected: "3",
+		},
+		{
+			name: "set keys",
+			input: `
+let total = 0;
+let s = new Set([1, 2, 2]);
+for (let k in s) { total = total + k; }
+total;
+`,
+			expected: "3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			testStringOrNumber(t, evaluated, tt.expected)
+		})
+	}
+}
+
+func TestEval_ForOfUsesIterators(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "array values",
+			input:    `let total = 0; for (let v of [1, 2, 3]) { total = total + v; } total;`,
+			expected: "6",
+		},
+		{
+			name:     "string characters",
+			input:    `let out = ""; for (let ch of "abc") { out = out + ch; } out;`,
+			expected: "abc",
+		},
+		{
+			name:     "object values",
+			input:    `let total = 0; for (let v of { a: 1, b: 2 }) { total = total + v; } total;`,
+			expected: "3",
+		},
+		{
+			name:     "map values",
+			input:    `let total = 0; let m = new Map([["a", 1], ["b", 2]]); for (let v of m) { total = total + v; } total;`,
+			expected: "3",
+		},
+		{
+			name:     "set values",
+			input:    `let total = 0; let s = new Set([1, 2, 2]); for (let v of s) { total = total + v; } total;`,
+			expected: "3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			testStringOrNumber(t, evaluated, tt.expected)
+		})
+	}
+}
+
 func TestEval_ArrayFind(t *testing.T) {
 	input := `let a = [1, 2, 3, 4]; a.find(x => x > 2);`
 	evaluated := testEval(input)

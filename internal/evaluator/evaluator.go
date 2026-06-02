@@ -315,62 +315,11 @@ func evalForIn(n *ast.ForInStmt, env *object.Environment) object.Object {
 	if object.IsRuntimeError(iterable) {
 		return iterable
 	}
-	switch it := iterable.(type) {
-	case *object.Array:
-		scope := env.NewScope()
-		for i := 0; i < len(it.Elements); i++ {
-			scope.Set(n.Name, &object.String{Value: fmt.Sprintf("%d", i)})
-			result := Eval(n.Body, scope.NewScope())
-			if rv, ok := result.(*object.ReturnValue); ok {
-				if signal := controlSignal(rv); signal == breakSignal {
-					break
-				} else if signal == continueSignal {
-					continue
-				}
-				return rv
-			}
-			if object.IsRuntimeError(result) {
-				return result
-			}
-		}
-	case *object.Hash:
-		scope := env.NewScope()
-		for _, pair := range it.Pairs {
-			scope.Set(n.Name, pair.Key)
-			result := Eval(n.Body, scope.NewScope())
-			if rv, ok := result.(*object.ReturnValue); ok {
-				if signal := controlSignal(rv); signal == breakSignal {
-					break
-				} else if signal == continueSignal {
-					continue
-				}
-				return rv
-			}
-			if object.IsRuntimeError(result) {
-				return result
-			}
-		}
-	case *object.String:
-		scope := env.NewScope()
-		for i := 0; i < len(it.Value); i++ {
-			scope.Set(n.Name, &object.Number{Value: float64(i)})
-			result := Eval(n.Body, scope.NewScope())
-			if rv, ok := result.(*object.ReturnValue); ok {
-				if signal := controlSignal(rv); signal == breakSignal {
-					break
-				} else if signal == continueSignal {
-					continue
-				}
-				return rv
-			}
-			if object.IsRuntimeError(result) {
-				return result
-			}
-		}
-	default:
-		return object.NewError(n.Pos(), "cannot iterate over %s", it.Type())
+	it, ok := object.NewIterator(iterable, object.IterateKeys)
+	if !ok {
+		return object.NewError(n.Pos(), "cannot iterate over %s", iterable.Type())
 	}
-	return object.UNDEFINED
+	return evalIteratorLoop(n.Name, n.Body, env, it)
 }
 
 func evalForOf(n *ast.ForOfStmt, env *object.Environment) object.Object {
@@ -378,43 +327,33 @@ func evalForOf(n *ast.ForOfStmt, env *object.Environment) object.Object {
 	if object.IsRuntimeError(iterable) {
 		return iterable
 	}
-	switch it := iterable.(type) {
-	case *object.Array:
-		scope := env.NewScope()
-		for _, elem := range it.Elements {
-			scope.Set(n.Name, elem)
-			result := Eval(n.Body, scope.NewScope())
-			if rv, ok := result.(*object.ReturnValue); ok {
-				if signal := controlSignal(rv); signal == breakSignal {
-					break
-				} else if signal == continueSignal {
-					continue
-				}
-				return rv
-			}
-			if object.IsRuntimeError(result) {
-				return result
-			}
+	it, ok := object.NewIterator(iterable, object.IterateValues)
+	if !ok {
+		return object.NewError(n.Pos(), "cannot for-of over %s", iterable.Type())
+	}
+	return evalIteratorLoop(n.Name, n.Body, env, it)
+}
+
+func evalIteratorLoop(name string, body ast.Node, env *object.Environment, it object.Iterator) object.Object {
+	scope := env.NewScope()
+	for {
+		value, ok := it.Next()
+		if !ok {
+			break
 		}
-	case *object.String:
-		scope := env.NewScope()
-		for _, ch := range it.Value {
-			scope.Set(n.Name, &object.String{Value: string(ch)})
-			result := Eval(n.Body, scope.NewScope())
-			if rv, ok := result.(*object.ReturnValue); ok {
-				if signal := controlSignal(rv); signal == breakSignal {
-					break
-				} else if signal == continueSignal {
-					continue
-				}
-				return rv
+		scope.Set(name, value)
+		result := Eval(body, scope.NewScope())
+		if rv, ok := result.(*object.ReturnValue); ok {
+			if signal := controlSignal(rv); signal == breakSignal {
+				break
+			} else if signal == continueSignal {
+				continue
 			}
-			if object.IsRuntimeError(result) {
-				return result
-			}
+			return rv
 		}
-	default:
-		return object.NewError(n.Pos(), "cannot for-of over %s", it.Type())
+		if object.IsRuntimeError(result) {
+			return result
+		}
 	}
 	return object.UNDEFINED
 }
