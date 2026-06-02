@@ -1,0 +1,18 @@
+# binaries
+gs.exe
+gs
+*.exe
+
+# build output
+/gts
+/bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,429 @@
+================================================================================
+  GoScript Grammar (EBNF, ISO/IEC 14977 style)
+  Version: 0.1
+================================================================================
+
+(* ============================================================ *)
+(* 0. 词法基础                                                  *)
+(* ============================================================ *)
+
+letter          = "A".."Z" | "a".."z" | unicode-letter ;
+digit           = "0".."9" ;
+hexdigit        = digit | "A".."F" | "a".."f" ;
+underscore      = "_" ;
+dollar          = "$" ;
+
+identifier-start = letter | underscore | dollar ;
+identifier-part  = identifier-start | digit ;
+
+identifier      = identifier-start , { identifier-part } ;
+
+(* 数字字面量：统一为 float64，int 注解仅在语义阶段识别 *)
+dec-int         = "0" | ( "1".."9" , { digit } ) ;
+hex-int         = "0" ( "x" | "X" ) , hexdigit , { hexdigit } ;
+bin-int         = "0" ( "b" | "B" ) , ( "0" | "1" ) , { "0" | "1" } ;
+oct-int         = "0" ( "o" | "O" ) , ( "0".."7" ) , { "0".."7" } ;
+exp-part        = ( "e" | "E" ) , [ "+" | "-" ] , { digit } ;
+float-literal   = { digit } , "." , { digit } , [ exp-part ]
+                | { digit } , exp-part ;
+
+number-literal  = ( float-literal | dec-int | hex-int | bin-int | oct-int ) ;
+
+string-char     = ? any unicode char except '"', '\', newline ? ;
+escape          = "\" ( "n" | "t" | "r" | "\"" | "'" | "\\" | "/"
+                       | "b" | "f" | "0"
+                       | "x" , hexdigit , hexdigit
+                       | "u" , hexdigit , hexdigit , hexdigit , hexdigit
+                       | "u{" , { hexdigit } , "}" ) ;
+string-literal  = ( '"' , { string-char | escape } , '"' )
+                | ( "'" , { string-char | escape } , "'" ) ;
+
+template-char   = ? any char except '`', '${' ? ;
+template-expr   = "${" , expression , "}" ;
+template-literal= "`" , { template-char | template-expr } , "`" ;
+
+literal         = number-literal | string-literal | template-literal
+                | boolean-literal | null-literal | undefined-literal ;
+boolean-literal = "true" | "false" ;
+null-literal    = "null" ;
+undefined-literal = "undefined" ;
+
+(* 注释会被词法层丢弃 *)
+line-comment    = "//" , { ? any char except newline ? } , newline ;
+block-comment   = "/*" , { ? any char ? | block-comment } , "*/" ;
+
+(* ============================================================ *)
+(* 1. 程序与模块                                                *)
+(* ============================================================ *)
+
+program         = { statement } ;
+
+(* import / export *)
+import-spec     = ( identifier , "as" , identifier )
+                | ( "{" , [ import-list ] , "}" )
+                | identifier ;
+import-list     = import-spec , { "," , import-spec } , [ "," ] ;
+import-default  = identifier , "," , import-list   (* default + named *)
+                | identifier ;
+import-decl     = "import" ( import-default | import-list )
+                  "from" , string-literal ";" ;
+
+export-decl     = "export" , ( declaration | "default" , expression ) ";" ;
+(* 注：v0.1 简化 —— export 仅为语法占位，运行时按文件边界实现模块 *)
+
+
+(* ============================================================ *)
+(* 1.5 模式（用于 match）                                       *)
+(* ============================================================ *)
+
+(* v0.1 支持：字面量、绑定、wildcard、OR、range、guard。        *)
+(* v0.2+ 将支持数组/对象解构、类型测试。                          *)
+
+pattern         = literal-pattern
+                | identifier-pattern
+                | wildcard-pattern
+                | or-pattern
+                | range-pattern
+                | "(" , pattern , ")" ;
+
+literal-pattern = number-literal | string-literal | boolean-literal
+                | null-literal | undefined-literal ;
+
+identifier-pattern = identifier ;      (* 绑定：把被匹配值绑定到该名字 *)
+wildcard-pattern = "_" ;                (* 任意值，不绑定 *)
+or-pattern      = pattern , "|" , pattern , { "|" , pattern } ;
+range-pattern   = literal , range-op , literal ;
+range-op        = "..="                  (* 闭区间，含两端 *)
+                 | ".."                   (* 半开区间，含 start 不含 end *) ;
+
+(* ============================================================ *)
+(* 2. 语句                                                      *)
+(* ============================================================ *)
+
+statement       = declaration
+                | if-statement
+                | while-statement
+                | for-statement
+                | return-statement
+                | break-statement
+                | continue-statement
+                | try-statement
+                | throw-statement
+                | block-statement
+                | labeled-statement
+                | match-statement
+                | expression-statement ;
+
+declaration     = variable-declaration
+                | function-declaration
+                | class-declaration
+                | import-decl
+                | export-decl ;
+
+(* --- 变量声明 --- *)
+variable-kind   = "let" | "const" | "var" ;
+type-annotation = ":" , type-expression ;
+type-expression = primary-type
+                | type-expression , "|" , primary-type     (* union *)
+                | primary-type , "?"                        (* optional *)
+                ;
+primary-type    = identifier                            (* number/string/.../any *)
+                | primary-type , "[" , "]"                (* T[] *)
+                | "Array" "<" , type-expression , ">"
+                | "{" , [ type-member-list ] , "}"
+                | "(" , [ param-type-list ] , ")" , "=>" , type-expression
+                | "(" , type-expression , ")"              (* parentheses *)
+                ;
+type-member-list= type-member , { "," , type-member } , [ "," ] ;
+type-member     = identifier , [ "?" ] , ":" , type-expression ;
+param-type-list = parameter-type , { "," , parameter-type } , [ "," ] ;
+parameter-type  = identifier , [ "?" ] , ":" , type-expression ;
+
+variable-declaration
+                = variable-kind , binding-list ";" ;
+binding-list    = binding , { "," , binding } , [ "," ] ;
+binding         = identifier , [ type-annotation ] , [ "=" , expression ] ;
+
+(* --- 函数声明 --- *)
+function-declaration
+                = [ "async" ] , "function" , identifier
+                  "(" , [ param-list ] , ")" , [ return-annotation ]
+                  block-statement ;
+param-list      = parameter , { "," , parameter } , [ "," ] ;
+parameter       = identifier , [ "?" ] , [ type-annotation ] , [ "=" , expression ] ;
+return-annotation = ":" , type-expression ;
+
+(* --- 类声明 --- *)
+class-declaration
+                = "class" , identifier , [ "<" , identifier , ">" ]
+                  [ "extends" , expression ]
+                  class-body ;
+class-body      = "{" , { class-member } , "}" ;
+class-member    = [ "static" ] , ( method-def | field-def | constructor-def ) ;
+constructor-def = "constructor" , "(" , [ param-list ] , ")" , block-statement ;
+method-def      = [ "async" ] , identifier , "(" , [ param-list ] , ")" , block-statement ;
+field-def       = identifier , [ type-annotation ] , [ "=" , expression ] ";" ;
+
+(* --- 控制流 --- *)
+if-statement    = "if" , "(" , expression , ")" , statement
+                  [ "else" , statement ] ;
+while-statement = "while" , "(" , expression , ")" , statement ;
+for-statement   = "for" , "(" , [ for-init ] , ";" , [ expression ] , ";"
+                                [ expression ] , ")" , statement ;
+for-init        = variable-declaration-no-semi | expression ;
+variable-declaration-no-semi
+                = variable-kind , binding-list ;
+for-in-statement= "for" , "(" , ( variable-declaration-no-semi | identifier )
+                  "in" , expression , ")" , statement ;
+for-of-statement= "for" , "(" , ( variable-declaration-no-semi | identifier )
+                  "of" , expression , ")" , statement ;
+
+(* --- match 模式匹配（替代 switch/case/default） --- *)
+(* match 既可作表达式，也可作语句：                                 *)
+(*   - 作表达式时，arm 体必须为 expression                         *)
+(*   - 作语句时，arm 体可任选 expression 或 block-statement          *)
+(* 不存在隐式 fall-through；每个 arm 独立匹配。                    *)
+match-statement = "match" , expression , "{" , { match-arm } , "}" ;
+match-expression= "match" , expression , "{" , { match-arm } , "}" ;
+match-arm       = pattern , [ "if" , expression ] , "=>" ,
+                  ( expression | block-statement ) , "," ;
+
+return-statement= "return" , [ expression ] ";" ;
+break-statement = "break" , [ identifier ] ";" ;
+continue-statement = "continue" , [ identifier ] ";" ;
+labeled-statement = identifier , ":" , statement ;
+
+(* --- 异常 --- *)
+try-statement   = "try" , block-statement ,
+                  [ "catch" , "(" , identifier [ type-annotation ] , ")" , block-statement ] ,
+                  [ "finally" , block-statement ] ;
+throw-statement = "throw" , expression ";" ;
+
+(* --- 块与表达式语句 --- *)
+block-statement = "{" , { statement } , "}" ;
+expression-statement = expression , [ ";" ] ;
+
+
+(* ============================================================ *)
+(* 3. 表达式（Pratt 风格：按优先级分层描述）                       *)
+(* ============================================================ *)
+
+expression      = assignment-expression ;
+
+(* 赋值是最低优先级的"表达式" *)
+assignment-expression
+                = conditional-expression
+                | left-hand-side , assignment-operator , assignment-expression ;
+assignment-operator
+                = "=" | "+=" | "-=" | "*=" | "/=" | "%="
+                | "<<=" | ">>=" | ">>>="
+                | "&=" | "|=" | "^=" | "**=" ;
+left-hand-side  = conditional-expression ;  (* 简化：成员/索引表达式都已在 cond. 内解析 *)
+
+
+(* 三元与短路 *)
+conditional-expression
+                = short-circuit-expression
+                | short-circuit-expression , "?" , assignment-expression , ":" , assignment-expression ;
+short-circuit-expression
+                = nullish-coalescing-expression
+                | short-circuit-expression , "&&" , nullish-coalescing-expression
+                | short-circuit-expression , "||" , nullish-coalescing-expression ;
+
+(* 可选链与空合并 *)
+nullish-coalescing-expression
+                = logical-or-expression
+                | logical-or-expression , "??" , nullish-coalescing-expression ;
+
+logical-or-expression
+                = logical-xor-expression
+                | logical-or-expression , "||" , logical-xor-expression ;
+logical-xor-expression
+                = logical-and-expression
+                | logical-xor-expression , "^^" , logical-and-expression ;  (* 扩展，可选 *)
+logical-and-expression
+                = bitwise-or-expression
+                | logical-and-expression , "&&" , bitwise-or-expression ;
+
+bitwise-or-expression
+                = bitwise-xor-expression
+                | bitwise-or-expression , "|" , bitwise-xor-expression ;
+bitwise-xor-expression
+                = bitwise-and-expression
+                | bitwise-xor-expression , "^" , bitwise-and-expression ;
+bitwise-and-expression
+                = equality-expression
+                | bitwise-and-expression , "&" , equality-expression ;
+
+equality-expression
+                = relational-expression
+                | equality-expression , ( "===" | "!==" ) , relational-expression ;
+                (* 注：== 和 != 已移除 —— 见 docs/bad-parts-fixed.md §1.1 *)
+
+relational-expression
+                = shift-expression
+                | relational-expression , ( "<" | "<=" | ">" | ">=" | "in" | "instanceof" ) , shift-expression ;
+                (* 注：关系运算符要求两边类型一致，违反时 TypeError —— 见 bad-parts-fixed.md §1.6 *)
+
+shift-expression
+                = additive-expression
+                | shift-expression , ( "<<" | ">>" | ">>>" ) , additive-expression ;
+
+additive-expression
+                = multiplicative-expression
+                | additive-expression , ( "+" | "-" ) , multiplicative-expression ;
+multiplicative-expression
+                = exponent-expression
+                | multiplicative-expression , ( "*" | "/" | "%" ) , exponent-expression ;
+
+(* 指数是右结合 *)
+exponent-expression
+                = unary-expression
+                | unary-expression , "**" , exponent-expression ;
+
+(* 一元 *)
+unary-expression
+                = postfix-expression
+                | ( "!" | "-" | "+" | "~" | "typeof" | "void" | "delete" ) , unary-expression
+                | "++" , unary-expression
+                | "--" , unary-expression
+                | "await" , unary-expression
+                | "yield" , [ expression ]  (* v0.1 仅语法占位 *)
+                ;
+
+postfix-expression
+                = call-expression
+                | call-expression , "++"
+                | call-expression , "--" ;
+
+(* 调用 / 成员 / 可选链 *)
+call-expression = member-expression , { call-suffix } ;
+call-suffix     = arguments
+                | "[" , expression , "]"
+                | "." , identifier
+                | "?." , identifier
+                | "?." , "[" , expression , "]"
+                | "?." , arguments ;
+
+arguments       = "(" , [ argument-list ] , ")" ;
+argument-list   = expression , { "," , expression } , [ "," ]
+                | spread-expression , { "," , ( expression | spread-expression ) } ;
+spread-expression = "..." , expression ;
+
+(* 基础成员链 *)
+member-expression
+                = new-expression
+                | primary-expression ;
+
+new-expression = "new" , member-expression , [ arguments ]
+                | member-expression ;
+
+primary-expression
+                = literal
+                | identifier
+                | "this"
+                | "super" , ( "." , identifier | "[" , expression , "]" )
+                | array-literal
+                | object-literal
+                | function-expression
+                | class-expression
+                | parenthesized-expression
+                | template-literal  (* 如未在 literal 中列出 *)
+                | import-call
+                ;
+
+parenthesized-expression = "(" , expression , ")" ;
+
+(* 字面量 *)
+array-literal   = "[" , [ element-list ] , "]" ;
+element-list    = ( expression | spread-expression ) , { "," , ( expression | spread-expression ) } , [ "," ] ;
+
+object-literal  = "{" , [ property-list ] , "}" ;
+property-list   = property , { "," , property } , [ "," ] ;
+property        = ( identifier | string-literal | number-literal )
+                  ":" , expression
+                | [ identifier ] , ( function-expression | identifier )  (* shorthand / method *)
+                | "..." , expression
+                | "[" , expression , "]" , ":" , expression  (* computed key *)
+                ;
+
+(* 函数表达式与箭头函数 *)
+function-expression
+                = [ "async" ] , "function" , [ identifier ] ,
+                  "(" , [ param-list ] , ")" , [ return-annotation ] , block-statement ;
+class-expression
+                = "class" , [ identifier ] , [ "extends" , expression ] , class-body ;
+
+arrow-function  = [ "async" ] , arrow-params , "=>" , ( expression | block-statement ) ;
+arrow-params    = identifier
+                | "(" , [ param-list ] , ")" ;
+
+import-call     = "import" , "(" , expression , ")" ;    (* 动态 import，可选 *)
+
+
+(* ============================================================ *)
+(* 4. 顶层入口                                                  *)
+(* ============================================================ *)
+
+program-entry   = program , EOF ;
+
+
+================================================================================
+  优先级与结合性总览（重复参考）
+================================================================================
+
+  17  Primary   literal / ident / (...) / [...]  match-expression
+  16  Postfix   ()  []  .  ?.  ++ --
+  15  Unary     !  +  -  ~  typeof  void  delete  ++ -- (prefix)  await  yield
+  14  Exponent  **  (right-assoc)
+  13  Mul       * / %
+  12  Add       + -
+  11  Shift     << >> >>>
+  10  Rel       < <= > >= in instanceof
+   9  Eq        === !==
+   8  BitAnd    &
+   7  BitXor    ^
+   6  BitOr     |
+   5  Logical   &&
+   4  Logical   ||
+   3  Nullish   ??
+   2  Ternary   ? :
+   1  Assign    = += -= *= /= %= <<= >>= >>>= &= |= ^= **=
+
+  注意：
+    - "==" 与 "!=" 已被移除。
+    - "+" 仅在两边类型相同时合法（number+number 或 string+string）。
+    - 关系运算符（<, <=, >, >=）要求两边类型相同。
+    - match-expression 属于 Primary 优先级。
+
+================================================================================
+  关键字列表
+================================================================================
+
+  break       catch       class       const       continue
+  delete      else        export      extends     false
+  finally     for         function    if          import
+  in          instanceof  let         match       new
+  null        return      super       this        throw
+  true        try         typeof      undefined   var
+  void        while       async       await       of
+  static      as          from        true        false
+
+  保留但 v0.1 保留为 reserved word（**不实现**）：
+  with  eval  arguments  do  switch  case  default  debugger
+  enum  interface  type  implements  package  private  protected  public
+
+  (*)  v0.1 不实现，仅保留为 reserved word（不能用作标识符）
+
+================================================================================
+  标识符 / 字面量规则
+================================================================================
+
+  - 标识符区分大小写。
+  - 保留字不可作标识符。
+  - 数字字面量允许 `_` 作为分隔符（v0.1 暂不实现分隔符）。
+  - 字符串允许 `\` 续行（v0.1 不实现）。
+  - 模板字符串支持嵌套 `${...}`。
+  - "match" 是关键字，不能作标识符。
+
+================================================================================
