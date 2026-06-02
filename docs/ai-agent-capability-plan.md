@@ -59,6 +59,31 @@
 
 这些能力足以作为 agent 脚本运行时的起点，但还不足以写出稳定的 Pi-like agent。
 
+### 3.1 本轮已补齐的能力
+
+截至 2026-06-02，本轮已完成第一批语言层和宿主标准库补齐：
+
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| 结构化错误 | 已完成基础版 | `Error`、`TypeError`、`RangeError`、`ReferenceError`、`SyntaxError` 支持 `name/message/stack`，运行时错误和脚本 `throw/catch` 可区分传播 |
+| Promise 链式语义 | 已完成基础版 | 支持 `new Promise()`、`then/catch/finally`、reject 传播、async 函数错误转 rejected Promise、`await` rejected Promise 进入 `catch` |
+| `await` 解析 | 已完成基础版 | parser 支持 `await` 表达式，配合 async/Promise 测试通过 |
+| C 风格 `for` 循环 | 已修复基础缺陷 | 修复 `for (let i = 0; ...)` 试探解析吞 token 的问题，闭包和工具 registry 循环可稳定运行 |
+| Agent 模块别名 | 已完成基础版 | `@agent/*` 映射到项目根目录下 `scripts/agent/*`，并支持默认 `.gs` 扩展 |
+| `@std/path` | 已完成基础版 | `join/resolve/relative/normalize/dirname/basename/extname/sep` |
+| `@std/fs` | 已完成基础版 | `readFileSync/writeFileSync/existsSync/readdirSync/mkdirSync/statSync/renameSync/unlinkSync` |
+| `@std/process` | 已完成基础版 | `argv/env/pid/cwd/chdir/getenv/setenv/unsetenv/exit` |
+| `@std/os` | 已完成基础版 | `platform/arch/homedir/tmpdir/hostname` |
+| `@std/crypto` | 已完成基础版 | `randomUUID/sha256/randomBytes` |
+| `@std/schema` | 已完成基础版 | JSON Schema 子集：`type/properties/required/items/enum/additionalProperties/min/max` 等 |
+| 脚本工具库 | 已完成最小版 | `@agent/tools/registry`、`@agent/tools/files` 已能完成工具注册、schema 校验、文件读写和目录列表 |
+| 脚本 coding tools | 已完成最小版 | `@agent/tools/bash`、`@agent/tools/grep`、`@agent/tools/coding` 已可由脚本执行 shell、纯文本搜索并聚合工具 |
+| 脚本 session | 已完成最小版 | `@agent/session/jsonl` 已可写入和读取 JSONL 会话记录 |
+| 脚本 agent loop | 已完成最小版 | `@agent/core/agent` + `@agent/llm/fake` 已能完成“provider 产生 tool call -> registry 调用工具 -> provider 返回最终消息”的两轮闭环 |
+| 脚本 smoke | 已完成基础版 | `scripts/agent/smoke_import.gs`、`smoke_std.gs`、`smoke_env.gs`、`smoke_schema.gs`、`smoke_tools.gs`、`smoke_coding_tools.gs`、`smoke_agent_loop.gs` 可验证脚本层使用标准库、工具库和最小 agent loop |
+
+这些交付仍然是“基础版”：它们已足够让脚本开始实现 coding tools、session 和 tool schema。L3 已开始补齐 HTTP streaming、SSE 和 stream 抽象；真实 provider 适配仍应由 `.gs` 脚本实现。
+
 ---
 
 ## 4. 语言层缺口矩阵
@@ -72,10 +97,10 @@
 | 完整模块语义 | `import/export`、循环依赖、native import 仍需加固 | agent 框架要拆成多个 `.gs` 模块 |
 | 结构化错误 | `Error` 子类、`stack`、file/line 不完整 | provider/tool/session 错误必须可诊断 |
 | JSON 和对象稳定性 | `JSON.stringify`、对象枚举、深层结构仍需加强 | provider payload、tool result、session JSONL 都依赖 |
-| 文件/路径标准库 | `@std/fs`、`@std/path` 未完整落地 | read/write/edit/session/skills 都依赖 |
-| HTTP streaming/SSE | HTTP 已有雏形，但缺少流式协议能力 | LLM provider 流式输出的核心 |
+| 文件/路径标准库 | `@std/fs`、`@std/path` 已有基础版，仍需 glob、walk、原子写、权限细节 | read/write/edit/session/skills 都依赖 |
+| HTTP streaming/SSE | 已有基础版，仍需 async iterator、abort、背压和更完整超时模型 | LLM provider 流式输出的底层能力 |
 | 进程执行增强 | `@std/exec` 已有，但缺少 cwd/env/timeout/stream/cancel 完整模型 | `bash` tool 必须可靠可控 |
-| Schema 校验 | 缺少 JSON Schema 子集 | 工具调用参数必须校验 |
+| Schema 校验 | 已有 JSON Schema 子集，仍需默认值、格式校验和更完整错误聚合 | 工具调用参数必须校验 |
 
 ### 4.2 P1：Agent MVP 需要
 
@@ -86,8 +111,8 @@
 | Buffer / bytes / base64 | 处理二进制、图片、HTTP body、clipboard/image tool result |
 | 正则与文本处理 | grep/search、模板处理、路径匹配、输出裁剪 |
 | `Date` / 时间工具 | session timestamp、timeout、耗时统计 |
-| `crypto` 基础 | uuid/hash/session id/cache key |
-| `process` / `os` | env、argv、cwd、platform、homedir、tmpdir |
+| `crypto` 基础 | 已有 uuid/hash/randomBytes，后续补 HMAC/base64 组合能力 |
+| `process` / `os` | 已有 env、argv、cwd、platform、homedir、tmpdir 等基础能力 |
 | 稳定数组/字符串方法 | map/filter/reduce/slice/split/join/startsWith/includes 等 agent 代码常用方法 |
 | 动态加载约定 | `import(path)` 或受控动态 require，用于扩展和技能加载 |
 
@@ -219,6 +244,11 @@ Agent 行为则在 `scripts/agent` 中完成。
 | `@std/os` | platform、arch、homedir、tmpdir、hostname |
 | `@std/exec` | cwd、env、timeout、stream stdout/stderr、kill、exitCode |
 
+**当前状态：**
+
+- `@std/fs`、`@std/path`、`@std/process`、`@std/os` 已完成基础同步 API。
+- 下一步应补 `@std/fs.walk/glob/readText/writeText/appendFileSync`、原子写、以及 `@std/exec` 的 timeout/env/cwd 一体化选项。
+
 **验收：**
 
 - `read/write/bash/ls/find` 工具可以主要用 GoScript 写。
@@ -226,7 +256,7 @@ Agent 行为则在 `scripts/agent` 中完成。
 
 ### L3：HTTP、SSE、Stream
 
-**目标：** 让 LLM provider 可以用脚本实现。
+**目标：** 只补通用 HTTP streaming、SSE、stream 抽象，让 LLM provider 继续由脚本实现。
 
 **工作项：**
 
@@ -236,22 +266,30 @@ Agent 行为则在 `scripts/agent` 中完成。
   - headers
   - method/body
   - timeout
-  - abort signal
+  - abort signal（后续）
   - streaming body
 - `@std/sse` 提供：
   - EventSource parser
   - 按事件增量输出
   - `[DONE]` 处理
 - `@std/stream` 提供：
-  - async iterable reader
-  - text decoder
-  - line splitter
+  - 同步 reader 基础版
+  - text chunk / line reader
+  - async iterable reader（后续）
   - bounded accumulator
 
 **验收：**
 
-- GoScript 脚本可以调用 OpenAI 兼容 streaming 接口并逐 token 输出。
-- 可以从 SSE chunk 中组装 tool-call JSON 参数。
+- GoScript 脚本可以从 HTTP streaming response 中读取 chunk、文本行和 SSE 事件。
+- 脚本 provider 可以基于 `@std/sse` 自行解析 OpenAI 兼容、Anthropic 或其他 provider 的 streaming payload。
+- Go 层不包含任何真实 provider 逻辑。
+
+**当前状态：**
+
+- `@std/stream` 已提供 `fromString/read/readText/readLine/readAll/close`。
+- `@std/net/http/client.stream()` 已返回带 `body` stream 的响应对象。
+- `@std/sse` 已提供 `reader(stream).next/readAll` 和 `parse(text)`。
+- 已通过本地 HTTP streaming + SSE 测试和 `scripts/agent/smoke_stream_sse.gs`。
 
 ### L4：Schema、JSON、Buffer、Crypto
 
@@ -278,6 +316,11 @@ Agent 行为则在 `scripts/agent` 中完成。
   - sha256
   - randomBytes
 
+**当前状态：**
+
+- `@std/schema` 已支持 tool 参数校验常用子集，但还未支持 `default` 写回、`format`、`oneOf/anyOf`。
+- `@std/crypto` 已支持 `randomUUID/sha256/randomBytes`，后续应补 base64、HMAC、hex 编解码与 Buffer/bytes 互操作。
+
 **验收：**
 
 - tool 参数校验错误能指出字段路径。
@@ -298,6 +341,16 @@ Agent 行为则在 `scripts/agent` 中完成。
 | `@agent/coding-tools` | read/write/bash/grep/find/ls |
 | `@agent/session` | JSONL session |
 | `@agent/resources` | AGENTS.md、skills、prompt templates |
+
+**当前状态：**
+
+- `@agent/tools/registry` 已完成最小工具注册表，支持 `register/list/get/call`，调用前使用 `@std/schema` 校验参数。
+- `@agent/tools/files` 已完成最小文件工具：`read_file`、`write_file`、`list_dir`，并通过 workspace 路径边界检查避免越界访问。
+- `@agent/session/jsonl` 已完成最小 JSONL 会话记录。
+- `@agent/tools/bash`、`@agent/tools/grep`、`@agent/tools/coding` 已完成最小 coding tools 聚合。
+- `@agent/core/agent` 和 `@agent/llm/fake` 已跑通两轮 fake tool-call loop。
+- provider 层应继续保持脚本实现。Go 层 L3 只补 HTTP streaming、SSE、stream 等通用底层能力，不内置任何真实 LLM provider。
+- 下一步应继续补 `@agent/core/events`、脚本 provider streaming 解析、tool-call 参数增量组装和取消/超时模型。
 
 **目标 API：**
 
@@ -363,57 +416,63 @@ go run ./cmd/gs scripts/agent/smoke_import.gs
 
 **交付物：**
 
-- `@std/fs`
-- `@std/path`
-- `@std/process`
-- `@std/os`
+- `@std/fs`（基础版已完成）
+- `@std/path`（基础版已完成）
+- `@std/process`（基础版已完成）
+- `@std/os`（基础版已完成）
 - 增强 `@std/exec`
 
 **验证：**
 
 ```bash
 go test ./...
-go run ./cmd/gs scripts/agent/smoke_tools.gs
+go run ./cmd/gs scripts/agent/smoke_std.gs
+go run ./cmd/gs scripts/agent/smoke_env.gs
 ```
 
 ### Sprint 4：HTTP/SSE/Stream
 
 **交付物：**
 
-- streaming HTTP response。
-- SSE parser。
-- async iterable stream。
-- abort/timeout 支持。
+- streaming HTTP response（基础版已完成）。
+- SSE parser（基础版已完成）。
+- stream 抽象（同步基础版已完成，async iterable 后续）。
+- abort/timeout 支持（timeout 基础版已支持，abort 后续）。
 
 **验证：**
 
 - 本地 fake SSE server 测试。
-- 无 API key 的 provider parser 单元测试。
+- `go run ./cmd/gs scripts/agent/smoke_stream_sse.gs`
+- 无 API key 的脚本 provider parser 单元测试。
 
-### Sprint 5：Schema 和 OpenAI Provider 脚本实现
+### Sprint 5：Schema 和脚本 Provider 解析
 
 **交付物：**
 
-- `@std/schema`。
-- `scripts/agent/llm/openai.gs`。
-- streaming text 和 tool-call assembly。
+- `@std/schema`（基础版已完成）。
+- `scripts/agent/llm/*` 由脚本实现 provider 适配。
+- streaming text 和 tool-call assembly 由脚本实现。
 
 **验证：**
 
-- fake OpenAI streaming fixture 测试。
+- `go run ./cmd/gs scripts/agent/smoke_schema.gs`
+- fake streaming fixture 测试。
 - 可选真实 API 手动测试。
 
 ### Sprint 6：脚本化 Agent Loop 和 Coding Tools
 
 **交付物：**
 
-- `scripts/agent/core/agent.gs`
-- `scripts/agent/tools/*.gs`
-- `scripts/agent/session/jsonl.gs`
+- `scripts/agent/core/agent.gs`（最小版已完成）
+- `scripts/agent/tools/*.gs`（registry 和文件工具最小版已完成）
+- `scripts/agent/session/jsonl.gs`（最小版已完成）
 - print mode 原型
 
 **验证：**
 
+- `go run ./cmd/gs scripts/agent/smoke_tools.gs`
+- `go run ./cmd/gs scripts/agent/smoke_coding_tools.gs`
+- `go run ./cmd/gs scripts/agent/smoke_agent_loop.gs`
 - fake provider 触发 `read` tool。
 - agent 用脚本完成“读文件 -> 返回总结”的两轮对话。
 
@@ -436,4 +495,3 @@ go run ./cmd/gs scripts/agent/main.gs -p "分析这个项目"
 ```
 
 第一版应优先做到：**异步可靠、模块可靠、HTTP/SSE 可流式、文件/进程可控、schema 可校验、agent loop 可脚本化**。
-

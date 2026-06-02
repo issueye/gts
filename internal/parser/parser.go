@@ -39,6 +39,7 @@ type Parser struct {
 	l      *lexer.Lexer
 	cur    lexer.Token
 	peek   lexer.Token
+	buf    []lexer.Token
 	file   string
 	errors []string
 
@@ -124,7 +125,23 @@ func (p *Parser) registerInfix(t lexer.TokenType, fn infixFn)   { p.infixFns[t] 
 
 func (p *Parser) nextToken() {
 	p.cur = p.peek
-	p.peek = p.l.NextToken()
+	p.peek = p.readToken()
+}
+
+func (p *Parser) readToken() lexer.Token {
+	if len(p.buf) > 0 {
+		tok := p.buf[0]
+		p.buf = p.buf[1:]
+		return tok
+	}
+	return p.l.NextToken()
+}
+
+func (p *Parser) unreadTokens(tokens []lexer.Token) {
+	if len(tokens) == 0 {
+		return
+	}
+	p.buf = append(append([]lexer.Token{}, tokens...), p.buf...)
 }
 
 func (p *Parser) curTokenIs(t lexer.TokenType) bool  { return p.cur.Type == t }
@@ -442,11 +459,16 @@ func (p *Parser) parseFor() ast.Statement {
 	maybeForIn := p.curTokenIs(lexer.TOKEN_LET) || p.curTokenIs(lexer.TOKEN_CONST) || p.curTokenIs(lexer.TOKEN_VAR) || p.curTokenIs(lexer.TOKEN_IDENT)
 	if maybeForIn {
 		saveCur, savePeek := p.cur, p.peek
+		consumed := make([]lexer.Token, 0, 2)
+		advance := func() {
+			p.nextToken()
+			consumed = append(consumed, p.peek)
+		}
 		if p.curTokenIs(lexer.TOKEN_LET) || p.curTokenIs(lexer.TOKEN_CONST) || p.curTokenIs(lexer.TOKEN_VAR) {
-			p.nextToken() // skip let/const/var
+			advance() // skip let/const/var
 		}
 		name := p.cur.Literal
-		p.nextToken() // skip ident
+		advance() // skip ident
 		if p.curTokenIs(lexer.TOKEN_IN) {
 			p.nextToken() // skip in
 			iterable := p.parseExpression(PREC_COMMA)
@@ -470,6 +492,7 @@ func (p *Parser) parseFor() ast.Statement {
 		// Not for-in/for-of, backtrack
 		p.cur = saveCur
 		p.peek = savePeek
+		p.unreadTokens(consumed)
 	}
 
 	// C-style for: for (init; cond; post) body

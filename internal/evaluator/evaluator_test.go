@@ -215,6 +215,12 @@ sum;
 	testNumber(t, evaluated, "6")
 }
 
+func TestEval_ForLetInitializer(t *testing.T) {
+	input := `let total = 0; for (let i = 0; i < 3; i = i + 1) { total = total + i; } total;`
+	evaluated := testEval(input)
+	testNumber(t, evaluated, "3")
+}
+
 func TestEval_ArrayFind(t *testing.T) {
 	input := `let a = [1, 2, 3, 4]; a.find(x => x > 2);`
 	evaluated := testEval(input)

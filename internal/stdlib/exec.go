@@ -230,6 +230,9 @@ func execCommand(env *object.Environment, pos ast.Position, args ...object.Objec
 			result.Pairs[hashKey(&object.String{Value: "exitCode"})] = object.HashPair{
 				Key: &object.String{Value: "exitCode"}, Value: &object.Number{Value: float64(exitCode)},
 			}
+			result.Pairs[hashKey(&object.String{Value: "success"})] = object.HashPair{
+				Key: &object.String{Value: "success"}, Value: object.NativeBool(exitCode == 0),
+			}
 			return result
 		},
 	})

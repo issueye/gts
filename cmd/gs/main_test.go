@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -168,6 +170,256 @@ typeof exec.run;
 	str, ok := result.(*object.String)
 	if !ok || str.Value != "BUILTIN" {
 		t.Fatalf("want native builtin type, got %T %v", result, result)
+	}
+}
+
+func TestStdPathModule(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "path.gs")
+	if err := os.WriteFile(app, []byte(`
+let path = require("@std/path");
+path.basename(path.join("alpha", "beta", "file.txt")) + ":" + path.extname("file.txt");
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "file.txt:.txt" {
+		t.Fatalf("want file.txt:.txt, got %T %v", result, result)
+	}
+}
+
+func TestStdFSModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fs.gs")
+	work := filepath.Join(dir, "work")
+	appSource := strings.ReplaceAll(`
+let fs = require("@std/fs");
+let path = require("@std/path");
+let root = "__WORK__";
+fs.mkdirSync(root, { recursive: true });
+let file = path.join(root, "note.txt");
+fs.writeFileSync(file, "hello");
+let names = fs.readdirSync(root);
+let stat = fs.statSync(file);
+let text = fs.readFileSync(file);
+fs.unlinkSync(file);
+let fileKind = "not-file";
+if (stat.isFile()) {
+  fileKind = "file";
+}
+let existsKind = "exists";
+if (!fs.existsSync(file)) {
+  existsKind = "missing";
+}
+text + ":" + names[0] + ":" + fileKind + ":" + existsKind;
+`, "__WORK__", strings.ReplaceAll(work, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "hello:note.txt:file:missing" {
+		t.Fatalf("want fs smoke result, got %T %v", result, result)
+	}
+}
+
+func TestStdProcessAndOSModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "env.gs")
+	appSource := strings.ReplaceAll(`
+let process = require("@std/process");
+let os = require("@std/os");
+let before = process.cwd();
+process.setenv("GOSCRIPT_AGENT_TEST", "ok");
+let value = process.getenv("GOSCRIPT_AGENT_TEST");
+let fallback = process.getenv("GOSCRIPT_AGENT_MISSING", "missing");
+let platformKind = "empty";
+if (os.platform !== "") {
+  platformKind = "set";
+}
+let tmpKind = "empty";
+if (os.tmpdir() !== "") {
+  tmpKind = "set";
+}
+process.chdir("__DIR__");
+let after = process.cwd();
+process.chdir(before);
+process.unsetenv("GOSCRIPT_AGENT_TEST");
+value + ":" + fallback + ":" + platformKind + ":" + tmpKind + ":" + after;
+`, "__DIR__", strings.ReplaceAll(dir, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	want := "ok:missing:set:set:" + dir
+	if !ok || str.Value != want {
+		t.Fatalf("want %q, got %T %v", want, result, result)
+	}
+}
+
+func TestStdCryptoAndSchemaModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "schema.gs")
+	if err := os.WriteFile(script, []byte(`
+let crypto = require("@std/crypto");
+let schema = require("@std/schema");
+
+let spec = {
+  type: "object",
+  required: ["command"],
+  additionalProperties: false,
+  properties: {
+    command: { type: "string", minLength: 1 },
+    limit: { type: "integer", minimum: 1, maximum: 100 },
+    mode: { enum: ["read", "write"] }
+  }
+};
+
+let ok = schema.validate(spec, { command: "ls", limit: 3, mode: "read" });
+let bad = schema.validate(spec, { limit: 0, extra: true });
+let okKind = "bad";
+if (ok.valid) {
+  okKind = "ok";
+}
+let badKind = "ok";
+if (!bad.valid) {
+  badKind = "bad";
+}
+let bytes = crypto.randomBytes(4);
+let bytesKind = "wrong";
+if (bytes.length === 4) {
+  bytesKind = "bytes4";
+}
+okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	want := "ok:bad:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:bytes4"
+	if !ok || str.Value != want {
+		t.Fatalf("want %q, got %T %v", want, result, result)
+	}
+}
+
+func TestStdExecCommandRunSuccess(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "exec_success.gs")
+	if err := os.WriteFile(script, []byte(`
+let exec = require("@std/exec");
+let os = require("@std/os");
+let cmd = exec.command("go", ["version"]);
+let result = cmd.run();
+let kind = "bad";
+if (result.success) {
+  kind = "ok";
+}
+kind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ok" {
+		t.Fatalf("want ok, got %T %v", result, result)
+	}
+}
+
+func TestStdStreamAndSSEModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "stream_sse.gs")
+	if err := os.WriteFile(script, []byte(`
+let stream = require("@std/stream");
+let sse = require("@std/sse");
+let body = stream.fromString("data: one\n\nevent: done\ndata: two\n\n");
+let reader = sse.reader(body);
+let first = reader.next();
+let second = reader.next();
+let end = reader.next();
+let endKind = "not-end";
+if (end === null) {
+  endKind = "end";
+}
+first.data + ":" + second.type + ":" + second.data + ":" + endKind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "one:done:two:end" {
+		t.Fatalf("want one:done:two:end, got %T %v", result, result)
+	}
+}
+
+func TestStdHTTPStreamModule(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: first\n\n"))
+		_, _ = w.Write([]byte("event: done\ndata: second\n\n"))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "http_stream.gs")
+	source := strings.ReplaceAll(`
+let http = require("@std/net/http/client");
+let sse = require("@std/sse");
+let resp = http.stream({ url: "__URL__", timeoutMs: 1000 });
+let reader = sse.reader(resp.body);
+let first = reader.next();
+let second = reader.next();
+resp.body.close();
+let okKind = "bad";
+if (resp.ok) {
+  okKind = "ok";
+}
+okKind + ":" + first.data + ":" + second.type + ":" + second.data;
+`, "__URL__", server.URL)
+	if err := os.WriteFile(script, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ok:first:done:second" {
+		t.Fatalf("want ok:first:done:second, got %T %v", result, result)
 	}
 }
 

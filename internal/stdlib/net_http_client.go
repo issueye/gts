@@ -18,4 +18,5 @@ func initHTTPClientModule(exports *object.Hash) {
 	setHashMember(exports, "post", &object.Builtin{Name: "http.post", Fn: httpClientPost})
 	setHashMember(exports, "request", &object.Builtin{Name: "http.request", Fn: httpClientRequest})
 	setHashMember(exports, "fetch", &object.Builtin{Name: "http.fetch", Fn: httpClientRequest})
+	setHashMember(exports, "stream", &object.Builtin{Name: "http.stream", Fn: httpClientStream})
 }
