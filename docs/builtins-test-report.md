@@ -42,7 +42,7 @@
 | 6 | Array 实例属性与方法 | 已实现文档列出的实例项；`sort` 当前要求显式比较函数 | 已覆盖 |
 | 6 | `Array.isArray/of/from` | 已实现基础版；`Array.from` 支持数组、字符串、数组式对象和 mapFn | 已覆盖 |
 | 7 | String 实例与静态方法 | 已实现：静态 `fromCharCode/fromCodePoint`，实例 `length/charAt/charCodeAt/codePointAt/concat/includes/indexOf/lastIndexOf/startsWith/endsWith/slice/substring/split/replace/replaceAll/trim/trimStart/trimEnd/toUpperCase/toLowerCase/padStart/padEnd/repeat/normalize/match/matchAll/search/at/isWellFormed/toWellFormed`；`normalize` 当前返回原字符串 | 已覆盖 |
-| 7 | `String.raw` | 未实现 | 待补齐 |
+| 7 | `String.raw` | 已实现基础调用形态：读取 `{ raw: [...] }` 并交织替换值 | 已覆盖 |
 | 8 | Number 静态属性、静态方法、实例方法 | 已实现文档列出项：安全整数边界、浮点常量、Infinity/NaN、`isInteger/isFinite/isNaN/isSafeInteger/parseFloat/parseInt`、`toString/toFixed/toPrecision/toExponential` | 已覆盖 |
 | 9 | Boolean wrapper | 已实现基础版：`new Boolean(...).valueOf()`、`toString()`；全局 `Boolean()` 保持原始布尔转换 | 已覆盖 |
 | 10 | Date | 已实现基础版：构造、`Date.now/parse/UTC`、常用 getter/setter、`getTime/valueOf/toISOString/toLocale*` | 已覆盖 |
@@ -99,7 +99,6 @@
 ## 后续补齐建议
 
 1. 先拆分 `docs/builtins.md`：把“当前已实现 API”和“路线图/目标 API”分开，避免使用者误判。
-2. 第一优先级补齐剩余 String 静态 `String.raw`。
-3. 第二优先级补强 Date/RegExp/Map/Set 的完整语义：UTC 系列、RegExp flags 全量兼容、迭代协议。
-4. 第三优先级修正文档中的标准模块命名：当前网络模块使用 `@std/net/http/client`、`@std/net/http/server`、`@std/net/socket/*`、`@std/net/ws/*`，而不是裸 `net/http/url`。
-5. Go 嵌入章节需要按当前 `lexer/parser/evaluator/object/module` API 重写可运行示例。
+2. 第一优先级补强 Date/RegExp/Map/Set 的完整语义：UTC 系列、RegExp flags 全量兼容、迭代协议。
+3. 第二优先级修正文档中的标准模块命名：当前网络模块使用 `@std/net/http/client`、`@std/net/http/server`、`@std/net/socket/*`、`@std/net/ws/*`，而不是裸 `net/http/url`。
+4. Go 嵌入章节需要按当前 `lexer/parser/evaluator/object/module` API 重写可运行示例。

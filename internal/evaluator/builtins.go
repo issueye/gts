@@ -25,6 +25,7 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 	env.Set("String", callableBuiltinObject("String", builtinString, map[string]object.Object{
 		"fromCharCode":  &object.Builtin{Name: "String.fromCharCode", Fn: builtinStringFromCharCode},
 		"fromCodePoint": &object.Builtin{Name: "String.fromCodePoint", Fn: builtinStringFromCodePoint},
+		"raw":           &object.Builtin{Name: "String.raw", Fn: builtinStringRaw},
 	}))
 	env.Set("Number", callableBuiltinObject("Number", builtinNumber, map[string]object.Object{
 		"MAX_SAFE_INTEGER":  &object.Number{Value: 9007199254740991},
@@ -222,6 +223,28 @@ func builtinStringFromCodePoint(env *object.Environment, pos ast.Position, args 
 			return object.NewError(pos, "RangeError: invalid code point %d", cp)
 		}
 		b.WriteRune(rune(cp))
+	}
+	return &object.String{Value: b.String()}
+}
+
+func builtinStringRaw(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "TypeError: String.raw requires a template object")
+	}
+	rawObj := getHashKey(args[0], &object.String{Value: "raw"})
+	raw, ok := rawObj.(*object.Array)
+	if !ok {
+		return object.NewError(pos, "TypeError: String.raw template object must have a raw array")
+	}
+	if len(raw.Elements) == 0 {
+		return &object.String{Value: ""}
+	}
+	var b strings.Builder
+	for i, part := range raw.Elements {
+		b.WriteString(part.Inspect())
+		if i+1 < len(raw.Elements) && i+1 < len(args) {
+			b.WriteString(args[i+1].Inspect())
+		}
 	}
 	return &object.String{Value: b.String()}
 }

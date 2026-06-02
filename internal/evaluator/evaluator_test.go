@@ -841,6 +841,8 @@ assert(Array.from([1, 2], function(x) { return x * 2; }).join(",") === "2,4", "A
 
 assert(String.fromCharCode(65, 66) === "AB", "String.fromCharCode");
 assert(String.fromCodePoint(9731) === "☃", "String.fromCodePoint");
+assert(String.raw({ raw: ["a", "\\n", "c"] }, "b") === "ab\\nc", "String.raw substitutions");
+assert(String.raw({ raw: [] }) === "", "String.raw empty");
 assert("abc".codePointAt(1) === 98, "String.codePointAt");
 assert("a-a-a".replaceAll("-", ":") === "a:a:a", "String.replaceAll");
 assert("café".normalize() === "café", "String.normalize");
