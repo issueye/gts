@@ -2,32 +2,11 @@ package evaluator
 
 import (
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/issueye/goscript/internal/ast"
-	"github.com/issueye/goscript/internal/async"
 	"github.com/issueye/goscript/internal/object"
 )
-
-var AsyncWG sync.WaitGroup
-var nextTimerID int64
-
-// Pool is the global goroutine pool used by async functions and timers.
-// Set from CLI before any script execution.
-var Pool *async.Pool
-
-// SetPool sets the goroutine pool for async operations.
-func SetPool(p *async.Pool) { Pool = p }
-
-// Go runs a function in the async pool, or a raw goroutine if pool is nil.
-func Go(fn func()) {
-	if Pool != nil {
-		Pool.Go(fn)
-	} else {
-		go fn()
-	}
-}
 
 func registerAsync(env *object.Environment) {
 	env.Set("Promise", &object.Hash{
@@ -259,18 +238,19 @@ func builtinSetTimeout(env *object.Environment, pos ast.Position, args ...object
 	}
 	callArgs := append([]object.Object(nil), args[2:]...)
 	var done sync.Once
-	AsyncWG.Add(1)
+	vm := env.VM()
+	vm.AsyncAdd(1)
 	timer := time.AfterFunc(time.Duration(delay.Value)*time.Millisecond, func() {
-		Go(func() {
-			defer done.Do(AsyncWG.Done)
+		vm.Go(func() {
+			defer done.Do(vm.AsyncDone)
 			callTimerFunction(fn, callArgs)
 		})
 	})
-	id := &object.TimerId{ID: atomic.AddInt64(&nextTimerID, 1)}
+	id := &object.TimerId{ID: vm.NextTimerID()}
 	env.ObjectManager().Register(id)
 	id.Cancel = func() {
 		if timer.Stop() {
-			done.Do(AsyncWG.Done)
+			done.Do(vm.AsyncDone)
 		}
 	}
 	return id
@@ -291,25 +271,26 @@ func builtinSetInterval(env *object.Environment, pos ast.Position, args ...objec
 	callArgs := append([]object.Object(nil), args[2:]...)
 	stop := make(chan struct{})
 	var done sync.Once
-	AsyncWG.Add(1)
-	go func() {
-		defer done.Do(AsyncWG.Done)
+	vm := env.VM()
+	vm.AsyncAdd(1)
+	vm.Go(func() {
+		defer done.Do(vm.AsyncDone)
 		ticker := time.NewTicker(time.Duration(delay.Value) * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				Go(func() {
+				vm.Go(func() {
 					callTimerFunction(fn, callArgs)
 				})
 			case <-stop:
 				return
 			}
 		}
-	}()
-	id := &object.TimerId{ID: atomic.AddInt64(&nextTimerID, 1)}
+	})
+	id := &object.TimerId{ID: vm.NextTimerID()}
 	env.ObjectManager().Register(id)
-	id.Cancel = func() { closeOnce(stop, &done) }
+	id.Cancel = func() { closeOnce(env, stop, &done) }
 	return id
 }
 
@@ -331,9 +312,10 @@ func builtinQueueMicrotask(env *object.Environment, pos ast.Position, args ...ob
 	if !ok {
 		return object.NewError(pos, "queueMicrotask first arg must be a function")
 	}
-	AsyncWG.Add(1)
-	Go(func() {
-		defer AsyncWG.Done()
+	vm := env.VM()
+	vm.AsyncAdd(1)
+	vm.Go(func() {
+		defer vm.AsyncDone()
 		callTimerFunction(fn, nil)
 	})
 	return object.UNDEFINED
@@ -348,10 +330,10 @@ func clearTimer(args []object.Object) {
 	}
 }
 
-func closeOnce(stop chan struct{}, done *sync.Once) {
+func closeOnce(env *object.Environment, stop chan struct{}, done *sync.Once) {
 	done.Do(func() {
 		close(stop)
-		AsyncWG.Done()
+		env.VM().AsyncDone()
 	})
 }
 

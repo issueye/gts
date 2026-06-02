@@ -34,7 +34,7 @@ func socketServerListen(env *object.Environment, pos ast.Position, args ...objec
 			return object.UNDEFINED
 		},
 	})
-	object.Spawn(func() {
+	env.VM().Go(func() {
 		for {
 			conn, err := listener.Accept()
 			if err != nil {
@@ -45,8 +45,8 @@ func socketServerListen(env *object.Environment, pos ast.Position, args ...objec
 			if len(handler.Parameters) > 0 {
 				scope.Set(handler.Parameters[0].Name, connObj)
 			}
-			object.Spawn(func() {
-				object.EvalFn(handler.Body, scope)
+			handler.Env.VM().Go(func() {
+				handler.Env.VM().EvalNode(handler.Body, scope)
 			})
 		}
 	})

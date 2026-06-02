@@ -4,38 +4,42 @@ import "github.com/issueye/goscript/internal/ast"
 
 // Environment is a scope for variable bindings.
 type Environment struct {
-	store   map[string]Object
-	consts  map[string]bool
-	parent  *Environment
-	manager *ObjectManager
-	Extra   Object // bound context for method dispatch (array/string instance)
-	Pos     ast.Position
+	store  map[string]Object
+	consts map[string]bool
+	parent *Environment
+	vm     *VirtualMachine
+	Extra  Object // bound context for method dispatch (array/string instance)
+	Pos    ast.Position
 }
 
 func NewEnvironment() *Environment {
-	return NewEnvironmentWithManager(NewObjectManager())
+	return NewVirtualMachine().NewEnvironment()
 }
 
-func NewEnvironmentWithManager(manager *ObjectManager) *Environment {
-	if manager == nil {
-		manager = NewObjectManager()
+func NewEnvironmentWithVM(vm *VirtualMachine) *Environment {
+	if vm == nil {
+		vm = NewVirtualMachine()
 	}
 	return &Environment{
-		store:   make(map[string]Object),
-		consts:  make(map[string]bool),
-		manager: manager,
+		store:  make(map[string]Object),
+		consts: make(map[string]bool),
+		vm:     vm,
 	}
+}
+
+func (e *Environment) VM() *VirtualMachine {
+	if e.vm != nil {
+		return e.vm
+	}
+	if e.parent != nil {
+		return e.parent.VM()
+	}
+	e.vm = NewVirtualMachine()
+	return e.vm
 }
 
 func (e *Environment) ObjectManager() *ObjectManager {
-	if e.manager != nil {
-		return e.manager
-	}
-	if e.parent != nil {
-		return e.parent.ObjectManager()
-	}
-	e.manager = NewObjectManager()
-	return e.manager
+	return e.VM().ObjectManager()
 }
 
 func (e *Environment) Get(name string) (Object, bool) {
@@ -108,7 +112,7 @@ func (e *Environment) Has(name string) bool {
 
 // NewScope creates a child environment (for block scope).
 func (e *Environment) NewScope() *Environment {
-	env := NewEnvironmentWithManager(e.ObjectManager())
+	env := NewEnvironmentWithVM(e.VM())
 	env.parent = e
 	return env
 }

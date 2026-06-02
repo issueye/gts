@@ -249,8 +249,8 @@ func wsServerCreateServer(env *object.Environment, pos ast.Position, args ...obj
 		if len(handler.Parameters) > 0 {
 			scope.Set(handler.Parameters[0].Name, wsObj)
 		}
-		object.Spawn(func() {
-			object.EvalFn(handler.Body, scope)
+		handler.Env.VM().Go(func() {
+			handler.Env.VM().EvalNode(handler.Body, scope)
 		})
 	})
 

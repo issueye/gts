@@ -96,11 +96,8 @@ func newRunner(opts options) *runner {
 	if opts.workers < 1 {
 		opts.workers = 1
 	}
-	pool := async.NewPool(opts.workers)
-	evaluator.SetPool(pool)
 	return &runner{
 		opts: opts,
-		pool: pool,
 	}
 }
 
@@ -135,7 +132,7 @@ func (r *runner) runFileWithOptions(path string, opts runOptions) error {
 		if _, err := r.evalFile(absPath, opts); err != nil {
 			return err
 		}
-		if err := r.waitGroup("async tasks", evaluator.AsyncWG.Wait); err != nil {
+		if err := r.waitGroup("async tasks", r.vm.WaitAsync); err != nil {
 			return err
 		}
 		return r.waitGroup("worker pool", r.pool.Wait)
@@ -148,7 +145,9 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 		return nil, err
 	}
 	r.vm = object.NewVirtualMachine()
-	r.cache = module.NewCacheWithManager(r.vm.ObjectManager())
+	r.pool = async.NewPool(r.opts.workers)
+	r.vm.SetSpawner(r.pool.Go)
+	r.cache = module.NewCacheWithVM(r.vm)
 	env := r.vm.NewEnvironment()
 	module.SetupExports(env)
 	r.configureModuleLoaders(env, filepath.Dir(absPath))
@@ -255,8 +254,12 @@ func (r *runner) ensureRuntime() {
 	if r.vm == nil {
 		r.vm = object.NewVirtualMachine()
 	}
+	if r.pool == nil {
+		r.pool = async.NewPool(r.opts.workers)
+		r.vm.SetSpawner(r.pool.Go)
+	}
 	if r.cache == nil {
-		r.cache = module.NewCacheWithManager(r.vm.ObjectManager())
+		r.cache = module.NewCacheWithVM(r.vm)
 	}
 }
 
@@ -264,7 +267,7 @@ func (r *runner) configureModuleLoaders(env *object.Environment, baseDir string)
 	r.ensureRuntime()
 	require := r.requireFunc(baseDir)
 	evaluator.RegisterBuiltinsWithCache(env, require)
-	evaluator.SetImportFunc(func(env *object.Environment, path string) (object.Object, error) {
+	env.VM().SetImportFunc(func(env *object.Environment, path string) (object.Object, error) {
 		return require(path)
 	})
 }

@@ -1,6 +1,9 @@
 package object
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestObjectManagerRegisterAndStats(t *testing.T) {
 	manager := NewObjectManager()
@@ -89,4 +92,47 @@ func TestVirtualMachinesHaveIndependentObjectManagers(t *testing.T) {
 	if idA != 1 || idB != 1 {
 		t.Fatalf("each vm should start object ids independently, got %d and %d", idA, idB)
 	}
+}
+
+func TestVirtualMachinesHaveIndependentRuntimeState(t *testing.T) {
+	vmA := NewVirtualMachine()
+	vmB := NewVirtualMachine()
+
+	if got := vmA.NextTimerID(); got != 1 {
+		t.Fatalf("vm a first timer id: want 1, got %d", got)
+	}
+	if got := vmA.NextTimerID(); got != 2 {
+		t.Fatalf("vm a second timer id: want 2, got %d", got)
+	}
+	if got := vmB.NextTimerID(); got != 1 {
+		t.Fatalf("vm b first timer id should be independent: want 1, got %d", got)
+	}
+}
+
+func TestVirtualMachinesWaitForAsyncTasksIndependently(t *testing.T) {
+	vmA := NewVirtualMachine()
+	vmB := NewVirtualMachine()
+
+	releaseA := make(chan struct{})
+	vmA.AsyncAdd(1)
+	vmA.Go(func() {
+		defer vmA.AsyncDone()
+		<-releaseA
+	})
+
+	doneB := make(chan struct{})
+	go func() {
+		vmB.WaitAsync()
+		close(doneB)
+	}()
+
+	select {
+	case <-doneB:
+	case <-time.After(100 * time.Millisecond):
+		close(releaseA)
+		t.Fatal("vm b should not wait for async tasks registered in vm a")
+	}
+
+	close(releaseA)
+	vmA.WaitAsync()
 }

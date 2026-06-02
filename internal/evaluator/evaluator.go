@@ -16,12 +16,6 @@ const (
 
 type ImportFn func(env *object.Environment, path string) (object.Object, error)
 
-var importFn ImportFn
-
-func SetImportFunc(fn ImportFn) {
-	importFn = fn
-}
-
 func Eval(node ast.Node, env *object.Environment) object.Object {
 	switch n := node.(type) {
 	case *ast.Program:
@@ -478,13 +472,12 @@ func evalTry(n *ast.TryStmt, env *object.Environment) object.Object {
 // ============================================================================
 
 func evalImport(n *ast.ImportDecl, env *object.Environment) object.Object {
-	if importFn == nil {
-		return object.NewError(n.Pos(), "ImportError: module loader is not configured")
-	}
-
-	exports, err := importFn(env, unquoteModulePath(n.Source))
+	exports, err := env.VM().Import(env, unquoteModulePath(n.Source))
 	if err != nil {
 		return object.NewError(n.Pos(), "ImportError: %v", err)
+	}
+	if exports == nil {
+		return object.NewError(n.Pos(), "ImportError: module loader is not configured")
 	}
 
 	if n.Namespace != "" {
@@ -1153,9 +1146,10 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 		}
 		if f.IsAsync {
 			promise := env.ObjectManager().NewPromise()
-			AsyncWG.Add(1)
-			Go(func() {
-				defer AsyncWG.Done()
+			vm := env.VM()
+			vm.AsyncAdd(1)
+			vm.Go(func() {
+				defer vm.AsyncDone()
 				result := Eval(f.Body, scope)
 				if rv, ok := result.(*object.ReturnValue); ok {
 					promise.Resolve(rv.Value)

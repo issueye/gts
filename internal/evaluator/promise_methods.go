@@ -47,10 +47,11 @@ func builtinPromiseFinally(env *object.Environment, pos ast.Position, args ...ob
 }
 
 func chainPromise(env *object.Environment, pos ast.Position, promise *object.Promise, onFulfilled, onRejected, onFinally object.Object) *object.Promise {
-	next := object.NewPromise()
-	AsyncWG.Add(1)
-	Go(func() {
-		defer AsyncWG.Done()
+	next := env.ObjectManager().NewPromise()
+	vm := env.VM()
+	vm.AsyncAdd(1)
+	vm.Go(func() {
+		defer vm.AsyncDone()
 		value := promise.Wait()
 		state := promise.State()
 

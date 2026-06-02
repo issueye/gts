@@ -33,17 +33,23 @@ func TestResolveAgentAliasFromProjectRoot(t *testing.T) {
 	}
 }
 
-func TestCacheUsesConfiguredObjectManager(t *testing.T) {
+func TestCacheUsesConfiguredVirtualMachine(t *testing.T) {
 	vm := object.NewVirtualMachine()
-	cache := NewCacheWithManager(vm.ObjectManager())
+	cache := NewCacheWithVM(vm)
 
 	env := cache.GetOrCreate(filepath.Join(t.TempDir(), "lib.gs"))
+	if env.VM() != vm {
+		t.Fatal("module cache should create environments inside the configured vm")
+	}
 	if env.ObjectManager() != vm.ObjectManager() {
 		t.Fatal("module cache should create environments inside the configured vm")
 	}
 
 	otherCache := NewCache()
 	otherEnv := otherCache.GetOrCreate(filepath.Join(t.TempDir(), "lib.gs"))
+	if otherEnv.VM() == vm {
+		t.Fatal("separate module cache should not share the vm by default")
+	}
 	if otherEnv.ObjectManager() == vm.ObjectManager() {
 		t.Fatal("separate module cache should not share the vm manager by default")
 	}

@@ -38,8 +38,8 @@ func httpServerCreateServer(env *object.Environment, pos ast.Position, args ...o
 				resObj := newResponseObject(w)
 				scope.Set(handler.Parameters[1].Name, resObj)
 			}
-			object.Spawn(func() {
-				object.EvalFn(handler.Body, scope)
+			handler.Env.VM().Go(func() {
+				handler.Env.VM().EvalNode(handler.Body, scope)
 			})
 		}
 	})

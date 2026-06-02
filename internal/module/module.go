@@ -12,20 +12,20 @@ import (
 // Cache stores loaded modules to avoid re-execution.
 type Cache struct {
 	mu      sync.Mutex
-	manager *object.ObjectManager
+	vm      *object.VirtualMachine
 	modules map[string]*object.Environment // absolute path → module env
 }
 
 func NewCache() *Cache {
-	return NewCacheWithManager(nil)
+	return NewCacheWithVM(nil)
 }
 
-func NewCacheWithManager(manager *object.ObjectManager) *Cache {
-	if manager == nil {
-		manager = object.NewObjectManager()
+func NewCacheWithVM(vm *object.VirtualMachine) *Cache {
+	if vm == nil {
+		vm = object.NewVirtualMachine()
 	}
 	return &Cache{
-		manager: manager,
+		vm:      vm,
 		modules: make(map[string]*object.Environment),
 	}
 }
@@ -37,7 +37,7 @@ func (c *Cache) GetOrCreate(absPath string) *object.Environment {
 	if mod, ok := c.modules[absPath]; ok {
 		return mod
 	}
-	env := object.NewEnvironmentWithManager(c.manager)
+	env := object.NewEnvironmentWithVM(c.vm)
 	c.modules[absPath] = env
 	return env
 }

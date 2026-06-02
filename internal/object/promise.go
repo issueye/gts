@@ -76,27 +76,32 @@ func (p *Promise) Wait() Object {
 }
 
 func (p *Promise) Then(onFulfilled *Function) *Promise {
-	next := NewPromise()
-	Spawn(func() {
+	var env *Environment
+	if onFulfilled != nil && onFulfilled.Env != nil {
+		env = onFulfilled.Env
+	} else {
+		env = NewEnvironment()
+	}
+	next := env.ObjectManager().NewPromise()
+	env.VM().Go(func() {
 		result := p.Wait()
 		if p.State() == PROMISE_FULFILLED && onFulfilled != nil {
 			scope := onFulfilled.Env.NewScope()
 			scope.Set(onFulfilled.Parameters[0].Name, result)
-			EvalPromiseFn(onFulfilled.Body, scope, next)
+			result := scope.VM().EvalNode(onFulfilled.Body, scope)
+			if rv, ok := result.(*ReturnValue); ok {
+				next.Resolve(rv.Value)
+			} else if IsRuntimeError(result) {
+				next.Reject(result)
+			} else {
+				next.Resolve(result)
+			}
 		} else {
 			next.Resolve(result)
 		}
 	})
 	return next
 }
-
-// Spawn is set by the evaluator to use the goroutine pool.
-var Spawn func(fn func()) = func(fn func()) { go fn() }
-
-var EvalPromiseFn func(body interface{}, env *Environment, promise *Promise)
-
-// EvalFn is set by the evaluator to allow stdlib modules to evaluate AST nodes.
-var EvalFn func(node interface{}, env *Environment) Object
 
 func (p *Promise) State() PromiseState {
 	p.mu.Lock()
