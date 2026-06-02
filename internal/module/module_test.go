@@ -54,3 +54,35 @@ func TestCacheUsesConfiguredVirtualMachine(t *testing.T) {
 		t.Fatal("separate module cache should not share the vm manager by default")
 	}
 }
+
+func TestSeparateCachesDoNotShareModuleEnvironments(t *testing.T) {
+	absPath := filepath.Join(t.TempDir(), "lib.gs")
+	vmA := object.NewVirtualMachine()
+	vmB := object.NewVirtualMachine()
+	cacheA := NewCacheWithVM(vmA)
+	cacheB := NewCacheWithVM(vmB)
+
+	envA := cacheA.GetOrCreate(absPath)
+	envB := cacheB.GetOrCreate(absPath)
+	if envA == envB {
+		t.Fatal("separate caches should not share module environments")
+	}
+	if envA.VM() == envB.VM() {
+		t.Fatal("separate caches should keep modules in separate virtual machines")
+	}
+	if envA.ObjectManager() == envB.ObjectManager() {
+		t.Fatal("separate caches should keep module object managers isolated")
+	}
+
+	envA.Set("value", &object.String{Value: "a"})
+	if _, ok := envB.Get("value"); ok {
+		t.Fatal("module bindings should not leak between separate caches")
+	}
+
+	if cacheA.GetOrCreate(absPath) != envA {
+		t.Fatal("same cache should reuse its own module environment")
+	}
+	if cacheB.GetOrCreate(absPath) != envB {
+		t.Fatal("same cache should reuse its own module environment")
+	}
+}

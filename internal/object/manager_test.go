@@ -70,6 +70,23 @@ func TestEnvironmentScopesShareObjectManager(t *testing.T) {
 	}
 }
 
+func TestNewEnvironmentsCreateIndependentVirtualMachines(t *testing.T) {
+	envA := NewEnvironment()
+	envB := NewEnvironment()
+
+	if envA.VM() == envB.VM() {
+		t.Fatal("separate root environments should not share a vm")
+	}
+	if envA.ObjectManager() == envB.ObjectManager() {
+		t.Fatal("separate root environments should not share object managers")
+	}
+
+	objA := envA.ObjectManager().NewHash()
+	if _, ok := envB.ObjectManager().IDOf(objA); ok {
+		t.Fatal("env b should not know objects allocated in env a")
+	}
+}
+
 func TestVirtualMachinesHaveIndependentObjectManagers(t *testing.T) {
 	vmA := NewVirtualMachine()
 	vmB := NewVirtualMachine()
@@ -135,4 +152,86 @@ func TestVirtualMachinesWaitForAsyncTasksIndependently(t *testing.T) {
 
 	close(releaseA)
 	vmA.WaitAsync()
+}
+
+func TestVirtualMachineHooksAreIndependent(t *testing.T) {
+	vmA := NewVirtualMachine()
+	vmB := NewVirtualMachine()
+	envA := vmA.NewEnvironment()
+	envB := vmB.NewEnvironment()
+
+	vmA.SetImportFunc(func(env *Environment, path string) (Object, error) {
+		if env.VM() != vmA {
+			t.Fatal("vm a importer received an environment from another vm")
+		}
+		return &String{Value: "a:" + path}, nil
+	})
+	vmB.SetImportFunc(func(env *Environment, path string) (Object, error) {
+		if env.VM() != vmB {
+			t.Fatal("vm b importer received an environment from another vm")
+		}
+		return &String{Value: "b:" + path}, nil
+	})
+
+	importA, err := vmA.Import(envA, "mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	importB, err := vmB.Import(envB, "mod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if importA.Inspect() != "a:mod" || importB.Inspect() != "b:mod" {
+		t.Fatalf("import hooks should stay isolated, got %q and %q", importA.Inspect(), importB.Inspect())
+	}
+
+	vmA.SetEvaluator(func(node interface{}, env *Environment) Object {
+		if env.VM() != vmA {
+			t.Fatal("vm a evaluator received an environment from another vm")
+		}
+		return &String{Value: "eval-a"}
+	})
+	vmB.SetEvaluator(func(node interface{}, env *Environment) Object {
+		if env.VM() != vmB {
+			t.Fatal("vm b evaluator received an environment from another vm")
+		}
+		return &String{Value: "eval-b"}
+	})
+
+	evalA := vmA.EvalNode(nil, envA)
+	evalB := vmB.EvalNode(nil, envB)
+	if evalA.Inspect() != "eval-a" || evalB.Inspect() != "eval-b" {
+		t.Fatalf("evaluator hooks should stay isolated, got %q and %q", evalA.Inspect(), evalB.Inspect())
+	}
+}
+
+func TestVirtualMachineSpawnersAreIndependent(t *testing.T) {
+	vmA := NewVirtualMachine()
+	vmB := NewVirtualMachine()
+
+	calledA := false
+	calledB := false
+	vmA.SetSpawner(func(fn func()) {
+		calledA = true
+		fn()
+	})
+	vmB.SetSpawner(func(fn func()) {
+		calledB = true
+		fn()
+	})
+
+	ranA := false
+	vmA.Go(func() { ranA = true })
+	if !calledA || !ranA {
+		t.Fatal("vm a should use its own spawner")
+	}
+	if calledB {
+		t.Fatal("vm a should not call vm b spawner")
+	}
+
+	ranB := false
+	vmB.Go(func() { ranB = true })
+	if !calledB || !ranB {
+		t.Fatal("vm b should use its own spawner")
+	}
 }
