@@ -10,6 +10,13 @@ import (
 )
 
 func RegisterBuiltins(env *object.Environment) {
+	RegisterBuiltinsWithCache(env, nil)
+}
+
+// RequireFn is a callback to load a module by path.
+type RequireFn func(path string) (object.Object, error)
+
+func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 	env.Set("console", &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hashKey(&object.String{Value: "log"}): {
@@ -41,6 +48,25 @@ func RegisterBuiltins(env *object.Environment) {
 			hashKey(&object.String{Value: "PI"}):     {Key: &object.String{Value: "PI"}, Value: &object.Number{Value: 3.141592653589793}},
 		},
 	})
+	registerJSON(env)
+	registerObject(env)
+
+	if require != nil {
+		env.Set("require", &object.Builtin{Name: "require", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+			if len(args) < 1 {
+				return object.NewError(pos, "require requires a path string")
+			}
+			path, ok := args[0].(*object.String)
+			if !ok {
+				return object.NewError(pos, "require requires a string path")
+			}
+			result, err := require(path.Value)
+			if err != nil {
+				return object.NewError(pos, "require: %v", err)
+			}
+			return result
+		}})
+	}
 }
 
 func builtinConsoleLog(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
