@@ -95,6 +95,9 @@ var Spawn func(fn func()) = func(fn func()) { go fn() }
 
 var EvalPromiseFn func(body interface{}, env *Environment, promise *Promise)
 
+// EvalFn is set by the evaluator to allow stdlib modules to evaluate AST nodes.
+var EvalFn func(node interface{}, env *Environment) Object
+
 func (p *Promise) State() PromiseState {
 	p.mu.Lock()
 	defer p.mu.Unlock()

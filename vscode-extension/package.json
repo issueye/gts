@@ -5,7 +5,6 @@
   "version": "0.1.0",
   "publisher": "issueye",
   "license": "MIT",
-  "icon": "icon.png",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -35,8 +34,8 @@
     ]
   },
   "scripts": {
-    "package": "npx @vscode/vsce package",
-    "install:local": "npx @vscode/vsce package --skip-version-check && code --install-extension *.vsix"
+    "package": "npx @vscode/vsce package --allow-missing-repository",
+    "install:local": "npx @vscode/vsce package --allow-missing-repository && code --install-extension *.vsix"
   },
   "repository": {
     "type": "git",

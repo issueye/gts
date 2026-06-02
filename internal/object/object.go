@@ -24,6 +24,7 @@ const (
 	RETURN_OBJ    ObjectType = "RETURN"
 	CLASS_OBJ     ObjectType = "CLASS"
 	INSTANCE_OBJ  ObjectType = "INSTANCE"
+	GOOBJECT_OBJ  ObjectType = "GOOBJECT"
 )
 
 type Object interface {
@@ -198,6 +199,14 @@ func (i *Instance) Type() ObjectType { return INSTANCE_OBJ }
 func (i *Instance) Inspect() string {
 	return fmt.Sprintf("<%s instance>", i.Class.Name)
 }
+
+// GoObject wraps an arbitrary Go value for use within the scripting runtime.
+type GoObject struct {
+	Value interface{}
+}
+
+func (g *GoObject) Type() ObjectType  { return GOOBJECT_OBJ }
+func (g *GoObject) Inspect() string   { return fmt.Sprintf("<go %T>", g.Value) }
 
 // --- Helpers ---
 

@@ -813,8 +813,8 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 	case *ast.MemberExpr:
 		obj := Eval(left.Object, env)
 		if hash, ok := obj.(*object.Hash); ok {
-			key := Eval(left.Property, env)
-			hash.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: right}
+			name := left.Property.(*ast.Ident).TokenLit
+			hash.Pairs[hashKey(&object.String{Value: name})] = object.HashPair{Key: &object.String{Value: name}, Value: right}
 			return right
 		}
 		if inst, ok := obj.(*object.Instance); ok {
@@ -835,6 +835,11 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 				return right
 			}
 			return object.NewError(left.Pos(), "TypeError: array index must be number")
+		}
+		if hash, ok := arr.(*object.Hash); ok {
+			idx := Eval(left.Index, env)
+			hash.Pairs[hashKey(idx)] = object.HashPair{Key: idx, Value: right}
+			return right
 		}
 		return object.NewError(left.Pos(), "TypeError: cannot index %s", arr.Type())
 	}

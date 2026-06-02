@@ -69,6 +69,11 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 		promise.Resolve(result)
 	}
 
+	// Wire up the general eval bridge for stdlib modules
+	object.EvalFn = func(node interface{}, env *object.Environment) object.Object {
+		return Eval(node.(ast.Node), env)
+	}
+
 	if require != nil {
 		env.Set("require", &object.Builtin{Name: "require", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 			if len(args) < 1 {
