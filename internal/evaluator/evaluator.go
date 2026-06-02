@@ -315,7 +315,10 @@ func evalForIn(n *ast.ForInStmt, env *object.Environment) object.Object {
 	if object.IsRuntimeError(iterable) {
 		return iterable
 	}
-	it, ok := object.NewIterator(iterable, object.IterateKeys)
+	it, ok, err := newRuntimeIterator(iterable, object.IterateKeys, env, n.Pos())
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return object.NewError(n.Pos(), "cannot iterate over %s", iterable.Type())
 	}
@@ -327,11 +330,57 @@ func evalForOf(n *ast.ForOfStmt, env *object.Environment) object.Object {
 	if object.IsRuntimeError(iterable) {
 		return iterable
 	}
-	it, ok := object.NewIterator(iterable, object.IterateValues)
+	it, ok, err := newRuntimeIterator(iterable, object.IterateValues, env, n.Pos())
+	if err != nil {
+		return err
+	}
 	if !ok {
 		return object.NewError(n.Pos(), "cannot for-of over %s", iterable.Type())
 	}
 	return evalIteratorLoop(n.Name, n.Body, env, it)
+}
+
+func newRuntimeIterator(obj object.Object, kind object.IterationKind, env *object.Environment, pos ast.Position) (object.Iterator, bool, object.Object) {
+	if protocol := getIteratorProtocol(obj, kind); protocol != nil {
+		result := applyFunction(protocol, env, nil, pos)
+		if object.IsRuntimeError(result) {
+			return nil, false, result
+		}
+		it, ok := object.NewIterator(result, object.IterateValues)
+		if !ok {
+			return nil, false, object.NewError(pos, "TypeError: iterator protocol must return an iterable object")
+		}
+		return it, true, nil
+	}
+
+	it, ok := object.NewIterator(obj, kind)
+	return it, ok, nil
+}
+
+func getIteratorProtocol(obj object.Object, kind object.IterationKind) object.Object {
+	name := "__iterator"
+	if kind == object.IterateKeys {
+		name = "__keyIterator"
+	}
+
+	switch o := obj.(type) {
+	case *object.Hash:
+		if fn := getHashKey(o, &object.String{Value: name}); fn != object.UNDEFINED {
+			return fn
+		}
+	case *object.Instance:
+		if v, ok := o.Props[name]; ok {
+			return v
+		}
+		if m, ok := o.Class.Methods[name]; ok {
+			bound := *m
+			methodScope := m.Env.NewScope()
+			methodScope.Set("this", o)
+			bound.Env = methodScope
+			return &bound
+		}
+	}
+	return nil
 }
 
 func evalIteratorLoop(name string, body ast.Node, env *object.Environment, it object.Iterator) object.Object {

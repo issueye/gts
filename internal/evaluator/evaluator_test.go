@@ -312,6 +312,28 @@ func TestEval_ForOfUsesIterators(t *testing.T) {
 			input:    `let total = 0; let s = new Set([1, 2, 2]); for (let v of s) { total = total + v; } total;`,
 			expected: "3",
 		},
+		{
+			name: "object protocol values",
+			input: `
+let total = 0;
+let obj = { __iterator: function() { return [4, 5, 6]; } };
+for (let v of obj) { total = total + v; }
+total;
+`,
+			expected: "15",
+		},
+		{
+			name: "instance protocol values",
+			input: `
+class Bag {
+  __iterator() { return [7, 8]; }
+}
+let total = 0;
+for (let v of new Bag()) { total = total + v; }
+total;
+`,
+			expected: "15",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -319,6 +341,19 @@ func TestEval_ForOfUsesIterators(t *testing.T) {
 			testStringOrNumber(t, evaluated, tt.expected)
 		})
 	}
+}
+
+func TestEval_CustomKeyIteratorProtocol(t *testing.T) {
+	input := `
+let out = "";
+let obj = {
+  __keyIterator: function() { return ["x", "y"]; }
+};
+for (let k in obj) { out = out + k; }
+out;
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "xy")
 }
 
 func TestEval_ArrayFind(t *testing.T) {
