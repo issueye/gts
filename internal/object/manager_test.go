@@ -66,3 +66,27 @@ func TestEnvironmentScopesShareObjectManager(t *testing.T) {
 		t.Fatal("parent manager should see child scope allocations")
 	}
 }
+
+func TestVirtualMachinesHaveIndependentObjectManagers(t *testing.T) {
+	vmA := NewVirtualMachine()
+	vmB := NewVirtualMachine()
+
+	if vmA.ObjectManager() == vmB.ObjectManager() {
+		t.Fatal("different virtual machines should not share object managers")
+	}
+
+	objA := vmA.ObjectManager().NewHash()
+	if _, ok := vmB.ObjectManager().IDOf(objA); ok {
+		t.Fatal("vm b should not know objects allocated in vm a")
+	}
+
+	objB := vmB.ObjectManager().NewHash()
+	idA, okA := vmA.ObjectManager().IDOf(objA)
+	idB, okB := vmB.ObjectManager().IDOf(objB)
+	if !okA || !okB {
+		t.Fatal("allocated objects should have ids in their own vm")
+	}
+	if idA != 1 || idB != 1 {
+		t.Fatalf("each vm should start object ids independently, got %d and %d", idA, idB)
+	}
+}

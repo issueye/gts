@@ -12,11 +12,22 @@ import (
 // Cache stores loaded modules to avoid re-execution.
 type Cache struct {
 	mu      sync.Mutex
+	manager *object.ObjectManager
 	modules map[string]*object.Environment // absolute path → module env
 }
 
 func NewCache() *Cache {
-	return &Cache{modules: make(map[string]*object.Environment)}
+	return NewCacheWithManager(nil)
+}
+
+func NewCacheWithManager(manager *object.ObjectManager) *Cache {
+	if manager == nil {
+		manager = object.NewObjectManager()
+	}
+	return &Cache{
+		manager: manager,
+		modules: make(map[string]*object.Environment),
+	}
 }
 
 // GetOrCreate returns a cached module env, or nil if not yet loaded.
@@ -26,7 +37,7 @@ func (c *Cache) GetOrCreate(absPath string) *object.Environment {
 	if mod, ok := c.modules[absPath]; ok {
 		return mod
 	}
-	env := object.NewEnvironment()
+	env := object.NewEnvironmentWithManager(c.manager)
 	c.modules[absPath] = env
 	return env
 }
@@ -89,8 +100,10 @@ func fileExists(path string) bool {
 // SetupExports initializes module.exports on an environment.
 func SetupExports(env *object.Environment) {
 	exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+	env.ObjectManager().Register(exports)
 	env.Set("exports", exports)
 	mod := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+	env.ObjectManager().Register(mod)
 	mod.Pairs[hashKey(&object.String{Value: "exports"})] = object.HashPair{
 		Key: &object.String{Value: "exports"}, Value: exports,
 	}

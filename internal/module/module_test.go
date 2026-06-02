@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/issueye/goscript/internal/object"
 )
 
 func TestResolvePathAddsDefaultExtension(t *testing.T) {
@@ -28,5 +30,21 @@ func TestResolveAgentAliasFromProjectRoot(t *testing.T) {
 	want := filepath.Join(dir, "scripts", "agent", "core", "agent.gs")
 	if filepath.Clean(got) != filepath.Clean(want) {
 		t.Fatalf("want %q, got %q", want, got)
+	}
+}
+
+func TestCacheUsesConfiguredObjectManager(t *testing.T) {
+	vm := object.NewVirtualMachine()
+	cache := NewCacheWithManager(vm.ObjectManager())
+
+	env := cache.GetOrCreate(filepath.Join(t.TempDir(), "lib.gs"))
+	if env.ObjectManager() != vm.ObjectManager() {
+		t.Fatal("module cache should create environments inside the configured vm")
+	}
+
+	otherCache := NewCache()
+	otherEnv := otherCache.GetOrCreate(filepath.Join(t.TempDir(), "lib.gs"))
+	if otherEnv.ObjectManager() == vm.ObjectManager() {
+		t.Fatal("separate module cache should not share the vm manager by default")
 	}
 }

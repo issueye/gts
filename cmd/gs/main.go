@@ -34,6 +34,7 @@ type runner struct {
 	opts  options
 	pool  *async.Pool
 	cache *module.Cache
+	vm    *object.VirtualMachine
 }
 
 type runOptions struct {
@@ -98,9 +99,8 @@ func newRunner(opts options) *runner {
 	pool := async.NewPool(opts.workers)
 	evaluator.SetPool(pool)
 	return &runner{
-		opts:  opts,
-		pool:  pool,
-		cache: module.NewCache(),
+		opts: opts,
+		pool: pool,
 	}
 }
 
@@ -147,7 +147,9 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 	if err != nil {
 		return nil, err
 	}
-	env := object.NewEnvironment()
+	r.vm = object.NewVirtualMachine()
+	r.cache = module.NewCacheWithManager(r.vm.ObjectManager())
+	env := r.vm.NewEnvironment()
 	module.SetupExports(env)
 	r.configureModuleLoaders(env, filepath.Dir(absPath))
 	result, err := r.evalSource(string(src), absPath, env)
@@ -217,6 +219,7 @@ func (r *runner) callMain(env *object.Environment, file string) (object.Object, 
 
 func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 	return func(path string) (object.Object, error) {
+		r.ensureRuntime()
 		if native, ok := module.GetNative(path); ok {
 			return native, nil
 		}
@@ -248,7 +251,17 @@ func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 	}
 }
 
+func (r *runner) ensureRuntime() {
+	if r.vm == nil {
+		r.vm = object.NewVirtualMachine()
+	}
+	if r.cache == nil {
+		r.cache = module.NewCacheWithManager(r.vm.ObjectManager())
+	}
+}
+
 func (r *runner) configureModuleLoaders(env *object.Environment, baseDir string) {
+	r.ensureRuntime()
 	require := r.requireFunc(baseDir)
 	evaluator.RegisterBuiltinsWithCache(env, require)
 	evaluator.SetImportFunc(func(env *object.Environment, path string) (object.Object, error) {
