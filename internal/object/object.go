@@ -3,7 +3,9 @@ package object
 import (
 	"bytes"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/issueye/goscript/internal/ast"
 )
@@ -11,20 +13,26 @@ import (
 type ObjectType string
 
 const (
-	NUMBER_OBJ    ObjectType = "NUMBER"
-	STRING_OBJ    ObjectType = "STRING"
-	BOOLEAN_OBJ   ObjectType = "BOOLEAN"
-	NULL_OBJ      ObjectType = "NULL"
-	UNDEFINED_OBJ ObjectType = "UNDEFINED"
-	ARRAY_OBJ     ObjectType = "ARRAY"
-	OBJECT_OBJ    ObjectType = "OBJECT"
-	FUNCTION_OBJ  ObjectType = "FUNCTION"
-	BUILTIN_OBJ   ObjectType = "BUILTIN"
-	ERROR_OBJ     ObjectType = "ERROR"
-	RETURN_OBJ    ObjectType = "RETURN"
-	CLASS_OBJ     ObjectType = "CLASS"
-	INSTANCE_OBJ  ObjectType = "INSTANCE"
-	GOOBJECT_OBJ  ObjectType = "GOOBJECT"
+	NUMBER_OBJ         ObjectType = "NUMBER"
+	STRING_OBJ         ObjectType = "STRING"
+	BOOLEAN_OBJ        ObjectType = "BOOLEAN"
+	NULL_OBJ           ObjectType = "NULL"
+	UNDEFINED_OBJ      ObjectType = "UNDEFINED"
+	ARRAY_OBJ          ObjectType = "ARRAY"
+	OBJECT_OBJ         ObjectType = "OBJECT"
+	FUNCTION_OBJ       ObjectType = "FUNCTION"
+	BUILTIN_OBJ        ObjectType = "BUILTIN"
+	ERROR_OBJ          ObjectType = "ERROR"
+	RETURN_OBJ         ObjectType = "RETURN"
+	CLASS_OBJ          ObjectType = "CLASS"
+	INSTANCE_OBJ       ObjectType = "INSTANCE"
+	GOOBJECT_OBJ       ObjectType = "GOOBJECT"
+	TIMER_OBJ          ObjectType = "TIMER"
+	DATE_OBJ           ObjectType = "DATE"
+	REGEXP_OBJ         ObjectType = "REGEXP"
+	MAP_OBJ            ObjectType = "MAP"
+	SET_OBJ            ObjectType = "SET"
+	BOOLEAN_OBJECT_OBJ ObjectType = "BOOLEAN_OBJECT"
 )
 
 type Object interface {
@@ -121,6 +129,44 @@ func (h *Hash) Inspect() string {
 type HashKey struct {
 	Type  ObjectType
 	Value string
+}
+
+// --- Map / Set ---
+
+type Map struct {
+	Entries map[HashKey]HashPair
+	Pos     ast.Position
+}
+
+func (m *Map) Type() ObjectType { return MAP_OBJ }
+func (m *Map) Inspect() string {
+	var out bytes.Buffer
+	pairs := make([]string, 0, len(m.Entries))
+	for _, p := range m.Entries {
+		pairs = append(pairs, fmt.Sprintf("%s => %s", p.Key.Inspect(), p.Value.Inspect()))
+	}
+	out.WriteString("Map{")
+	out.WriteString(strings.Join(pairs, ", "))
+	out.WriteString("}")
+	return out.String()
+}
+
+type Set struct {
+	Values map[HashKey]Object
+	Pos    ast.Position
+}
+
+func (s *Set) Type() ObjectType { return SET_OBJ }
+func (s *Set) Inspect() string {
+	var out bytes.Buffer
+	values := make([]string, 0, len(s.Values))
+	for _, v := range s.Values {
+		values = append(values, v.Inspect())
+	}
+	out.WriteString("Set{")
+	out.WriteString(strings.Join(values, ", "))
+	out.WriteString("}")
+	return out.String()
 }
 
 // --- Function ---
@@ -221,6 +267,46 @@ type GoObject struct {
 
 func (g *GoObject) Type() ObjectType { return GOOBJECT_OBJ }
 func (g *GoObject) Inspect() string  { return fmt.Sprintf("<go %T>", g.Value) }
+
+// TimerId is an opaque handle returned by setTimeout/setInterval.
+type TimerId struct {
+	ID     int64
+	Cancel func()
+}
+
+func (t *TimerId) Type() ObjectType { return TIMER_OBJ }
+func (t *TimerId) Inspect() string  { return fmt.Sprintf("<timer %d>", t.ID) }
+
+// Date wraps a point in time for the runtime Date builtin.
+type Date struct {
+	Time time.Time
+}
+
+func (d *Date) Type() ObjectType { return DATE_OBJ }
+func (d *Date) Inspect() string  { return d.Time.Local().Format(time.RFC1123) }
+
+// RegExp wraps a compiled Go regexp plus the user-facing source and flags.
+type RegExp struct {
+	Source string
+	Flags  string
+	Re     *regexp.Regexp
+}
+
+func (r *RegExp) Type() ObjectType { return REGEXP_OBJ }
+func (r *RegExp) Inspect() string  { return "/" + r.Source + "/" + r.Flags }
+
+// BooleanObject is the boxed value returned by new Boolean(...).
+type BooleanObject struct {
+	Value bool
+}
+
+func (b *BooleanObject) Type() ObjectType { return BOOLEAN_OBJECT_OBJ }
+func (b *BooleanObject) Inspect() string {
+	if b.Value {
+		return "true"
+	}
+	return "false"
+}
 
 // --- Helpers ---
 

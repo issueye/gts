@@ -38,6 +38,7 @@ func init() {
 		"padEnd":       builtinStrPadEnd,
 		"normalize":    builtinStrNormalize,
 		"match":        builtinStrMatch,
+		"matchAll":     builtinStrMatchAll,
 		"search":       builtinStrSearch,
 		"at":           builtinStrAt,
 		"isWellFormed": builtinStrIsWellFormed,
@@ -329,6 +330,9 @@ func builtinStrReplace(env *object.Environment, pos ast.Position, args ...object
 		return &object.String{Value: getStr(env)}
 	}
 	s := getStr(env)
+	if re, ok := args[0].(*object.RegExp); ok {
+		return &object.String{Value: regexpReplace(s, re, args[1].Inspect())}
+	}
 	old := args[0].Inspect()
 	newStr := args[1].Inspect()
 	return &object.String{Value: strings.Replace(s, old, newStr, 1)}
@@ -339,6 +343,13 @@ func builtinStrReplaceAll(env *object.Environment, pos ast.Position, args ...obj
 		return &object.String{Value: getStr(env)}
 	}
 	s := getStr(env)
+	if re, ok := args[0].(*object.RegExp); ok {
+		global := *re
+		if !strings.Contains(global.Flags, "g") {
+			global.Flags += "g"
+		}
+		return &object.String{Value: regexpReplace(s, &global, args[1].Inspect())}
+	}
 	old := args[0].Inspect()
 	newStr := args[1].Inspect()
 	return &object.String{Value: strings.ReplaceAll(s, old, newStr)}
@@ -404,6 +415,20 @@ func builtinStrMatch(env *object.Environment, pos ast.Position, args ...object.O
 	if len(args) < 1 {
 		return object.NULL
 	}
+	if re, ok := args[0].(*object.RegExp); ok {
+		if strings.Contains(re.Flags, "g") {
+			matches := re.Re.FindAllString(getStr(env), -1)
+			if matches == nil {
+				return object.NULL
+			}
+			elements := make([]object.Object, len(matches))
+			for i, item := range matches {
+				elements[i] = &object.String{Value: item}
+			}
+			return &object.Array{Elements: elements}
+		}
+		return regexpExecArray(re, getStr(env))
+	}
 	re, err := regexp.Compile(args[0].Inspect())
 	if err != nil {
 		return object.NewError(pos, "SyntaxError: invalid regexp: %v", err)
@@ -423,6 +448,13 @@ func builtinStrSearch(env *object.Environment, pos ast.Position, args ...object.
 	if len(args) < 1 {
 		return &object.Number{Value: -1}
 	}
+	if re, ok := args[0].(*object.RegExp); ok {
+		loc := re.Re.FindStringIndex(getStr(env))
+		if loc == nil {
+			return &object.Number{Value: -1}
+		}
+		return &object.Number{Value: float64(loc[0])}
+	}
 	re, err := regexp.Compile(args[0].Inspect())
 	if err != nil {
 		return object.NewError(pos, "SyntaxError: invalid regexp: %v", err)
@@ -432,6 +464,32 @@ func builtinStrSearch(env *object.Environment, pos ast.Position, args ...object.
 		return &object.Number{Value: -1}
 	}
 	return &object.Number{Value: float64(loc[0])}
+}
+
+func builtinStrMatchAll(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return &object.Array{Elements: nil}
+	}
+	var re *object.RegExp
+	if existing, ok := args[0].(*object.RegExp); ok {
+		re = existing
+	} else {
+		compiled, err := compileRegExp(pos, args[0].Inspect(), "g")
+		if err != nil {
+			return err
+		}
+		re = compiled
+	}
+	matches := re.Re.FindAllStringSubmatch(getStr(env), -1)
+	elements := make([]object.Object, len(matches))
+	for i, match := range matches {
+		sub := make([]object.Object, len(match))
+		for j, item := range match {
+			sub[j] = &object.String{Value: item}
+		}
+		elements[i] = &object.Array{Elements: sub}
+	}
+	return &object.Array{Elements: elements}
 }
 
 func builtinStrAt(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

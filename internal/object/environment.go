@@ -4,15 +4,38 @@ import "github.com/issueye/goscript/internal/ast"
 
 // Environment is a scope for variable bindings.
 type Environment struct {
-	store  map[string]Object
-	consts map[string]bool
-	parent *Environment
-	Extra  Object // bound context for method dispatch (array/string instance)
-	Pos    ast.Position
+	store   map[string]Object
+	consts  map[string]bool
+	parent  *Environment
+	manager *ObjectManager
+	Extra   Object // bound context for method dispatch (array/string instance)
+	Pos     ast.Position
 }
 
 func NewEnvironment() *Environment {
-	return &Environment{store: make(map[string]Object), consts: make(map[string]bool)}
+	return NewEnvironmentWithManager(NewObjectManager())
+}
+
+func NewEnvironmentWithManager(manager *ObjectManager) *Environment {
+	if manager == nil {
+		manager = NewObjectManager()
+	}
+	return &Environment{
+		store:   make(map[string]Object),
+		consts:  make(map[string]bool),
+		manager: manager,
+	}
+}
+
+func (e *Environment) ObjectManager() *ObjectManager {
+	if e.manager != nil {
+		return e.manager
+	}
+	if e.parent != nil {
+		return e.parent.ObjectManager()
+	}
+	e.manager = NewObjectManager()
+	return e.manager
 }
 
 func (e *Environment) Get(name string) (Object, bool) {
@@ -85,7 +108,7 @@ func (e *Environment) Has(name string) bool {
 
 // NewScope creates a child environment (for block scope).
 func (e *Environment) NewScope() *Environment {
-	env := NewEnvironment()
+	env := NewEnvironmentWithManager(e.ObjectManager())
 	env.parent = e
 	return env
 }

@@ -3,6 +3,7 @@ package evaluator
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -25,11 +26,26 @@ func builtinJSONStringify(env *object.Environment, pos ast.Position, args ...obj
 	if len(args) < 1 {
 		return object.UNDEFINED
 	}
-	result := toJSON(args[0])
-	if result == "" {
-		return object.NewError(pos, "JSON.stringify: unsupported value")
+	value := args[0]
+	if len(args) > 1 && args[1] != object.NULL && args[1] != object.UNDEFINED {
+		value = applyJSONReplacerTree(env, pos, args[1], &object.String{Value: ""}, value)
+		if object.IsRuntimeError(value) {
+			return value
+		}
 	}
-	return &object.String{Value: result}
+	raw := toGoJSONValue(value)
+	space := jsonIndent(args)
+	var data []byte
+	var err error
+	if space != "" {
+		data, err = json.MarshalIndent(raw, "", space)
+	} else {
+		data, err = json.Marshal(raw)
+	}
+	if err != nil {
+		return object.NewError(pos, "JSON.stringify: %v", err)
+	}
+	return &object.String{Value: string(data)}
 }
 
 func toJSON(obj object.Object) string {
@@ -94,6 +110,111 @@ func toJSON(obj object.Object) string {
 	}
 }
 
+func toGoJSONValue(obj object.Object) interface{} {
+	switch v := obj.(type) {
+	case *object.Null, *object.Undefined:
+		return nil
+	case *object.Boolean:
+		return v.Value
+	case *object.Number:
+		if math.IsNaN(v.Value) || math.IsInf(v.Value, 0) {
+			return nil
+		}
+		return v.Value
+	case *object.String:
+		return v.Value
+	case *object.Array:
+		items := make([]interface{}, len(v.Elements))
+		for i, item := range v.Elements {
+			items[i] = toGoJSONValue(item)
+		}
+		return items
+	case *object.Hash:
+		out := make(map[string]interface{}, len(v.Pairs))
+		for _, pair := range v.Pairs {
+			out[pair.Key.Inspect()] = toGoJSONValue(pair.Value)
+		}
+		return out
+	case *object.Instance:
+		out := make(map[string]interface{}, len(v.Props))
+		for key, value := range v.Props {
+			out[key] = toGoJSONValue(value)
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func jsonIndent(args []object.Object) string {
+	if len(args) < 3 || args[2] == object.NULL || args[2] == object.UNDEFINED {
+		return ""
+	}
+	switch s := args[2].(type) {
+	case *object.Number:
+		n := int(s.Value)
+		if n < 0 {
+			n = 0
+		}
+		if n > 10 {
+			n = 10
+		}
+		return strings.Repeat(" ", n)
+	case *object.String:
+		if len(s.Value) > 10 {
+			return s.Value[:10]
+		}
+		return s.Value
+	default:
+		return ""
+	}
+}
+
+func applyJSONReplacer(env *object.Environment, pos ast.Position, replacer object.Object, key object.Object, value object.Object) object.Object {
+	switch replacer.(type) {
+	case *object.Function, *object.Builtin:
+		return applyFunction(replacer, env, []object.Object{key, value}, pos)
+	default:
+		return value
+	}
+}
+
+func applyJSONReplacerTree(env *object.Environment, pos ast.Position, replacer object.Object, key object.Object, value object.Object) object.Object {
+	switch v := value.(type) {
+	case *object.Array:
+		elements := make([]object.Object, len(v.Elements))
+		for i, item := range v.Elements {
+			next := applyJSONReplacerTree(env, pos, replacer, &object.String{Value: strconv.Itoa(i)}, item)
+			if object.IsRuntimeError(next) {
+				return next
+			}
+			elements[i] = next
+		}
+		value = &object.Array{Elements: elements, Pos: v.Pos}
+	case *object.Hash:
+		pairs := make(map[object.HashKey]object.HashPair, len(v.Pairs))
+		for hk, pair := range v.Pairs {
+			next := applyJSONReplacerTree(env, pos, replacer, pair.Key, pair.Value)
+			if object.IsRuntimeError(next) {
+				return next
+			}
+			pairs[hk] = object.HashPair{Key: pair.Key, Value: next}
+		}
+		value = &object.Hash{Pairs: pairs, Proto: v.Proto, Frozen: v.Frozen, Sealed: v.Sealed, Pos: v.Pos}
+	case *object.Instance:
+		props := make(map[string]object.Object, len(v.Props))
+		for name, item := range v.Props {
+			next := applyJSONReplacerTree(env, pos, replacer, &object.String{Value: name}, item)
+			if object.IsRuntimeError(next) {
+				return next
+			}
+			props[name] = next
+		}
+		value = &object.Instance{Class: v.Class, Props: props, Pos: v.Pos}
+	}
+	return applyJSONReplacer(env, pos, replacer, key, value)
+}
+
 func builtinJSONParse(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	if len(args) < 1 {
 		return object.NewError(pos, "JSON.parse requires a string argument")
@@ -106,7 +227,40 @@ func builtinJSONParse(env *object.Environment, pos ast.Position, args ...object.
 	if err != nil {
 		return object.NewError(pos, "JSON.parse: %v", err)
 	}
+	if len(args) > 1 && args[1] != object.NULL && args[1] != object.UNDEFINED {
+		result = applyJSONReviver(env, pos, args[1], &object.String{Value: ""}, result)
+		if object.IsRuntimeError(result) {
+			return result
+		}
+	}
 	return result
+}
+
+func applyJSONReviver(env *object.Environment, pos ast.Position, reviver object.Object, key object.Object, value object.Object) object.Object {
+	switch v := value.(type) {
+	case *object.Array:
+		for i, item := range v.Elements {
+			next := applyJSONReviver(env, pos, reviver, &object.String{Value: strconv.Itoa(i)}, item)
+			if object.IsRuntimeError(next) {
+				return next
+			}
+			v.Elements[i] = next
+		}
+	case *object.Hash:
+		for hk, pair := range v.Pairs {
+			next := applyJSONReviver(env, pos, reviver, pair.Key, pair.Value)
+			if object.IsRuntimeError(next) {
+				return next
+			}
+			v.Pairs[hk] = object.HashPair{Key: pair.Key, Value: next}
+		}
+	}
+	switch reviver.(type) {
+	case *object.Function, *object.Builtin:
+		return applyFunction(reviver, env, []object.Object{key, value}, pos)
+	default:
+		return value
+	}
 }
 
 func parseJSONValue(s string) (object.Object, error) {

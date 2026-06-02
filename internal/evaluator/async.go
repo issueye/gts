@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/issueye/goscript/internal/ast"
@@ -10,6 +11,7 @@ import (
 )
 
 var AsyncWG sync.WaitGroup
+var nextTimerID int64
 
 // Pool is the global goroutine pool used by async functions and timers.
 // Set from CLI before any script execution.
@@ -34,10 +36,15 @@ func registerAsync(env *object.Environment) {
 			hk("resolve"):              {Key: &object.String{Value: "resolve"}, Value: &object.Builtin{Name: "Promise.resolve", Fn: builtinPromiseResolve}},
 			hk("reject"):               {Key: &object.String{Value: "reject"}, Value: &object.Builtin{Name: "Promise.reject", Fn: builtinPromiseReject}},
 			hk("all"):                  {Key: &object.String{Value: "all"}, Value: &object.Builtin{Name: "Promise.all", Fn: builtinPromiseAll}},
+			hk("race"):                 {Key: &object.String{Value: "race"}, Value: &object.Builtin{Name: "Promise.race", Fn: builtinPromiseRace}},
+			hk("allSettled"):           {Key: &object.String{Value: "allSettled"}, Value: &object.Builtin{Name: "Promise.allSettled", Fn: builtinPromiseAllSettled}},
 		},
 	})
 	env.Set("setTimeout", &object.Builtin{Name: "setTimeout", Fn: builtinSetTimeout})
+	env.Set("clearTimeout", &object.Builtin{Name: "clearTimeout", Fn: builtinClearTimeout})
 	env.Set("setInterval", &object.Builtin{Name: "setInterval", Fn: builtinSetInterval})
+	env.Set("clearInterval", &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval})
+	env.Set("queueMicrotask", &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask})
 	env.Set("sleep", &object.Builtin{Name: "sleep", Fn: builtinSleep})
 }
 
@@ -49,7 +56,7 @@ func constructPromise(env *object.Environment, args []object.Object, pos ast.Pos
 	if !ok {
 		return object.NewError(pos, "TypeError: Promise executor must be a function")
 	}
-	promise := object.NewPromise()
+	promise := env.ObjectManager().NewPromise()
 	resolve := &object.Builtin{Name: "Promise.resolveExecutor", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 		var value object.Object = object.UNDEFINED
 		if len(args) > 0 {
@@ -81,7 +88,7 @@ func constructPromise(env *object.Environment, args []object.Object, pos ast.Pos
 }
 
 func builtinPromiseResolve(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	p := object.NewPromise()
+	p := env.ObjectManager().NewPromise()
 	if len(args) > 0 {
 		p.Resolve(args[0])
 	}
@@ -89,7 +96,7 @@ func builtinPromiseResolve(env *object.Environment, pos ast.Position, args ...ob
 }
 
 func builtinPromiseReject(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	p := object.NewPromise()
+	p := env.ObjectManager().NewPromise()
 	if len(args) > 0 {
 		p.Reject(args[0])
 	}
@@ -97,7 +104,7 @@ func builtinPromiseReject(env *object.Environment, pos ast.Position, args ...obj
 }
 
 func builtinPromiseAll(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	p := object.NewPromise()
+	p := env.ObjectManager().NewPromise()
 	if len(args) < 1 {
 		p.Resolve(object.UNDEFINED)
 		return p
@@ -108,7 +115,7 @@ func builtinPromiseAll(env *object.Environment, pos ast.Position, args ...object
 		return p
 	}
 	if len(arr.Elements) == 0 {
-		p.Resolve(&object.Array{Elements: nil})
+		p.Resolve(env.ObjectManager().NewArray(nil))
 		return p
 	}
 	results := make([]object.Object, len(arr.Elements))
@@ -129,7 +136,7 @@ func builtinPromiseAll(env *object.Environment, pos ast.Position, args ...object
 				results[idx] = val
 				remaining--
 				if remaining == 0 {
-					p.Resolve(&object.Array{Elements: results})
+					p.Resolve(env.ObjectManager().NewArray(results))
 				}
 				mu.Unlock()
 			} else {
@@ -137,13 +144,105 @@ func builtinPromiseAll(env *object.Environment, pos ast.Position, args ...object
 				results[idx] = el
 				remaining--
 				if remaining == 0 {
-					p.Resolve(&object.Array{Elements: results})
+					p.Resolve(env.ObjectManager().NewArray(results))
 				}
 				mu.Unlock()
 			}
 		}(elem)
 	}
 	return p
+}
+
+func builtinPromiseRace(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	p := env.ObjectManager().NewPromise()
+	if len(args) < 1 {
+		p.Resolve(object.UNDEFINED)
+		return p
+	}
+	arr, ok := args[0].(*object.Array)
+	if !ok {
+		p.Reject(object.NewError(pos, "Promise.race requires an array"))
+		return p
+	}
+	for _, elem := range arr.Elements {
+		if pr, ok := elem.(*object.Promise); ok {
+			if pr.State() != object.PROMISE_PENDING {
+				val := pr.Wait()
+				if pr.State() == object.PROMISE_REJECTED {
+					p.Reject(val)
+				} else {
+					p.Resolve(val)
+				}
+				return p
+			}
+			continue
+		}
+		p.Resolve(elem)
+		return p
+	}
+	for _, elem := range arr.Elements {
+		go func(el object.Object) {
+			pr := el.(*object.Promise)
+			val := pr.Wait()
+			if pr.State() == object.PROMISE_REJECTED {
+				p.Reject(val)
+				return
+			}
+			p.Resolve(val)
+		}(elem)
+	}
+	return p
+}
+
+func builtinPromiseAllSettled(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	p := env.ObjectManager().NewPromise()
+	if len(args) < 1 {
+		p.Resolve(object.UNDEFINED)
+		return p
+	}
+	arr, ok := args[0].(*object.Array)
+	if !ok {
+		p.Reject(object.NewError(pos, "Promise.allSettled requires an array"))
+		return p
+	}
+	if len(arr.Elements) == 0 {
+		p.Resolve(env.ObjectManager().NewArray(nil))
+		return p
+	}
+	results := make([]object.Object, len(arr.Elements))
+	remaining := len(arr.Elements)
+	var mu sync.Mutex
+	for i, elem := range arr.Elements {
+		idx := i
+		go func(el object.Object) {
+			result := settledResult(env, "fulfilled", "value", el)
+			if pr, ok := el.(*object.Promise); ok {
+				val := pr.Wait()
+				if pr.State() == object.PROMISE_REJECTED {
+					result = settledResult(env, "rejected", "reason", val)
+				} else {
+					result = settledResult(env, "fulfilled", "value", val)
+				}
+			}
+			mu.Lock()
+			results[idx] = result
+			remaining--
+			if remaining == 0 {
+				p.Resolve(env.ObjectManager().NewArray(results))
+			}
+			mu.Unlock()
+		}(elem)
+	}
+	return p
+}
+
+func settledResult(env *object.Environment, status, field string, value object.Object) *object.Hash {
+	result := &object.Hash{Pairs: map[object.HashKey]object.HashPair{
+		hk("status"): {Key: &object.String{Value: "status"}, Value: &object.String{Value: status}},
+		hk(field):    {Key: &object.String{Value: field}, Value: value},
+	}}
+	env.ObjectManager().Register(result)
+	return result
 }
 
 func builtinSetTimeout(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -158,15 +257,23 @@ func builtinSetTimeout(env *object.Environment, pos ast.Position, args ...object
 	if !ok {
 		return object.NewError(pos, "setTimeout second arg must be a number (ms)")
 	}
+	callArgs := append([]object.Object(nil), args[2:]...)
+	var done sync.Once
 	AsyncWG.Add(1)
-	time.AfterFunc(time.Duration(delay.Value)*time.Millisecond, func() {
-		defer AsyncWG.Done()
+	timer := time.AfterFunc(time.Duration(delay.Value)*time.Millisecond, func() {
 		Go(func() {
-			scope := fn.Env.NewScope()
-			Eval(fn.Body, scope)
+			defer done.Do(AsyncWG.Done)
+			callTimerFunction(fn, callArgs)
 		})
 	})
-	return object.UNDEFINED
+	id := &object.TimerId{ID: atomic.AddInt64(&nextTimerID, 1)}
+	env.ObjectManager().Register(id)
+	id.Cancel = func() {
+		if timer.Stop() {
+			done.Do(AsyncWG.Done)
+		}
+	}
+	return id
 }
 
 func builtinSetInterval(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -181,17 +288,89 @@ func builtinSetInterval(env *object.Environment, pos ast.Position, args ...objec
 	if !ok {
 		return object.NewError(pos, "setInterval second arg must be a number (ms)")
 	}
+	callArgs := append([]object.Object(nil), args[2:]...)
+	stop := make(chan struct{})
+	var done sync.Once
+	AsyncWG.Add(1)
 	go func() {
+		defer done.Do(AsyncWG.Done)
 		ticker := time.NewTicker(time.Duration(delay.Value) * time.Millisecond)
 		defer ticker.Stop()
-		for range ticker.C {
-			Go(func() {
-				scope := fn.Env.NewScope()
-				Eval(fn.Body, scope)
-			})
+		for {
+			select {
+			case <-ticker.C:
+				Go(func() {
+					callTimerFunction(fn, callArgs)
+				})
+			case <-stop:
+				return
+			}
 		}
 	}()
+	id := &object.TimerId{ID: atomic.AddInt64(&nextTimerID, 1)}
+	env.ObjectManager().Register(id)
+	id.Cancel = func() { closeOnce(stop, &done) }
+	return id
+}
+
+func builtinClearTimeout(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	clearTimer(args)
 	return object.UNDEFINED
+}
+
+func builtinClearInterval(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	clearTimer(args)
+	return object.UNDEFINED
+}
+
+func builtinQueueMicrotask(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "queueMicrotask requires a function")
+	}
+	fn, ok := args[0].(*object.Function)
+	if !ok {
+		return object.NewError(pos, "queueMicrotask first arg must be a function")
+	}
+	AsyncWG.Add(1)
+	Go(func() {
+		defer AsyncWG.Done()
+		callTimerFunction(fn, nil)
+	})
+	return object.UNDEFINED
+}
+
+func clearTimer(args []object.Object) {
+	if len(args) < 1 {
+		return
+	}
+	if id, ok := args[0].(*object.TimerId); ok && id.Cancel != nil {
+		id.Cancel()
+	}
+}
+
+func closeOnce(stop chan struct{}, done *sync.Once) {
+	done.Do(func() {
+		close(stop)
+		AsyncWG.Done()
+	})
+}
+
+func callTimerFunction(fn *object.Function, args []object.Object) object.Object {
+	scope := fn.Env.NewScope()
+	for i, p := range fn.Parameters {
+		if i < len(args) {
+			if p.Spread {
+				rest := make([]object.Object, len(args)-i)
+				copy(rest, args[i:])
+				scope.Set(p.Name, fn.Env.ObjectManager().NewArray(rest))
+				break
+			}
+			scope.Set(p.Name, args[i])
+		} else {
+			scope.Set(p.Name, object.UNDEFINED)
+		}
+	}
+	return Eval(fn.Body, scope)
 }
 
 func builtinSleep(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

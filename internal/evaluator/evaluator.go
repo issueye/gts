@@ -632,6 +632,7 @@ func evalFuncDecl(n *ast.FuncDecl, env *object.Environment) object.Object {
 		IsAsync:    n.IsAsync,
 		Pos:        n.Pos(),
 	}
+	env.ObjectManager().Register(fn)
 	env.Set(n.Name, fn)
 	return fn
 }
@@ -644,6 +645,7 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 		Statics: make(map[string]object.Object),
 		Pos:     n.Pos(),
 	}
+	env.ObjectManager().Register(cls)
 	// Resolve super class
 	if n.Super != nil {
 		superVal := Eval(n.Super, env)
@@ -669,6 +671,7 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 					Env:        env,
 					Pos:        m.Pos_,
 				}
+				env.ObjectManager().Register(fn)
 				cls.Statics[m.Name] = fn
 				continue
 			}
@@ -679,6 +682,7 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 				Env:        env,
 				Pos:        m.Pos_,
 			}
+			env.ObjectManager().Register(fn)
 			cls.Methods[m.Name] = fn
 		case "field":
 			var val object.Object = object.UNDEFINED
@@ -785,11 +789,11 @@ func evalArray(n *ast.ArrayLit, env *object.Environment) object.Object {
 		}
 		elems[i] = val
 	}
-	return &object.Array{Elements: elems, Pos: n.Pos()}
+	return env.ObjectManager().NewArrayAt(elems, n.Pos())
 }
 
 func evalObject(n *ast.ObjectLit, env *object.Environment) object.Object {
-	hash := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair), Pos: n.Pos()}
+	hash := env.ObjectManager().NewHashAt(n.Pos())
 	for _, p := range n.Properties {
 		if p.Spread {
 			val := Eval(p.Value, env)
@@ -1149,7 +1153,7 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 				if p.Spread {
 					rest := make([]object.Object, len(args)-i)
 					copy(rest, args[i:])
-					scope.Set(p.Name, &object.Array{Elements: rest})
+					scope.Set(p.Name, env.ObjectManager().NewArray(rest))
 					break
 				}
 				scope.Set(p.Name, args[i])
@@ -1160,7 +1164,7 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 			}
 		}
 		if f.IsAsync {
-			promise := object.NewPromise()
+			promise := env.ObjectManager().NewPromise()
 			AsyncWG.Add(1)
 			Go(func() {
 				defer AsyncWG.Done()
@@ -1195,6 +1199,7 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 		return object.NewError(pos, "TypeError: object is not a function")
 	case *object.Class:
 		inst := &object.Instance{Class: f, Props: make(map[string]object.Object), Pos: pos}
+		env.ObjectManager().Register(inst)
 		for k, v := range f.Fields {
 			inst.Props[k] = v
 		}
@@ -1357,6 +1362,29 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 		if fn, ok := numberMethods[name]; ok {
 			return &object.Builtin{Name: "Number." + name, Fn: fn, Extra: o}
 		}
+	case *object.Date:
+		if fn, ok := dateMethods[name]; ok {
+			return &object.Builtin{Name: "Date." + name, Fn: fn, Extra: o}
+		}
+	case *object.RegExp:
+		switch name {
+		case "source":
+			return &object.String{Value: o.Source}
+		case "flags":
+			return &object.String{Value: o.Flags}
+		case "global":
+			return object.NativeBool(strings.Contains(o.Flags, "g"))
+		case "ignoreCase":
+			return object.NativeBool(strings.Contains(o.Flags, "i"))
+		default:
+			if fn, ok := regexpMethods[name]; ok {
+				return &object.Builtin{Name: "RegExp." + name, Fn: fn, Extra: o}
+			}
+		}
+	case *object.BooleanObject:
+		if fn, ok := booleanObjectMethods[name]; ok {
+			return &object.Builtin{Name: "Boolean." + name, Fn: fn, Extra: o}
+		}
 	case *object.Array:
 		switch name {
 		case "length":
@@ -1364,6 +1392,24 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 		default:
 			if fn, ok := arrayMethods[name]; ok {
 				return &object.Builtin{Name: "Array." + name, Fn: fn, Extra: o}
+			}
+		}
+	case *object.Map:
+		switch name {
+		case "size":
+			return &object.Number{Value: float64(len(o.Entries))}
+		default:
+			if fn, ok := mapMethods[name]; ok {
+				return &object.Builtin{Name: "Map." + name, Fn: fn, Extra: o}
+			}
+		}
+	case *object.Set:
+		switch name {
+		case "size":
+			return &object.Number{Value: float64(len(o.Values))}
+		default:
+			if fn, ok := setMethods[name]; ok {
+				return &object.Builtin{Name: "Set." + name, Fn: fn, Extra: o}
 			}
 		}
 	case *object.Promise:
@@ -1412,7 +1458,7 @@ func hashKey(o object.Object) object.HashKey {
 // ============================================================================
 
 func evalFuncExpr(n *ast.FuncExpr, env *object.Environment) object.Object {
-	return &object.Function{
+	fn := &object.Function{
 		Name:       n.Name,
 		Parameters: n.Params,
 		Body:       n.Body,
@@ -1420,6 +1466,8 @@ func evalFuncExpr(n *ast.FuncExpr, env *object.Environment) object.Object {
 		IsAsync:    n.IsAsync,
 		Pos:        n.Pos(),
 	}
+	env.ObjectManager().Register(fn)
+	return fn
 }
 
 func evalArrowFunc(n *ast.ArrowFuncExpr, env *object.Environment) object.Object {
@@ -1429,13 +1477,15 @@ func evalArrowFunc(n *ast.ArrowFuncExpr, env *object.Environment) object.Object 
 			&ast.ReturnStmt{Value: n.Body.(ast.Expression)},
 		}}
 	}
-	return &object.Function{
+	fn := &object.Function{
 		Name:       "",
 		Parameters: n.Params,
 		Body:       block,
 		Env:        env,
 		Pos:        n.Pos(),
 	}
+	env.ObjectManager().Register(fn)
+	return fn
 }
 
 // ============================================================================
@@ -1450,6 +1500,11 @@ func evalNew(n *ast.NewExpr, env *object.Environment) object.Object {
 	args := make([]object.Object, len(n.Args))
 	for i, a := range n.Args {
 		args[i] = Eval(a, env)
+	}
+	if hash, ok := callee.(*object.Hash); ok {
+		if marker, ok := getHashKey(hash, &object.String{Value: "__constructBoolean"}).(*object.Boolean); ok && marker.Value {
+			return constructBooleanObject(args)
+		}
 	}
 	return applyFunction(callee, env, args, n.Pos())
 }

@@ -425,6 +425,19 @@ function assert(cond, label) {
 assert(print("") === undefined, "print return");
 assert(println("") === undefined, "println return");
 assert(console.log("docs") === undefined, "console.log return");
+assert(console.info("docs") === undefined, "console.info return");
+assert(console.warn("docs") === undefined, "console.warn return");
+assert(console.error("docs") === undefined, "console.error return");
+assert(console.debug("docs") === undefined, "console.debug return");
+assert(console.assert(true, "docs") === undefined, "console.assert pass return");
+assert(console.time("docs") === undefined, "console.time return");
+assert(console.timeEnd("docs") === undefined, "console.timeEnd return");
+assert(console.trace("docs") === undefined, "console.trace return");
+assert(console.count("docs") === undefined, "console.count return");
+assert(console.countReset("docs") === undefined, "console.countReset return");
+assert(console.group("docs") === undefined, "console.group return");
+assert(console.groupEnd() === undefined, "console.groupEnd return");
+assert(console.table([{a: 1}, {a: 2, b: true}]) === undefined, "console.table return");
 
 assert(String(12) === "12", "String number");
 assert(String(true) === "true", "String boolean");
@@ -534,6 +547,102 @@ Promise.all([Promise.resolve(1), 2, Promise.resolve(3)])
 	testString(t, evaluated, "1,2,3")
 }
 
+func TestEval_BuiltinsDocs_MapSet(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+
+let m = new Map();
+assert(m.size === 0, "Map initial size");
+assert(m.set("k", 1) === m, "Map.set chain");
+assert(m.get("k") === 1, "Map.get");
+assert(m.has("k") === true, "Map.has true");
+assert(m.size === 1, "Map size after set");
+m.set("k", 2);
+assert(m.get("k") === 2, "Map.set overwrite");
+assert(m.size === 1, "Map overwrite size");
+assert(m.delete("missing") === false, "Map.delete missing");
+assert(m.delete("k") === true, "Map.delete present");
+assert(m.has("k") === false, "Map.has false");
+assert(m.get("k") === undefined, "Map.get missing");
+let fromEntries = new Map([["a", 1], ["b", 2]]);
+assert(fromEntries.size === 2, "Map iterable size");
+assert(fromEntries.get("b") === 2, "Map iterable get");
+fromEntries.clear();
+assert(fromEntries.size === 0, "Map.clear");
+
+let s = new Set([1, 2, 2]);
+assert(s.size === 2, "Set iterable dedupe");
+assert(s.has(1) === true, "Set.has true");
+assert(s.add(3) === s, "Set.add chain");
+assert(s.size === 3, "Set.add size");
+assert(s.delete(2) === true, "Set.delete present");
+assert(s.delete(2) === false, "Set.delete missing");
+assert(s.has(2) === false, "Set.has false");
+s.clear();
+assert(s.size === 0, "Set.clear");
+
+"ok";
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "ok")
+}
+
+func TestEval_BuiltinsDocs_PromiseRaceAndAllSettled(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{`
+Promise.race([Promise.resolve(4), Promise.resolve(9)])
+  .then(function(value) { return value; });
+`, "4"},
+		{`
+Promise.race([Promise.reject(new Error("fast")), Promise.resolve(9)])
+  .catch(function(e) { return e.message; });
+`, "fast"},
+		{`
+Promise.allSettled([Promise.resolve(1), Promise.reject(new TypeError("bad")), 3])
+  .then(function(results) {
+    return results[0].status + ":" + results[0].value.toString() + "|" +
+      results[1].status + ":" + results[1].reason.name + ":" + results[1].reason.message + "|" +
+      results[2].status + ":" + results[2].value.toString();
+  });
+`, "fulfilled:1|rejected:TypeError:bad|fulfilled:3"},
+	}
+
+	for _, tt := range tests {
+		evaluated := waitIfPromise(testEval(tt.input))
+		testStringOrNumber(t, evaluated, tt.expected)
+	}
+}
+
+func TestEval_BuiltinsDocs_TimersAndMicrotasks(t *testing.T) {
+	input := `
+let events = [];
+queueMicrotask(function() { events.push("micro"); });
+let cancelled = setTimeout(function() { events.push("cancelled"); }, 1);
+clearTimeout(cancelled);
+setTimeout(function(value) { events.push(value); }, 5, "timeout");
+let id = setInterval(function(label) {
+  events.push(label);
+  clearInterval(id);
+}, 1, "interval");
+sleep(20);
+let score = 0;
+if (events.includes("micro")) { score = score + 1; }
+if (events.includes("timeout")) { score = score + 10; }
+if (events.includes("interval")) { score = score + 100; }
+if (events.includes("cancelled")) { score = score + 1000; }
+score;
+`
+	evaluated := testEval(input)
+	testNumber(t, evaluated, "111")
+}
+
 func TestEval_BuiltinsDocs_ExtendedGlobalMathObjectArrayStringNumber(t *testing.T) {
 	input := `
 function assert(cond, label) {
@@ -623,6 +732,53 @@ assert(15.toString(16) === "f", "Number.toString");
 assert(1.25.toFixed(1) === "1.2", "Number.toFixed");
 assert(1234.toPrecision(3) === "1.23e+03", "Number.toPrecision");
 assert(12.toExponential(1) === "1.2e+01", "Number.toExponential");
+
+"ok";
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "ok")
+}
+
+func TestEval_BuiltinsDocs_JSONStringMatchAllBooleanWrapper(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+
+let pretty = JSON.stringify({ a: 1, b: [2] }, null, 2);
+assert(pretty.includes("\n  \"a\""), "JSON.stringify space");
+let replaced = JSON.stringify({ keep: 1, bump: 2 }, function(k, v) {
+  if (k === "bump") {
+    return v + 10;
+  }
+  return v;
+});
+assert(JSON.parse(replaced).bump === 12, "JSON.stringify replacer");
+let revived = JSON.parse("{\"a\":1,\"b\":[2]}", function(k, v) {
+  if (k === "a") {
+    return 9;
+  }
+  if (k === "0") {
+    return v + 3;
+  }
+  return v;
+});
+assert(revived.a === 9, "JSON.parse reviver object");
+assert(revived.b[0] === 5, "JSON.parse reviver array");
+
+let matches = "a1 b2".matchAll(new RegExp("([a-z])([0-9])", "g"));
+assert(matches.length === 2, "String.matchAll length");
+assert(matches[0][1] === "a", "String.matchAll group");
+assert("a1 b2".replaceAll(new RegExp("[0-9]", "g"), "#") === "a# b#", "String.replaceAll regexp");
+
+let boxedTrue = new Boolean(true);
+let boxedFalse = new Boolean(false);
+assert(boxedTrue.valueOf() === true, "Boolean.valueOf true");
+assert(boxedFalse.valueOf() === false, "Boolean.valueOf false");
+assert(boxedFalse.toString() === "false", "Boolean.toString");
+assert(Boolean(boxedFalse) === true, "Boolean boxed truthiness");
 
 "ok";
 `
@@ -795,6 +951,57 @@ Promise.resolve(1)
 `
 	evaluated := waitIfPromise(testEval(input))
 	testString(t, evaluated, "nested")
+}
+
+func TestEval_DateBuiltinBasic(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+let d = new Date("2020-01-02T03:04:05.006Z");
+assert(d.toISOString() === "2020-01-02T03:04:05.006Z", "Date.toISOString");
+assert(d.getTime() === 1577934245006, "Date.getTime");
+assert(d.valueOf() === 1577934245006, "Date.valueOf");
+assert(d.getUTCFullYear() === 2020, "Date.getUTCFullYear");
+assert(d.getUTCMonth() === 0, "Date.getUTCMonth");
+assert(d.getUTCDate() === 2, "Date.getUTCDate");
+assert(d.getUTCHours() === 3, "Date.getUTCHours");
+d.setTime(0);
+assert(d.toISOString() === "1970-01-01T00:00:00.000Z", "Date.setTime");
+assert(Date.UTC(2020, 0, 2, 3, 4, 5, 6) === 1577934245006, "Date.UTC");
+assert(Date.parse("2020-01-02T03:04:05.006Z") === 1577934245006, "Date.parse");
+assert(new Date(0).toLocaleDateString().length > 0, "Date.toLocaleDateString");
+"ok";
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "ok")
+}
+
+func TestEval_RegExpBuiltinAndStringInterop(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+let re = new RegExp("a([0-9]+)", "i");
+assert(re.test("xxA12yy") === true, "RegExp.test");
+assert(re.exec("xxA12yy")[0] === "A12", "RegExp.exec full");
+assert(re.exec("xxA12yy")[1] === "12", "RegExp.exec capture");
+assert("xxA12yy".match(re)[1] === "12", "String.match RegExp");
+assert("xxA12yy".search(re) === 2, "String.search RegExp");
+assert("a1 a2".replace(re, "x") === "x a2", "String.replace RegExp first");
+assert("a1 a2".replace(new RegExp("a[0-9]", "g"), "x") === "x x", "String.replace RegExp global");
+assert(new RegExp("a+", "g").global === true, "RegExp.global");
+assert(re.ignoreCase === true, "RegExp.ignoreCase");
+assert(re.source === "a([0-9]+)", "RegExp.source");
+assert(re.flags === "i", "RegExp.flags");
+"ok";
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "ok")
 }
 
 func waitIfPromise(obj object.Object) object.Object {

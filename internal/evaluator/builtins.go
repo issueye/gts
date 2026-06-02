@@ -19,14 +19,7 @@ func RegisterBuiltins(env *object.Environment) {
 type RequireFn func(path string) (object.Object, error)
 
 func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
-	env.Set("console", &object.Hash{
-		Pairs: map[object.HashKey]object.HashPair{
-			hashKey(&object.String{Value: "log"}): {
-				Key:   &object.String{Value: "log"},
-				Value: &object.Builtin{Name: "console.log", Fn: builtinConsoleLog},
-			},
-		},
-	})
+	registerConsole(env)
 	env.Set("println", &object.Builtin{Name: "println", Fn: builtinPrintln})
 	env.Set("print", &object.Builtin{Name: "print", Fn: builtinPrint})
 	env.Set("String", callableBuiltinObject("String", builtinString, map[string]object.Object{
@@ -49,7 +42,15 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 		"parseFloat":        &object.Builtin{Name: "Number.parseFloat", Fn: builtinParseFloat},
 		"parseInt":          &object.Builtin{Name: "Number.parseInt", Fn: builtinParseInt},
 	}))
-	env.Set("Boolean", callableBuiltinObject("Boolean", builtinBoolean, nil))
+	env.Set("Boolean", callableBuiltinObject("Boolean", builtinBoolean, map[string]object.Object{
+		"__constructBoolean": object.TRUE,
+	}))
+	env.Set("Date", callableBuiltinObject("Date", builtinDate, map[string]object.Object{
+		"now":   &object.Builtin{Name: "Date.now", Fn: builtinDateNow},
+		"parse": &object.Builtin{Name: "Date.parse", Fn: builtinDateParse},
+		"UTC":   &object.Builtin{Name: "Date.UTC", Fn: builtinDateUTC},
+	}))
+	env.Set("RegExp", callableBuiltinObject("RegExp", builtinRegExp, nil))
 	env.Set("Error", &object.Builtin{Name: "Error", Fn: builtinError})
 	env.Set("TypeError", &object.Builtin{Name: "TypeError", Fn: builtinNamedError("TypeError")})
 	env.Set("RangeError", &object.Builtin{Name: "RangeError", Fn: builtinNamedError("RangeError")})
@@ -104,6 +105,7 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 	registerJSON(env)
 	registerObject(env)
 	registerArray(env)
+	registerMapSet(env)
 	registerAsync(env)
 
 	// Wire up the goroutine pool
@@ -144,14 +146,6 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 			return result
 		}})
 	}
-}
-
-func builtinConsoleLog(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	for _, a := range args {
-		fmt.Print(a.Inspect(), " ")
-	}
-	fmt.Println()
-	return object.UNDEFINED
 }
 
 func builtinPrintln(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
