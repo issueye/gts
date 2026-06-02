@@ -368,6 +368,7 @@ err.stack;
 | `@std/toml` | `parse`, `stringify`, `readFileSync`, `writeFileSync` |
 | `@std/yaml` | `parse`, `stringify`, `readFileSync`, `writeFileSync` |
 | `@std/xml` | `parse`, `stringify`, `readFileSync`, `writeFileSync`；XML 节点为 `{ name, attributes, children, text }` |
+| `@std/exec` | `run`, `output`, `combinedOutput`, `start`, `command`, `spawn`；`spawn` 返回 stdin/stdout/stderr stream、`write/writeln/closeStdin/wait/kill` |
 | `net` | `fetch`（基于 Go `net/http`），`Server` 类（TCP） |
 | `http` | `createServer`, `request`, `get` |
 | `url` | `URL` 类，`URLSearchParams` 类 |

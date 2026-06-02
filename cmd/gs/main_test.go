@@ -537,6 +537,51 @@ kind;
 	}
 }
 
+func TestStdExecSpawnInteractive(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "exec_spawn.gs")
+	appSource := strings.ReplaceAll(`
+let exec = require("@std/exec");
+let process = require("@std/process");
+let cmdName = "bash";
+let cmdArgs = ["-lc", "while IFS= read -r line; do echo got:$line; done"];
+if (process.env.OS === "Windows_NT") {
+  cmdName = "powershell";
+  cmdArgs = ["-NoProfile", "-Command", "$input | ForEach-Object { 'got:' + $_ }"];
+}
+let child = exec.spawn(cmdName, cmdArgs, { cwd: "__DIR__", env: { GOSCRIPT_SPAWN_TEST: "ok" } });
+child.writeln("one");
+child.stdin.writeln("two");
+child.closeStdin();
+let first = child.stdout.readLine();
+let second = child.stdout.readLine();
+let end = child.stdout.readLine();
+let result = child.wait();
+let endKind = "not-end";
+if (end === null) {
+  endKind = "end";
+}
+let okKind = "bad";
+if (result.success) {
+  okKind = "ok";
+}
+first + ":" + second + ":" + endKind + ":" + okKind;
+`, "__DIR__", strings.ReplaceAll(dir, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "got:one:got:two:end:ok" {
+		t.Fatalf("want got:one:got:two:end:ok, got %T %v", result, result)
+	}
+}
+
 func TestStdStreamAndSSEModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "stream_sse.gs")
