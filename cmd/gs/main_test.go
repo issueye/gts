@@ -453,6 +453,74 @@ okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind + ":" + uu
 	}
 }
 
+func TestStdURLBufferEventsTimersModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "native_more.gs")
+	if err := os.WriteFile(script, []byte(`
+let url = require("@std/url");
+let buffer = require("@std/buffer");
+let events = require("@std/events");
+let timers = require("@std/timers");
+
+let parsed = url.parse("https://example.com:8443/a/b?x=1#top");
+let resolved = url.resolve("https://example.com/a/b", "../c?y=2");
+let u = url.URL("/next?q=1", "https://example.com/base/");
+u.searchParams.set("q", "2");
+u.searchParams.append("tag", "go");
+let params = url.URLSearchParams("a=1&a=2");
+params.append("b", "3");
+let urlKind = "url-bad";
+if (parsed.protocol === "https:" && parsed.hostname === "example.com" && parsed.port === "8443" && resolved === "https://example.com/c?y=2" && u.search === "?q=2&tag=go" && params.get("a") === "1" && params.has("b")) {
+  urlKind = "url";
+}
+
+let b = buffer.from("6869", "hex");
+let joined = buffer.concat([b, buffer.from("!")]);
+let filled = buffer.alloc(3, 65);
+let bufferKind = "buffer-bad";
+if (buffer.isBuffer(b) && b.length === 2 && b.toString() === "hi" && joined.toString("base64") === "aGkh" && filled.toString() === "AAA" && joined.slice(1).toString() === "i!") {
+  bufferKind = "buffer";
+}
+
+let emitter = events.EventEmitter();
+let seen = "";
+function onValue(v) { seen = seen + "on" + v; }
+emitter.on("value", onValue);
+emitter.once("value", function(v) { seen = seen + "once" + v; });
+let firstEmit = emitter.emit("value", "1");
+let secondEmit = emitter.emit("value", "2");
+emitter.off("value", onValue);
+let thirdEmit = emitter.emit("value", "3");
+let eventsKind = "events-bad";
+if (firstEmit && secondEmit && !thirdEmit && seen === "on1once1on2" && emitter.listenerCount("value") === 0) {
+  eventsKind = "events";
+}
+
+let timerKind = "timers-bad";
+let ticked = false;
+timers.queueMicrotask(function() { ticked = true; });
+timers.sleep(10);
+if (typeof timers.setTimeout === "BUILTIN" && ticked) {
+  timerKind = "timers";
+}
+
+urlKind + ":" + bufferKind + ":" + eventsKind + ":" + timerKind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	want := "url:buffer:events:timers"
+	if !ok || str.Value != want {
+		t.Fatalf("want %q, got %T %v", want, result, result)
+	}
+}
+
 func TestStdConfigCodecModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "config_codecs.gs")

@@ -373,13 +373,15 @@ err.stack;
 | `@std/exec` | `run`, `output`, `combinedOutput`, `start`, `command`, `spawn`；`spawn` 返回 stdin/stdout/stderr stream、`write/writeln/closeStdin/wait/kill` |
 | `@std/pty` | `spawn`, `open`；返回 PTY/ConPTY 进程对象，含 `output`, `write`, `writeln`, `readText`, `readLine`, `resize`, `wait`, `kill`, `close` |
 | `@std/terminal` | `isTTY`, `size`, `read`, `write`, `writeln`, `setRawMode`；用于宿主终端探测、读写和 raw mode 恢复 |
-| `net` | `fetch`（基于 Go `net/http`），`Server` 类（TCP） |
-| `http` | `createServer`, `request`, `get` |
-| `url` | `URL` 类，`URLSearchParams` 类 |
-| `crypto` | `randomBytes`, `createHash`（md5/sha1/sha256/sha512），`createHmac` |
-| `events` | `EventEmitter` 类 |
-| `timers` | `setTimeout` 等的模块化别名 |
-| `buffer` | `Buffer` 类（与 Node 类似的字节缓冲区） |
+| `@std/net/http/client` | `request`, `get`, `post`, `stream` |
+| `@std/net/http/server` | `createServer` |
+| `@std/net/socket/client`、`@std/net/socket/server` | TCP socket client/server |
+| `@std/net/ws/client`、`@std/net/ws/server` | WebSocket client/server |
+| `@std/url` | `parse`, `format`, `resolve`, `pathToFileURL`, `fileURLToPath`, `URL`, `URLSearchParams` |
+| `@std/crypto` | `randomUUID`, `sha256`, `randomBytes` |
+| `@std/events` | `EventEmitter` 基础版：`on`, `once`, `off`, `emit`, `listeners`, `listenerCount`, `removeAllListeners` |
+| `@std/timers` | `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `queueMicrotask`, `sleep` 的模块化别名 |
+| `@std/buffer` | `from`, `alloc`, `byteLength`, `concat`, `isBuffer`；支持 `utf8`、`hex`、`base64` |
 | `@std/process` | `argv`, `argv0`, `env`, `envObject`, `pid`, `cwd`, `chdir`, `execPath`, `getenv`, `setenv`, `unsetenv`, `uptime`, `hrtime`, `version`, `exit` |
 
 > 模块 API 设计参考 Node.js CommonJS 子集 + 必要扩展。

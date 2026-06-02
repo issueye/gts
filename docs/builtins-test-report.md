@@ -23,6 +23,7 @@
   - `@std/stream`、`@std/sse`、`@std/net/http/client`
   - `@std/db` SQLite 基础与事务/预编译语句
   - `@std/crypto`、`@std/schema`
+  - `@std/url`、`@std/buffer`、`@std/events`、`@std/timers`
 
 ## 逐项覆盖结果
 
@@ -60,7 +61,8 @@
 | 15 | `@std/pty`、`@std/terminal` | 已实现 | 已覆盖 |
 | 15 | `@std/stream`、`@std/sse`、`@std/net/http/client.stream` | 已实现 L3 streaming/SSE/stream 抽象 | 已覆盖 |
 | 15 | `@std/db` | 已实现 SQLite、PostgreSQL、MySQL、MSSQL 驱动入口；SQLite 使用 `modernc.org/sqlite` nocgo | SQLite 已覆盖 |
-| 15 | 文档中的裸 `net/http/url/crypto/events/timers/buffer` Node 风格模块 | 当前与实现命名不一致或未实现 | 待文档修订或实现 |
+| 15 | `@std/url`、`@std/buffer`、`@std/events`、`@std/timers` | 已实现基础版：URL/SearchParams、Buffer 编码、EventEmitter、timer 模块别名 | 已覆盖 |
+| 15 | 文档中的裸 `net/http/crypto/events/timers/buffer` Node 风格模块 | 当前原生模块统一使用 `@std/*` 命名；裸模块名待文档修订或 resolver 别名 | 待文档修订 |
 | 16 | Go 嵌入示例 | 文档示例与当前 API 形态不完全一致 | 待文档修订 |
 
 ## 本轮新增自动测试覆盖
@@ -100,5 +102,5 @@
 
 1. 先拆分 `docs/builtins.md`：把“当前已实现 API”和“路线图/目标 API”分开，避免使用者误判。
 2. 第一优先级补强 RegExp/Map/Set 的完整语义：RegExp flags 全量兼容、迭代协议细节。
-3. 第二优先级修正文档中的标准模块命名：当前网络模块使用 `@std/net/http/client`、`@std/net/http/server`、`@std/net/socket/*`、`@std/net/ws/*`，而不是裸 `net/http/url`。
+3. 第二优先级修正文档中的标准模块命名：当前网络模块使用 `@std/net/http/client`、`@std/net/http/server`、`@std/net/socket/*`、`@std/net/ws/*`，URL/Buffer/Events/Timers 使用 `@std/url`、`@std/buffer`、`@std/events`、`@std/timers`。
 4. Go 嵌入章节需要按当前 `lexer/parser/evaluator/object/module` API 重写可运行示例。
