@@ -362,9 +362,9 @@ err.stack;
 
 | 模块 | 提供 |
 |------|------|
-| `fs` | `readFileSync`, `writeFileSync`, `readdirSync`, `statSync`, `existsSync`, `mkdirSync`, `unlinkSync`, `rmdirSync` |
-| `path` | `join`, `resolve`, `dirname`, `basename`, `extname`, `sep` |
-| `os` | `platform`, `arch`, `hostname`, `cpus`, `totalmem`, `freemem`, `homedir`, `tmpdir`, `env` |
+| `@std/fs` | `readFileSync`, `readTextSync`, `writeFileSync`, `writeTextSync`, `appendFileSync`, `writeFileAtomicSync`, `existsSync`, `readdirSync`, `walkSync`, `globSync`, `copyFileSync`, `rmSync`, `mkdtempSync`, `realpathSync`, `lstatSync`, `mkdirSync`, `statSync`, `renameSync`, `unlinkSync` |
+| `@std/path` | `join`, `resolve`, `relative`, `normalize`, `dirname`, `basename`, `extname`, `isAbs`, `toSlash`, `fromSlash`, `matches`, `parse`, `format`, `splitList`, `sep`, `delimiter` |
+| `@std/os` | `platform`, `arch`, `eol`, `type`, `release`, `hostname`, `cpus`, `homedir`, `tmpdir`, `userInfo` |
 | `net` | `fetch`（基于 Go `net/http`），`Server` 类（TCP） |
 | `http` | `createServer`, `request`, `get` |
 | `url` | `URL` 类，`URLSearchParams` 类 |
@@ -372,7 +372,7 @@ err.stack;
 | `events` | `EventEmitter` 类 |
 | `timers` | `setTimeout` 等的模块化别名 |
 | `buffer` | `Buffer` 类（与 Node 类似的字节缓冲区） |
-| `process` | `argv`, `env`, `cwd`, `exit`, `pid`, `platform`, `version` |
+| `@std/process` | `argv`, `argv0`, `env`, `envObject`, `pid`, `cwd`, `chdir`, `execPath`, `getenv`, `setenv`, `unsetenv`, `uptime`, `hrtime`, `version`, `exit` |
 
 > 模块 API 设计参考 Node.js CommonJS 子集 + 必要扩展。
 

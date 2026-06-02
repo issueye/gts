@@ -71,10 +71,10 @@
 | `await` 解析 | 已完成基础版 | parser 支持 `await` 表达式，配合 async/Promise 测试通过 |
 | C 风格 `for` 循环 | 已修复基础缺陷 | 修复 `for (let i = 0; ...)` 试探解析吞 token 的问题，闭包和工具 registry 循环可稳定运行 |
 | Agent 模块别名 | 已完成基础版 | `@agent/*` 映射到项目根目录下 `scripts/agent/*`，并支持默认 `.gs` 扩展 |
-| `@std/path` | 已完成基础版 | `join/resolve/relative/normalize/dirname/basename/extname/sep` |
-| `@std/fs` | 已完成增强版 | `readFileSync/writeFileSync/readTextSync/writeTextSync/appendFileSync/writeFileAtomicSync/existsSync/readdirSync/walkSync/mkdirSync/statSync/renameSync/unlinkSync` |
-| `@std/process` | 已完成基础版 | `argv/env/pid/cwd/chdir/getenv/setenv/unsetenv/exit` |
-| `@std/os` | 已完成基础版 | `platform/arch/homedir/tmpdir/hostname` |
+| `@std/path` | 已完成增强版 | `join/resolve/relative/normalize/dirname/basename/extname/isAbs/toSlash/fromSlash/matches/parse/format/splitList/sep/delimiter` |
+| `@std/fs` | 已完成增强版 | `readFileSync/writeFileSync/readTextSync/writeTextSync/appendFileSync/writeFileAtomicSync/existsSync/readdirSync({withFileTypes})/walkSync/globSync/copyFileSync/rmSync/mkdtempSync/realpathSync/lstatSync/mkdirSync/statSync/renameSync/unlinkSync` |
+| `@std/process` | 已完成增强版 | `argv/argv0/env/envObject/pid/cwd/chdir/execPath/getenv/setenv/unsetenv/uptime/hrtime/version/exit` |
+| `@std/os` | 已完成增强版 | `platform/arch/eol/type/release/homedir/tmpdir/hostname/cpus/userInfo` |
 | `@std/crypto` | 已完成基础版 | `randomUUID/sha256/randomBytes` |
 | `@std/schema` | 已完成基础版 | JSON Schema 子集：`type/properties/required/items/enum/additionalProperties/min/max` 等 |
 | `@std/db` | 已完成增强版 | 统一 `open/exec/query/queryOne/prepare/begin/ping/close`，支持事务、预编译语句、连接池配置；SQLite 使用 `modernc.org/sqlite` no-cgo 驱动 |
@@ -99,7 +99,7 @@
 | 完整模块语义 | `import/export`、循环依赖、native import 仍需加固 | agent 框架要拆成多个 `.gs` 模块 |
 | 结构化错误 | `Error` 子类、`stack`、file/line 不完整 | provider/tool/session 错误必须可诊断 |
 | JSON 和对象稳定性 | `JSON.stringify`、对象枚举、深层结构仍需加强 | provider payload、tool result、session JSONL 都依赖 |
-| 文件/路径标准库 | `@std/fs`、`@std/path` 已有增强版，仍需 glob、权限细节、watch | read/write/edit/session/skills 都依赖 |
+| 文件/路径标准库 | `@std/fs`、`@std/path` 已有增强版，仍需 watch、权限细节、更完整 glob 规则 | read/write/edit/session/skills 都依赖 |
 | HTTP streaming/SSE | 已有基础版，仍需 async iterator、abort、背压和更完整超时模型 | LLM provider 流式输出的底层能力 |
 | 进程执行增强 | `@std/exec` 已有，但缺少 cwd/env/timeout/stream/cancel 完整模型 | `bash` tool 必须可靠可控 |
 | Schema 校验 | 已有 JSON Schema 子集，仍需默认值、格式校验和更完整错误聚合 | 工具调用参数必须校验 |
@@ -115,7 +115,7 @@
 | 正则与文本处理 | grep/search、模板处理、路径匹配、输出裁剪 |
 | `Date` / 时间工具 | session timestamp、timeout、耗时统计 |
 | `crypto` 基础 | 已有 uuid/hash/randomBytes，后续补 HMAC/base64 组合能力 |
-| `process` / `os` | 已有 env、argv、cwd、platform、homedir、tmpdir 等基础能力 |
+| `process` / `os` | 已有 env、envObject、argv、argv0、execPath、cwd、uptime、hrtime、platform、type、release、userInfo、homedir、tmpdir、eol、cpus 等增强能力 |
 | 稳定数组/字符串方法 | map/filter/reduce/slice/split/join/startsWith/includes 等 agent 代码常用方法 |
 | 动态加载约定 | `import(path)` 或受控动态 require，用于扩展和技能加载 |
 
@@ -242,17 +242,17 @@ Agent 行为则在 `scripts/agent` 中完成。
 
 | 模块 | 能力 |
 |---|---|
-| `@std/fs` | 读写文件、目录遍历、stat、mkdir、rename、unlink、临时文件、原子写 |
-| `@std/path` | join、resolve、relative、normalize、dirname、basename、extname、sep |
-| `@std/process` | argv、env、cwd、chdir、exit、pid |
-| `@std/os` | platform、arch、homedir、tmpdir、hostname |
+| `@std/fs` | 读写文件、目录遍历、带类型目录项、walk、glob、copy、rm、mkdtemp、realpath、lstat、stat、mkdir、rename、unlink、原子写 |
+| `@std/path` | join、resolve、relative、normalize、dirname、basename、extname、isAbs、toSlash、fromSlash、matches、parse、format、splitList、sep、delimiter |
+| `@std/process` | argv、argv0、env、envObject、cwd、chdir、execPath、uptime、hrtime、version、exit、pid |
+| `@std/os` | platform、arch、eol、type、release、homedir、tmpdir、hostname、cpus、userInfo |
 | `@std/exec` | cwd、env、timeout、stream stdout/stderr、kill、exitCode |
 
 **当前状态：**
 
-- `@std/fs`、`@std/path`、`@std/process`、`@std/os` 已完成同步 API。
-- `@std/fs` 已支持文本读写、追加写、原子写和递归 walk。
-- 下一步应补 `@std/fs.glob/watch`、权限细节，以及 `@std/exec` 的 timeout/env/cwd 一体化选项。
+- `@std/fs`、`@std/path`、`@std/process`、`@std/os` 已完成同步增强 API。
+- `@std/fs` 已支持文本读写、追加写、原子写、带类型目录项、递归 walk、glob、copy、临时目录、真实路径、lstat 和递归/强制删除。
+- 下一步应补 `@std/fs.watch`、权限细节、更完整 glob 规则，以及 `@std/exec` 的 timeout/env/cwd 一体化选项。
 
 **验收：**
 
@@ -429,10 +429,10 @@ go run ./cmd/gs scripts/agent/smoke_import.gs
 
 **交付物：**
 
-- `@std/fs`（基础版已完成）
-- `@std/path`（基础版已完成）
-- `@std/process`（基础版已完成）
-- `@std/os`（基础版已完成）
+- `@std/fs`（增强版已完成）
+- `@std/path`（增强版已完成）
+- `@std/process`（增强版已完成）
+- `@std/os`（增强版已完成）
 - 增强 `@std/exec`
 
 **验证：**

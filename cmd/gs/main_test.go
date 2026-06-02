@@ -178,7 +178,28 @@ func TestStdPathModule(t *testing.T) {
 	app := filepath.Join(dir, "path.gs")
 	if err := os.WriteFile(app, []byte(`
 let path = require("@std/path");
-path.basename(path.join("alpha", "beta", "file.txt")) + ":" + path.extname("file.txt");
+let absKind = "rel";
+if (path.isAbs(path.resolve("alpha"))) {
+  absKind = "abs";
+}
+let slashKind = "bad";
+if (path.toSlash(path.fromSlash("alpha/beta/file.txt")) === "alpha/beta/file.txt") {
+  slashKind = "slash";
+}
+let matchKind = "no";
+if (path.matches("*.txt", "file.txt")) {
+  matchKind = "match";
+}
+let parsed = path.parse(path.join("alpha", "beta", "file.txt"));
+let parseKind = "bad";
+if (parsed.name === "file" && parsed.ext === ".txt" && path.basename(path.format(parsed)) === "file.txt") {
+  parseKind = "parse";
+}
+let listKind = "bad";
+if (path.splitList("alpha" + path.delimiter + "beta").length === 2) {
+  listKind = "list";
+}
+path.basename(path.join("alpha", "beta", "file.txt")) + ":" + path.extname("file.txt") + ":" + absKind + ":" + slashKind + ":" + matchKind + ":" + parseKind + ":" + listKind;
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +210,8 @@ path.basename(path.join("alpha", "beta", "file.txt")) + ":" + path.extname("file
 		t.Fatal(err)
 	}
 	str, ok := result.(*object.String)
-	if !ok || str.Value != "file.txt:.txt" {
-		t.Fatalf("want file.txt:.txt, got %T %v", result, result)
+	if !ok || str.Value != "file.txt:.txt:abs:slash:match:parse:list" {
+		t.Fatalf("want file.txt:.txt:abs:slash:match:parse:list, got %T %v", result, result)
 	}
 }
 
@@ -246,13 +267,48 @@ fs.mkdirSync(path.join(root, "nested"), { recursive: true });
 let file = path.join(root, "nested", "note.txt");
 fs.writeFileAtomicSync(file, "one");
 fs.appendFileSync(file, "\ntwo");
+let tmpDir = fs.mkdtempSync(path.join(root, "tmp-"));
+let copy = path.join(root, "copy.txt");
+fs.copyFileSync(file, copy);
 let text = fs.readTextSync(file);
+let copyText = fs.readTextSync(copy);
+let realKind = "bad";
+if (path.isAbs(fs.realpathSync(copy))) {
+  realKind = "real";
+}
+let lstat = fs.lstatSync(copy);
+let lstatKind = "bad";
+if (lstat.isFile() && !lstat.isSymlink()) {
+  lstatKind = "lstat";
+}
 let entries = fs.walkSync(root, { includeDirs: false });
 let countKind = "bad";
-if (entries.length === 1) {
-  countKind = "one-file";
+if (entries.length === 2) {
+  countKind = "two-files";
 }
-text + ":" + countKind + ":" + entries[0].relativePath;
+let typed = fs.readdirSync(root, { withFileTypes: true });
+let typedKind = "bad";
+for (let i = 0; i < typed.length; i = i + 1) {
+  if (typed[i].name === "nested" && typed[i].isDirectory()) {
+    typedKind = "dirent";
+  }
+}
+let globbed = fs.globSync(path.join(root, "nested", "*.txt"));
+let globKind = "bad";
+if (globbed.length === 1 && path.basename(globbed[0]) === "note.txt") {
+  globKind = "glob";
+}
+fs.rmSync(path.join(root, "nested"), { recursive: true, force: true });
+fs.rmSync(path.join(root, "missing"), { recursive: true, force: true });
+let rmKind = "bad";
+if (!fs.existsSync(file)) {
+  rmKind = "removed";
+}
+let tmpKind = "bad";
+if (fs.existsSync(tmpDir)) {
+  tmpKind = "tmp";
+}
+text + ":" + copyText + ":" + countKind + ":" + typedKind + ":" + globKind + ":" + realKind + ":" + lstatKind + ":" + tmpKind + ":" + rmKind;
 `, "__WORK__", strings.ReplaceAll(work, `\`, `\\`))
 	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
 		t.Fatal(err)
@@ -264,7 +320,7 @@ text + ":" + countKind + ":" + entries[0].relativePath;
 		t.Fatal(err)
 	}
 	str, ok := result.(*object.String)
-	want := "one\ntwo:one-file:" + filepath.Join("nested", "note.txt")
+	want := "one\ntwo:one\ntwo:two-files:dirent:glob:real:lstat:tmp:removed"
 	if !ok || str.Value != want {
 		t.Fatalf("want %q, got %T %v", want, result, result)
 	}
@@ -280,6 +336,25 @@ let before = process.cwd();
 process.setenv("GOSCRIPT_AGENT_TEST", "ok");
 let value = process.getenv("GOSCRIPT_AGENT_TEST");
 let fallback = process.getenv("GOSCRIPT_AGENT_MISSING", "missing");
+let envNow = process.envObject();
+let envKind = "missing";
+if (envNow.GOSCRIPT_AGENT_TEST === "ok") {
+  envKind = "env";
+}
+let argvKind = "empty";
+if (process.argv0 !== "") {
+  argvKind = "argv0";
+}
+let execKind = "empty";
+if (process.execPath() !== "") {
+  execKind = "exec";
+}
+let runtimeKind = "bad";
+let mark = process.hrtime();
+let diff = process.hrtime(mark);
+if (process.uptime() >= 0 && diff.length === 2 && process.version !== "") {
+  runtimeKind = "runtime";
+}
 let platformKind = "empty";
 if (os.platform !== "") {
   platformKind = "set";
@@ -288,11 +363,24 @@ let tmpKind = "empty";
 if (os.tmpdir() !== "") {
   tmpKind = "set";
 }
+let eolKind = "bad";
+if (os.eol === "\n" || os.eol === "\r\n") {
+  eolKind = "eol";
+}
+let cpuKind = "bad";
+if (os.cpus() > 0) {
+  cpuKind = "cpus";
+}
+let osKind = "bad";
+let user = os.userInfo();
+if (os.type() !== "" && os.release() !== "" && user.homedir !== "") {
+  osKind = "os";
+}
 process.chdir("__DIR__");
 let after = process.cwd();
 process.chdir(before);
 process.unsetenv("GOSCRIPT_AGENT_TEST");
-value + ":" + fallback + ":" + platformKind + ":" + tmpKind + ":" + after;
+value + ":" + fallback + ":" + envKind + ":" + argvKind + ":" + execKind + ":" + runtimeKind + ":" + platformKind + ":" + tmpKind + ":" + eolKind + ":" + cpuKind + ":" + osKind + ":" + after;
 `, "__DIR__", strings.ReplaceAll(dir, `\`, `\\`))
 	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
 		t.Fatal(err)
@@ -304,7 +392,7 @@ value + ":" + fallback + ":" + platformKind + ":" + tmpKind + ":" + after;
 		t.Fatal(err)
 	}
 	str, ok := result.(*object.String)
-	want := "ok:missing:set:set:" + dir
+	want := "ok:missing:env:argv0:exec:runtime:set:set:eol:cpus:os:" + dir
 	if !ok || str.Value != want {
 		t.Fatalf("want %q, got %T %v", want, result, result)
 	}

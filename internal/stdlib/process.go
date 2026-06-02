@@ -4,11 +4,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
 )
+
+var processStartedAt = time.Now()
 
 func init() {
 	module.RegisterNative("@std/process", func() (object.Object, error) {
@@ -20,14 +23,24 @@ func init() {
 
 func initProcessModule(exports *object.Hash) {
 	setHashMember(exports, "argv", strSliceToArray(os.Args))
+	if len(os.Args) > 0 {
+		setHashMember(exports, "argv0", &object.String{Value: os.Args[0]})
+	} else {
+		setHashMember(exports, "argv0", &object.String{Value: ""})
+	}
 	setHashMember(exports, "pid", &object.Number{Value: float64(os.Getpid())})
 	setHashMember(exports, "env", envObject())
 	setHashMember(exports, "cwd", &object.Builtin{Name: "process.cwd", Fn: processCwd})
 	setHashMember(exports, "chdir", &object.Builtin{Name: "process.chdir", Fn: processChdir})
+	setHashMember(exports, "execPath", &object.Builtin{Name: "process.execPath", Fn: processExecPath})
 	setHashMember(exports, "getenv", &object.Builtin{Name: "process.getenv", Fn: processGetenv})
+	setHashMember(exports, "envObject", &object.Builtin{Name: "process.envObject", Fn: processEnvObject})
+	setHashMember(exports, "uptime", &object.Builtin{Name: "process.uptime", Fn: processUptime})
+	setHashMember(exports, "hrtime", &object.Builtin{Name: "process.hrtime", Fn: processHrtime})
 	setHashMember(exports, "setenv", &object.Builtin{Name: "process.setenv", Fn: processSetenv})
 	setHashMember(exports, "unsetenv", &object.Builtin{Name: "process.unsetenv", Fn: processUnsetenv})
 	setHashMember(exports, "exit", &object.Builtin{Name: "process.exit", Fn: processExit})
+	setHashMember(exports, "version", &object.String{Value: "0.1.0-dev"})
 }
 
 func processCwd(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -49,6 +62,14 @@ func processChdir(env *object.Environment, pos ast.Position, args ...object.Obje
 	return object.UNDEFINED
 }
 
+func processExecPath(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	path, err := os.Executable()
+	if err != nil {
+		return object.NewError(pos, "process.execPath: %v", err)
+	}
+	return &object.String{Value: path}
+}
+
 func processGetenv(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	name, errObj := requiredString(pos, "process.getenv", args, 0, "name")
 	if errObj != nil {
@@ -62,6 +83,40 @@ func processGetenv(env *object.Environment, pos ast.Position, args ...object.Obj
 		return object.UNDEFINED
 	}
 	return &object.String{Value: value}
+}
+
+func processEnvObject(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return envObject()
+}
+
+func processUptime(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return &object.Number{Value: time.Since(processStartedAt).Seconds()}
+}
+
+func processHrtime(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	elapsed := time.Since(processStartedAt)
+	seconds := int64(elapsed / time.Second)
+	nanos := int64(elapsed % time.Second)
+	if len(args) >= 1 {
+		if prev, ok := args[0].(*object.Array); ok && len(prev.Elements) >= 2 {
+			if secObj, ok := prev.Elements[0].(*object.Number); ok {
+				if nanoObj, ok := prev.Elements[1].(*object.Number); ok {
+					baseSeconds := int64(secObj.Value)
+					baseNanos := int64(nanoObj.Value)
+					seconds -= baseSeconds
+					nanos -= baseNanos
+					if nanos < 0 {
+						seconds--
+						nanos += int64(time.Second)
+					}
+				}
+			}
+		}
+	}
+	return &object.Array{Elements: []object.Object{
+		&object.Number{Value: float64(seconds)},
+		&object.Number{Value: float64(nanos)},
+	}}
 }
 
 func processSetenv(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
