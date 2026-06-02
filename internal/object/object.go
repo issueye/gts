@@ -97,9 +97,9 @@ type HashPair struct {
 }
 
 type Hash struct {
-	Pairs    map[HashKey]HashPair
-	Proto    *Hash
-	Pos      ast.Position
+	Pairs map[HashKey]HashPair
+	Proto *Hash
+	Pos   ast.Position
 }
 
 func (h *Hash) Type() ObjectType { return OBJECT_OBJ }
@@ -169,11 +169,23 @@ func (r *ReturnValue) Inspect() string  { return r.Value.Inspect() }
 
 type Error struct {
 	Message string
+	Name    string
+	Stack   string
+	Runtime bool
 	Pos     ast.Position
 }
 
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
-func (e *Error) Inspect() string  { return fmt.Sprintf("%s: %s", e.Pos, e.Message) }
+func (e *Error) Inspect() string {
+	name := e.Name
+	if name == "" {
+		name = "Error"
+	}
+	if e.Pos.IsZero() {
+		return fmt.Sprintf("%s: %s", name, e.Message)
+	}
+	return fmt.Sprintf("%s: %s: %s", e.Pos, name, e.Message)
+}
 
 // --- Class / Instance ---
 
@@ -205,13 +217,45 @@ type GoObject struct {
 	Value interface{}
 }
 
-func (g *GoObject) Type() ObjectType  { return GOOBJECT_OBJ }
-func (g *GoObject) Inspect() string   { return fmt.Sprintf("<go %T>", g.Value) }
+func (g *GoObject) Type() ObjectType { return GOOBJECT_OBJ }
+func (g *GoObject) Inspect() string  { return fmt.Sprintf("<go %T>", g.Value) }
 
 // --- Helpers ---
 
 func NewError(pos ast.Position, format string, args ...interface{}) *Error {
-	return &Error{Message: fmt.Sprintf(format, args...), Pos: pos}
+	name := "Error"
+	message := fmt.Sprintf(format, args...)
+	for _, prefix := range []string{"TypeError", "RangeError", "ReferenceError", "SyntaxError", "ImportError", "ExportError", "MatchError"} {
+		if strings.HasPrefix(message, prefix+": ") {
+			name = prefix
+			message = strings.TrimPrefix(message, prefix+": ")
+			break
+		}
+	}
+	err := NewNamedError(pos, name, message)
+	err.Runtime = true
+	return err
+}
+
+func NewNamedError(pos ast.Position, name, message string) *Error {
+	if name == "" {
+		name = "Error"
+	}
+	err := &Error{Name: name, Message: message, Pos: pos}
+	err.Stack = err.FormatStack()
+	return err
+}
+
+func (e *Error) FormatStack() string {
+	name := e.Name
+	if name == "" {
+		name = "Error"
+	}
+	first := fmt.Sprintf("%s: %s", name, e.Message)
+	if e.Pos.IsZero() {
+		return first
+	}
+	return fmt.Sprintf("%s\n    at %s", first, e.Pos)
 }
 
 var (
@@ -228,9 +272,13 @@ func NativeBool(v bool) *Boolean {
 	return FALSE
 }
 
-func IsNumber(o Object) bool  { return o.Type() == NUMBER_OBJ }
-func IsString(o Object) bool  { return o.Type() == STRING_OBJ }
-func IsError(o Object) bool   { return o.Type() == ERROR_OBJ }
+func IsNumber(o Object) bool { return o != nil && o.Type() == NUMBER_OBJ }
+func IsString(o Object) bool { return o != nil && o.Type() == STRING_OBJ }
+func IsError(o Object) bool  { return o != nil && o.Type() == ERROR_OBJ }
+func IsRuntimeError(o Object) bool {
+	err, ok := o.(*Error)
+	return ok && err.Runtime
+}
 func IsTruthy(o Object) bool {
 	switch o := o.(type) {
 	case *Null, *Undefined:

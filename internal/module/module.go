@@ -3,6 +3,7 @@ package module
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/issueye/goscript/internal/object"
@@ -40,16 +41,49 @@ func (c *Cache) Get(absPath string) *object.Environment {
 // ResolvePath resolves a module path relative to the base directory.
 func ResolvePath(path, baseDir string) string {
 	if filepath.IsAbs(path) {
-		return path
+		return withDefaultExt(path)
 	}
 	if baseDir == "" {
 		baseDir, _ = os.Getwd()
 	}
-	resolved := filepath.Join(baseDir, path)
-	if filepath.Ext(resolved) == "" {
-		resolved += ".gs"
+	if strings.HasPrefix(path, "@agent/") {
+		return withDefaultExt(filepath.Join(FindProjectRoot(baseDir), "scripts", "agent", strings.TrimPrefix(path, "@agent/")))
 	}
-	return resolved
+	return withDefaultExt(filepath.Join(baseDir, path))
+}
+
+func withDefaultExt(path string) string {
+	if filepath.Ext(path) == "" {
+		return path + ".gs"
+	}
+	return path
+}
+
+// FindProjectRoot walks upward looking for a GoScript project root. The root is
+// used for script library aliases such as @agent/*.
+func FindProjectRoot(startDir string) string {
+	if startDir == "" {
+		startDir, _ = os.Getwd()
+	}
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return startDir
+	}
+	for {
+		if fileExists(filepath.Join(dir, "project.toml")) || fileExists(filepath.Join(dir, ".git")) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return filepath.Clean(startDir)
+		}
+		dir = parent
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // SetupExports initializes module.exports on an environment.

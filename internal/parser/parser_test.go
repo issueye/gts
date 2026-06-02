@@ -331,6 +331,35 @@ func TestParse_NewExpr(t *testing.T) {
 	}
 }
 
+func TestParse_NewExprWithFunctionArgument(t *testing.T) {
+	input := `new Promise(function(resolve, reject) { resolve(2); }).then(function(x) { return x + 1; });`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	expr := prog.Body[0].(*ast.ExprStmt).Expr
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("want chained CallExpr, got %T", expr)
+	}
+	member, ok := call.Callee.(*ast.MemberExpr)
+	if !ok {
+		t.Fatalf("want member callee, got %T", call.Callee)
+	}
+	if _, ok := member.Object.(*ast.NewExpr); !ok {
+		t.Fatalf("want new expression as member object, got %T", member.Object)
+	}
+}
+
+func TestParse_AwaitExpr(t *testing.T) {
+	input := `async function main() { let x = await Promise.reject(new Error("x")); }`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	fn := prog.Body[0].(*ast.FuncDecl)
+	stmt := fn.Body.Statements[0].(*ast.LetStmt)
+	if _, ok := stmt.Value.(*ast.AwaitExpr); !ok {
+		t.Fatalf("want AwaitExpr, got %T", stmt.Value)
+	}
+}
+
 func TestParse_MatchExpr(t *testing.T) {
 	input := `
 match code {
@@ -397,6 +426,51 @@ func TestParse_ImportExport(t *testing.T) {
 	_, ok = prog.Body[1].(*ast.ExportDecl)
 	if !ok {
 		t.Fatalf("want ExportDecl, got %T", prog.Body[1])
+	}
+}
+
+func TestParse_ExportDefaultExpression(t *testing.T) {
+	input := `export default 6;`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	if len(prog.Body) != 1 {
+		t.Fatalf("want 1 stmt, got %d", len(prog.Body))
+	}
+	exp, ok := prog.Body[0].(*ast.ExportDecl)
+	if !ok {
+		t.Fatalf("want ExportDecl, got %T", prog.Body[0])
+	}
+	if !exp.IsDefault {
+		t.Fatal("expected default export")
+	}
+}
+
+func TestParse_NamespaceImport(t *testing.T) {
+	input := `import * as math from "./math.gs";`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	imp, ok := prog.Body[0].(*ast.ImportDecl)
+	if !ok {
+		t.Fatalf("want ImportDecl, got %T", prog.Body[0])
+	}
+	if imp.Namespace != "math" {
+		t.Fatalf("want namespace math, got %q", imp.Namespace)
+	}
+}
+
+func TestParse_ExportSpecifiers(t *testing.T) {
+	input := `export { value, add as sum };`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	exp, ok := prog.Body[0].(*ast.ExportDecl)
+	if !ok {
+		t.Fatalf("want ExportDecl, got %T", prog.Body[0])
+	}
+	if len(exp.Specifiers) != 2 {
+		t.Fatalf("want 2 specifiers, got %d", len(exp.Specifiers))
+	}
+	if exp.Specifiers[1].Name != "add" || exp.Specifiers[1].Alias != "sum" {
+		t.Fatalf("unexpected alias: %+v", exp.Specifiers[1])
 	}
 }
 

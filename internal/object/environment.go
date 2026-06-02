@@ -5,13 +5,14 @@ import "github.com/issueye/goscript/internal/ast"
 // Environment is a scope for variable bindings.
 type Environment struct {
 	store  map[string]Object
+	consts map[string]bool
 	parent *Environment
 	Extra  Object // bound context for method dispatch (array/string instance)
 	Pos    ast.Position
 }
 
 func NewEnvironment() *Environment {
-	return &Environment{store: make(map[string]Object)}
+	return &Environment{store: make(map[string]Object), consts: make(map[string]bool)}
 }
 
 func (e *Environment) Get(name string) (Object, bool) {
@@ -24,6 +25,13 @@ func (e *Environment) Get(name string) (Object, bool) {
 
 func (e *Environment) Set(name string, val Object) Object {
 	e.store[name] = val
+	e.consts[name] = false
+	return val
+}
+
+func (e *Environment) SetConst(name string, val Object) Object {
+	e.store[name] = val
+	e.consts[name] = true
 	return val
 }
 
@@ -31,6 +39,9 @@ func (e *Environment) Set(name string, val Object) Object {
 // creating it in the current scope if not found anywhere.
 func (e *Environment) SetUp(name string, val Object) Object {
 	if _, ok := e.store[name]; ok {
+		if e.consts[name] {
+			return nil
+		}
 		e.store[name] = val
 		return val
 	}
@@ -38,12 +49,28 @@ func (e *Environment) SetUp(name string, val Object) Object {
 		return e.parent.SetUp(name, val)
 	}
 	e.store[name] = val
+	e.consts[name] = false
 	return val
+}
+
+func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
+	if _, ok := e.store[name]; ok {
+		if e.consts[name] {
+			return nil, true, true
+		}
+		e.store[name] = val
+		return val, true, false
+	}
+	if e.parent != nil {
+		return e.parent.Assign(name, val)
+	}
+	return nil, false, false
 }
 
 // SetHere sets only in this environment (not parent).
 func (e *Environment) SetHere(name string, val Object) Object {
 	e.store[name] = val
+	e.consts[name] = false
 	return val
 }
 

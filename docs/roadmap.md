@@ -2,6 +2,8 @@
 
 > 状态：v0.1 设计阶段 ✅  
 > 当前阶段目标：在 `cmd/gs/main.go` 中跑通一个最小可用的解释器（同步子集 + 闭包 + 类型注解可选检查）。
+>
+> 注意：本文件保留了早期设计阶段的原始路线图。当前代码进度已经超过这里描述的 M0/M1 阶段，但 CLI、模块运行时、Resolver、TypeChecker 等仍未完成。后续执行请优先参考 [`development-plan.md`](development-plan.md)。
 
 ---
 

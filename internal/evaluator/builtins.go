@@ -30,13 +30,18 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 	env.Set("String", &object.Builtin{Name: "String", Fn: builtinString})
 	env.Set("Number", &object.Builtin{Name: "Number", Fn: builtinNumber})
 	env.Set("Boolean", &object.Builtin{Name: "Boolean", Fn: builtinBoolean})
+	env.Set("Error", &object.Builtin{Name: "Error", Fn: builtinError})
+	env.Set("TypeError", &object.Builtin{Name: "TypeError", Fn: builtinNamedError("TypeError")})
+	env.Set("RangeError", &object.Builtin{Name: "RangeError", Fn: builtinNamedError("RangeError")})
+	env.Set("ReferenceError", &object.Builtin{Name: "ReferenceError", Fn: builtinNamedError("ReferenceError")})
+	env.Set("SyntaxError", &object.Builtin{Name: "SyntaxError", Fn: builtinNamedError("SyntaxError")})
 	env.Set("parseInt", &object.Builtin{Name: "parseInt", Fn: builtinParseInt})
 	env.Set("parseFloat", &object.Builtin{Name: "parseFloat", Fn: builtinParseFloat})
 	env.Set("isNaN", &object.Builtin{Name: "isNaN", Fn: builtinIsNaN})
 	env.Set("isFinite", &object.Builtin{Name: "isFinite", Fn: builtinIsFinite})
 	env.Set("Math", &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
-			hashKey(&object.String{Value: "abs"}):   {Key: &object.String{Value: "abs"}, Value: &object.Builtin{Name: "Math.abs", Fn: builtinMathAbs}},
+			hashKey(&object.String{Value: "abs"}):    {Key: &object.String{Value: "abs"}, Value: &object.Builtin{Name: "Math.abs", Fn: builtinMathAbs}},
 			hashKey(&object.String{Value: "floor"}):  {Key: &object.String{Value: "floor"}, Value: &object.Builtin{Name: "Math.floor", Fn: builtinMathFloor}},
 			hashKey(&object.String{Value: "ceil"}):   {Key: &object.String{Value: "ceil"}, Value: &object.Builtin{Name: "Math.ceil", Fn: builtinMathCeil}},
 			hashKey(&object.String{Value: "round"}):  {Key: &object.String{Value: "round"}, Value: &object.Builtin{Name: "Math.round", Fn: builtinMathRound}},
@@ -147,6 +152,24 @@ func builtinBoolean(env *object.Environment, pos ast.Position, args ...object.Ob
 		return object.FALSE
 	}
 	return object.NativeBool(object.IsTruthy(args[0]))
+}
+
+func builtinError(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return newScriptError(pos, "Error", args...)
+}
+
+func builtinNamedError(name string) object.BuiltinFunc {
+	return func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		return newScriptError(pos, name, args...)
+	}
+}
+
+func newScriptError(pos ast.Position, name string, args ...object.Object) object.Object {
+	message := ""
+	if len(args) > 0 {
+		message = args[0].Inspect()
+	}
+	return object.NewNamedError(pos, name, message)
 }
 
 func builtinParseInt(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

@@ -3,12 +3,24 @@ package evaluator
 import (
 	"fmt"
 	"math"
-
 	"strings"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/object"
 )
+
+const (
+	breakSignal    = "__break__"
+	continueSignal = "__continue__"
+)
+
+type ImportFn func(env *object.Environment, path string) (object.Object, error)
+
+var importFn ImportFn
+
+func SetImportFunc(fn ImportFn) {
+	importFn = fn
+}
 
 func Eval(node ast.Node, env *object.Environment) object.Object {
 	switch n := node.(type) {
@@ -37,13 +49,23 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.ReturnStmt:
 		return evalReturn(n, env)
 	case *ast.BreakStmt:
-		return &object.ReturnValue{Value: &object.Error{Message: "break", Pos: n.Pos()}}
+		return &object.ReturnValue{Value: &object.Error{Message: breakSignal, Name: "SyntaxError", Pos: n.Pos(), Runtime: true}}
 	case *ast.ContinueStmt:
-		return &object.ReturnValue{Value: &object.Error{Message: "continue", Pos: n.Pos()}}
+		return &object.ReturnValue{Value: &object.Error{Message: continueSignal, Name: "SyntaxError", Pos: n.Pos(), Runtime: true}}
 	case *ast.ThrowStmt:
 		val := Eval(n.Value, env)
-		if object.IsError(val) {
+		if object.IsRuntimeError(val) {
 			return val
+		}
+		if err, ok := val.(*object.Error); ok {
+			err.Runtime = true
+			if err.Pos.IsZero() {
+				err.Pos = n.Pos()
+			}
+			if err.Stack == "" {
+				err.Stack = err.FormatStack()
+			}
+			return err
 		}
 		return object.NewError(n.Pos(), "%s", val.Inspect())
 	case *ast.TryStmt:
@@ -110,9 +132,10 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 	case *ast.MatchExpr:
 		return evalMatch(n, env)
 
-	// Import / Export (stub)
-	case *ast.ImportDecl, *ast.ExportDecl:
-		return object.UNDEFINED
+	case *ast.ImportDecl:
+		return evalImport(n, env)
+	case *ast.ExportDecl:
+		return evalExport(n, env)
 	}
 
 	return object.NewError(ast.Position{}, "unknown node type: %T", node)
@@ -127,9 +150,17 @@ func evalProgram(prog *ast.Program, env *object.Environment) object.Object {
 	for _, stmt := range prog.Body {
 		result = Eval(stmt, env)
 		if rv, ok := result.(*object.ReturnValue); ok {
+			if err, ok := rv.Value.(*object.Error); ok {
+				switch err.Message {
+				case breakSignal:
+					return object.NewError(err.Pos, "SyntaxError: break outside loop")
+				case continueSignal:
+					return object.NewError(err.Pos, "SyntaxError: continue outside loop")
+				}
+			}
 			return rv.Value
 		}
-		if object.IsError(result) {
+		if object.IsRuntimeError(result) {
 			return result
 		}
 	}
@@ -147,7 +178,7 @@ func evalLet(n *ast.LetStmt, env *object.Environment) object.Object {
 	var val object.Object = object.UNDEFINED
 	if n.Value != nil {
 		val = Eval(n.Value, env)
-		if object.IsError(val) {
+		if object.IsRuntimeError(val) {
 			return val
 		}
 	}
@@ -159,11 +190,11 @@ func evalConst(n *ast.ConstStmt, env *object.Environment) object.Object {
 	var val object.Object = object.UNDEFINED
 	if n.Value != nil {
 		val = Eval(n.Value, env)
-		if object.IsError(val) {
+		if object.IsRuntimeError(val) {
 			return val
 		}
 	}
-	env.Set(n.Name, val)
+	env.SetConst(n.Name, val)
 	return object.UNDEFINED
 }
 
@@ -171,7 +202,7 @@ func evalVar(n *ast.VarStmt, env *object.Environment) object.Object {
 	var val object.Object = object.UNDEFINED
 	if n.Value != nil {
 		val = Eval(n.Value, env)
-		if object.IsError(val) {
+		if object.IsRuntimeError(val) {
 			return val
 		}
 	}
@@ -190,7 +221,7 @@ func evalBlock(block *ast.BlockStmt, env *object.Environment) object.Object {
 		if result != nil && result.Type() == object.RETURN_OBJ {
 			return result
 		}
-		if object.IsError(result) {
+		if object.IsRuntimeError(result) {
 			return result
 		}
 	}
@@ -203,7 +234,7 @@ func evalBlock(block *ast.BlockStmt, env *object.Environment) object.Object {
 
 func evalIf(n *ast.IfStmt, env *object.Environment) object.Object {
 	cond := Eval(n.Cond, env)
-	if object.IsError(cond) {
+	if object.IsRuntimeError(cond) {
 		return cond
 	}
 	if object.IsTruthy(cond) {
@@ -219,7 +250,7 @@ func evalWhile(n *ast.WhileStmt, env *object.Environment) object.Object {
 	var result object.Object
 	for {
 		cond := Eval(n.Cond, env)
-		if object.IsError(cond) {
+		if object.IsRuntimeError(cond) {
 			return cond
 		}
 		if !object.IsTruthy(cond) {
@@ -227,9 +258,14 @@ func evalWhile(n *ast.WhileStmt, env *object.Environment) object.Object {
 		}
 		result = Eval(n.Body, env.NewScope())
 		if rv, ok := result.(*object.ReturnValue); ok {
+			if signal := controlSignal(rv); signal == breakSignal {
+				break
+			} else if signal == continueSignal {
+				continue
+			}
 			return rv
 		}
-		if object.IsError(result) {
+		if object.IsRuntimeError(result) {
 			return result
 		}
 	}
@@ -240,14 +276,14 @@ func evalFor(n *ast.ForStmt, env *object.Environment) object.Object {
 	scope := env.NewScope()
 	if n.Init != nil {
 		result := Eval(n.Init, scope)
-		if object.IsError(result) {
+		if object.IsRuntimeError(result) {
 			return result
 		}
 	}
 	for {
 		if n.Cond != nil {
 			cond := Eval(n.Cond, scope)
-			if object.IsError(cond) {
+			if object.IsRuntimeError(cond) {
 				return cond
 			}
 			if !object.IsTruthy(cond) {
@@ -256,9 +292,15 @@ func evalFor(n *ast.ForStmt, env *object.Environment) object.Object {
 		}
 		result := Eval(n.Body, scope.NewScope())
 		if rv, ok := result.(*object.ReturnValue); ok {
-			return rv
+			if signal := controlSignal(rv); signal == breakSignal {
+				break
+			} else if signal == continueSignal {
+				// continue to post expression below
+			} else {
+				return rv
+			}
 		}
-		if object.IsError(result) {
+		if object.IsRuntimeError(result) {
 			return result
 		}
 		if n.Post != nil {
@@ -270,7 +312,7 @@ func evalFor(n *ast.ForStmt, env *object.Environment) object.Object {
 
 func evalForIn(n *ast.ForInStmt, env *object.Environment) object.Object {
 	iterable := Eval(n.Iterable, env)
-	if object.IsError(iterable) {
+	if object.IsRuntimeError(iterable) {
 		return iterable
 	}
 	switch it := iterable.(type) {
@@ -280,9 +322,14 @@ func evalForIn(n *ast.ForInStmt, env *object.Environment) object.Object {
 			scope.Set(n.Name, &object.String{Value: fmt.Sprintf("%d", i)})
 			result := Eval(n.Body, scope.NewScope())
 			if rv, ok := result.(*object.ReturnValue); ok {
+				if signal := controlSignal(rv); signal == breakSignal {
+					break
+				} else if signal == continueSignal {
+					continue
+				}
 				return rv
 			}
-			if object.IsError(result) {
+			if object.IsRuntimeError(result) {
 				return result
 			}
 		}
@@ -292,9 +339,14 @@ func evalForIn(n *ast.ForInStmt, env *object.Environment) object.Object {
 			scope.Set(n.Name, pair.Key)
 			result := Eval(n.Body, scope.NewScope())
 			if rv, ok := result.(*object.ReturnValue); ok {
+				if signal := controlSignal(rv); signal == breakSignal {
+					break
+				} else if signal == continueSignal {
+					continue
+				}
 				return rv
 			}
-			if object.IsError(result) {
+			if object.IsRuntimeError(result) {
 				return result
 			}
 		}
@@ -304,9 +356,14 @@ func evalForIn(n *ast.ForInStmt, env *object.Environment) object.Object {
 			scope.Set(n.Name, &object.Number{Value: float64(i)})
 			result := Eval(n.Body, scope.NewScope())
 			if rv, ok := result.(*object.ReturnValue); ok {
+				if signal := controlSignal(rv); signal == breakSignal {
+					break
+				} else if signal == continueSignal {
+					continue
+				}
 				return rv
 			}
-			if object.IsError(result) {
+			if object.IsRuntimeError(result) {
 				return result
 			}
 		}
@@ -318,7 +375,7 @@ func evalForIn(n *ast.ForInStmt, env *object.Environment) object.Object {
 
 func evalForOf(n *ast.ForOfStmt, env *object.Environment) object.Object {
 	iterable := Eval(n.Iterable, env)
-	if object.IsError(iterable) {
+	if object.IsRuntimeError(iterable) {
 		return iterable
 	}
 	switch it := iterable.(type) {
@@ -328,9 +385,14 @@ func evalForOf(n *ast.ForOfStmt, env *object.Environment) object.Object {
 			scope.Set(n.Name, elem)
 			result := Eval(n.Body, scope.NewScope())
 			if rv, ok := result.(*object.ReturnValue); ok {
+				if signal := controlSignal(rv); signal == breakSignal {
+					break
+				} else if signal == continueSignal {
+					continue
+				}
 				return rv
 			}
-			if object.IsError(result) {
+			if object.IsRuntimeError(result) {
 				return result
 			}
 		}
@@ -340,9 +402,14 @@ func evalForOf(n *ast.ForOfStmt, env *object.Environment) object.Object {
 			scope.Set(n.Name, &object.String{Value: string(ch)})
 			result := Eval(n.Body, scope.NewScope())
 			if rv, ok := result.(*object.ReturnValue); ok {
+				if signal := controlSignal(rv); signal == breakSignal {
+					break
+				} else if signal == continueSignal {
+					continue
+				}
 				return rv
 			}
-			if object.IsError(result) {
+			if object.IsRuntimeError(result) {
 				return result
 			}
 		}
@@ -361,7 +428,7 @@ func evalReturn(n *ast.ReturnStmt, env *object.Environment) object.Object {
 		return &object.ReturnValue{Value: object.UNDEFINED}
 	}
 	val := Eval(n.Value, env)
-	if object.IsError(val) {
+	if object.IsRuntimeError(val) {
 		return val
 	}
 	return &object.ReturnValue{Value: val}
@@ -371,12 +438,26 @@ func evalLabeled(n *ast.LabeledStmt, env *object.Environment) object.Object {
 	result := Eval(n.Stmt, env)
 	if rv, ok := result.(*object.ReturnValue); ok {
 		if err, ok2 := rv.Value.(*object.Error); ok2 {
-			if err.Message == "break" || err.Message == "continue" {
+			if err.Message == breakSignal || err.Message == continueSignal {
 				return rv
 			}
 		}
 	}
 	return result
+}
+
+func controlSignal(rv *object.ReturnValue) string {
+	if rv == nil {
+		return ""
+	}
+	err, ok := rv.Value.(*object.Error)
+	if !ok {
+		return ""
+	}
+	if err.Message == breakSignal || err.Message == continueSignal {
+		return err.Message
+	}
+	return ""
 }
 
 // ============================================================================
@@ -385,10 +466,16 @@ func evalLabeled(n *ast.LabeledStmt, env *object.Environment) object.Object {
 
 func evalTry(n *ast.TryStmt, env *object.Environment) object.Object {
 	result := Eval(n.Block, env.NewScope())
-	if object.IsError(result) && n.Catch != nil {
+	if object.IsRuntimeError(result) && n.Catch != nil {
 		scope := env.NewScope()
 		if n.Catch.Name != "" {
-			scope.Set(n.Catch.Name, result)
+			if err, ok := result.(*object.Error); ok {
+				caught := *err
+				caught.Runtime = false
+				scope.Set(n.Catch.Name, &caught)
+			} else {
+				scope.Set(n.Catch.Name, result)
+			}
 		}
 		result = Eval(n.Catch.Body, scope)
 	}
@@ -396,6 +483,140 @@ func evalTry(n *ast.TryStmt, env *object.Environment) object.Object {
 		Eval(n.Finalizer, env.NewScope())
 	}
 	return result
+}
+
+// ============================================================================
+// Import / Export
+// ============================================================================
+
+func evalImport(n *ast.ImportDecl, env *object.Environment) object.Object {
+	if importFn == nil {
+		return object.NewError(n.Pos(), "ImportError: module loader is not configured")
+	}
+
+	exports, err := importFn(env, unquoteModulePath(n.Source))
+	if err != nil {
+		return object.NewError(n.Pos(), "ImportError: %v", err)
+	}
+
+	if n.Namespace != "" {
+		env.Set(n.Namespace, exports)
+	}
+	if n.Default != "" {
+		value := getExport(exports, "default")
+		if value == object.UNDEFINED {
+			return object.NewError(n.Pos(), "ImportError: module %s has no default export", n.Source)
+		}
+		env.Set(n.Default, value)
+	}
+	for _, name := range n.Names {
+		value := getExport(exports, name)
+		if value == object.UNDEFINED {
+			return object.NewError(n.Pos(), "ImportError: module %s has no export %s", n.Source, name)
+		}
+		env.Set(name, value)
+	}
+	for exported, local := range n.Aliases {
+		value := getExport(exports, exported)
+		if value == object.UNDEFINED {
+			return object.NewError(n.Pos(), "ImportError: module %s has no export %s", n.Source, exported)
+		}
+		env.Set(local, value)
+	}
+	return object.UNDEFINED
+}
+
+func evalExport(n *ast.ExportDecl, env *object.Environment) object.Object {
+	if len(n.Specifiers) > 0 {
+		for _, spec := range n.Specifiers {
+			value, ok := env.Get(spec.Name)
+			if !ok {
+				return object.NewError(n.Pos(), "ExportError: %s was not defined", spec.Name)
+			}
+			setExport(env, spec.Alias, value)
+		}
+		return object.UNDEFINED
+	}
+	if n.Decl == nil {
+		return object.UNDEFINED
+	}
+
+	if n.IsDefault {
+		stmt, ok := n.Decl.(*ast.ExprStmt)
+		if !ok {
+			return object.NewError(n.Pos(), "ExportError: default export must be an expression")
+		}
+		value := Eval(stmt.Expr, env)
+		if object.IsRuntimeError(value) {
+			return value
+		}
+		setExport(env, "default", value)
+		return value
+	}
+
+	result := Eval(n.Decl, env)
+	if object.IsRuntimeError(result) {
+		return result
+	}
+	for _, name := range exportedNames(n.Decl) {
+		value, ok := env.Get(name)
+		if !ok {
+			return object.NewError(n.Pos(), "ExportError: %s was not defined", name)
+		}
+		setExport(env, name, value)
+	}
+	return result
+}
+
+func exportedNames(stmt ast.Statement) []string {
+	switch s := stmt.(type) {
+	case *ast.LetStmt:
+		return []string{s.Name}
+	case *ast.ConstStmt:
+		return []string{s.Name}
+	case *ast.VarStmt:
+		return []string{s.Name}
+	case *ast.FuncDecl:
+		return []string{s.Name}
+	case *ast.ClassDecl:
+		return []string{s.Name}
+	default:
+		return nil
+	}
+}
+
+func setExport(env *object.Environment, name string, value object.Object) {
+	exportsObj, ok := env.Get("exports")
+	if !ok {
+		return
+	}
+	if exports, ok := exportsObj.(*object.Hash); ok {
+		key := &object.String{Value: name}
+		exports.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: value}
+	}
+}
+
+func getExport(exports object.Object, name string) object.Object {
+	hash, ok := exports.(*object.Hash)
+	if !ok {
+		return object.UNDEFINED
+	}
+	key := &object.String{Value: name}
+	if pair, ok := hash.Pairs[hashKey(key)]; ok {
+		return pair.Value
+	}
+	return object.UNDEFINED
+}
+
+func unquoteModulePath(path string) string {
+	if len(path) >= 2 {
+		first := path[0]
+		last := path[len(path)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return path[1 : len(path)-1]
+		}
+	}
+	return path
 }
 
 // ============================================================================
@@ -559,7 +780,7 @@ func evalArray(n *ast.ArrayLit, env *object.Environment) object.Object {
 	elems := make([]object.Object, len(n.Elements))
 	for i, e := range n.Elements {
 		val := Eval(e, env)
-		if object.IsError(val) {
+		if object.IsRuntimeError(val) {
 			return val
 		}
 		elems[i] = val
@@ -583,18 +804,18 @@ func evalObject(n *ast.ObjectLit, env *object.Environment) object.Object {
 			name := p.Key.(*ast.Ident).TokenLit
 			key := &object.String{Value: name}
 			val := Eval(p.Value, env)
-			if object.IsError(val) {
+			if object.IsRuntimeError(val) {
 				return val
 			}
 			hash.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: val}
 			continue
 		}
 		key := evalPropertyKey(p.Key, env)
-		if object.IsError(key) {
+		if object.IsRuntimeError(key) {
 			return key
 		}
 		val := Eval(p.Value, env)
-		if object.IsError(val) {
+		if object.IsRuntimeError(val) {
 			return val
 		}
 		hash.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: val}
@@ -608,7 +829,7 @@ func evalObject(n *ast.ObjectLit, env *object.Environment) object.Object {
 
 func evalPrefix(n *ast.PrefixExpr, env *object.Environment) object.Object {
 	right := Eval(n.Right, env)
-	if object.IsError(right) {
+	if object.IsRuntimeError(right) {
 		return right
 	}
 	switch n.Op {
@@ -639,11 +860,11 @@ func evalPrefix(n *ast.PrefixExpr, env *object.Environment) object.Object {
 
 func evalInfix(n *ast.InfixExpr, env *object.Environment) object.Object {
 	left := Eval(n.Left, env)
-	if object.IsError(left) {
+	if object.IsRuntimeError(left) {
 		return left
 	}
 	right := Eval(n.Right, env)
-	if object.IsError(right) {
+	if object.IsRuntimeError(right) {
 		return right
 	}
 
@@ -780,7 +1001,7 @@ func evalCompare(left, right object.Object, op string, pos ast.Position) object.
 
 func evalTernary(n *ast.TernaryExpr, env *object.Environment) object.Object {
 	cond := Eval(n.Cond, env)
-	if object.IsError(cond) {
+	if object.IsRuntimeError(cond) {
 		return cond
 	}
 	if object.IsTruthy(cond) {
@@ -791,23 +1012,31 @@ func evalTernary(n *ast.TernaryExpr, env *object.Environment) object.Object {
 
 func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 	right := Eval(n.Right, env)
-	if object.IsError(right) {
+	if object.IsRuntimeError(right) {
 		return right
 	}
 	switch left := n.Left.(type) {
 	case *ast.Ident:
 		if n.Op == "=" {
-			env.SetUp(left.TokenLit, right)
+			if _, ok, isConst := env.Assign(left.TokenLit, right); !ok {
+				return object.NewError(left.Pos(), "ReferenceError: '%s' is not defined", left.TokenLit)
+			} else if isConst {
+				return object.NewError(left.Pos(), "TypeError: assignment to constant '%s'", left.TokenLit)
+			}
 		} else {
 			existing, ok := env.Get(left.TokenLit)
 			if !ok {
 				return object.NewError(left.Pos(), "ReferenceError: '%s' is not defined", left.TokenLit)
 			}
 			right = evalCompoundAssign(existing, right, n.Op, n.Pos())
-			if object.IsError(right) {
+			if object.IsRuntimeError(right) {
 				return right
 			}
-			env.Set(left.TokenLit, right)
+			if _, ok, isConst := env.Assign(left.TokenLit, right); !ok {
+				return object.NewError(left.Pos(), "ReferenceError: '%s' is not defined", left.TokenLit)
+			} else if isConst {
+				return object.NewError(left.Pos(), "TypeError: assignment to constant '%s'", left.TokenLit)
+			}
 		}
 		return right
 	case *ast.MemberExpr:
@@ -882,13 +1111,13 @@ func evalCompoundAssign(left, right object.Object, op string, pos ast.Position) 
 
 func evalCall(n *ast.CallExpr, env *object.Environment) object.Object {
 	callee := Eval(n.Callee, env)
-	if object.IsError(callee) {
+	if object.IsRuntimeError(callee) {
 		return callee
 	}
 	args := make([]object.Object, len(n.Args))
 	for i, a := range n.Args {
 		args[i] = Eval(a, env)
-		if object.IsError(args[i]) {
+		if object.IsRuntimeError(args[i]) {
 			return args[i]
 		}
 	}
@@ -922,6 +1151,8 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 				result := Eval(f.Body, scope)
 				if rv, ok := result.(*object.ReturnValue); ok {
 					promise.Resolve(rv.Value)
+				} else if object.IsRuntimeError(result) {
+					promise.Reject(result)
 				} else {
 					promise.Resolve(result)
 				}
@@ -938,6 +1169,11 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 		result := f.Fn(env, pos, args...)
 		env.Extra = nil
 		return result
+	case *object.Hash:
+		if promiseConstructor, ok := getHashKey(f, &object.String{Value: "__promiseConstructor"}).(*object.Boolean); ok && promiseConstructor.Value {
+			return constructPromise(env, args, pos)
+		}
+		return object.NewError(pos, "TypeError: object is not a function")
 	case *object.Class:
 		inst := &object.Instance{Class: f, Props: make(map[string]object.Object), Pos: pos}
 		for k, v := range f.Fields {
@@ -973,7 +1209,7 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 
 func evalMember(n *ast.MemberExpr, env *object.Environment) object.Object {
 	obj := Eval(n.Object, env)
-	if object.IsError(obj) {
+	if object.IsRuntimeError(obj) {
 		return obj
 	}
 	prop := n.Property.(*ast.Ident).TokenLit
@@ -982,11 +1218,11 @@ func evalMember(n *ast.MemberExpr, env *object.Environment) object.Object {
 
 func evalIndex(n *ast.IndexExpr, env *object.Environment) object.Object {
 	left := Eval(n.Left, env)
-	if object.IsError(left) {
+	if object.IsRuntimeError(left) {
 		return left
 	}
 	idx := Eval(n.Index, env)
-	if object.IsError(idx) {
+	if object.IsRuntimeError(idx) {
 		return idx
 	}
 	switch l := left.(type) {
@@ -1071,6 +1307,24 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 			return m
 		}
 		return object.NewError(pos, "TypeError: '%s' is not a static member of %s", name, o.Name)
+	case *object.Error:
+		switch name {
+		case "name":
+			errName := o.Name
+			if errName == "" {
+				errName = "Error"
+			}
+			return &object.String{Value: errName}
+		case "message":
+			return &object.String{Value: o.Message}
+		case "stack":
+			stack := o.Stack
+			if stack == "" {
+				stack = o.FormatStack()
+			}
+			return &object.String{Value: stack}
+		}
+		return object.UNDEFINED
 	case *object.String:
 		switch name {
 		case "length":
@@ -1088,6 +1342,10 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 			if fn, ok := arrayMethods[name]; ok {
 				return &object.Builtin{Name: "Array." + name, Fn: fn, Extra: o}
 			}
+		}
+	case *object.Promise:
+		if fn, ok := promiseMethods[name]; ok {
+			return &object.Builtin{Name: "Promise." + name, Fn: fn, Extra: o}
 		}
 	}
 	return object.NewError(pos, "TypeError: cannot read property '%s' of %s", name, obj.Type())
@@ -1160,7 +1418,7 @@ func evalArrowFunc(n *ast.ArrowFuncExpr, env *object.Environment) object.Object 
 
 func evalNew(n *ast.NewExpr, env *object.Environment) object.Object {
 	callee := Eval(n.Callee, env)
-	if object.IsError(callee) {
+	if object.IsRuntimeError(callee) {
 		return callee
 	}
 	args := make([]object.Object, len(n.Args))
@@ -1177,7 +1435,21 @@ func evalNew(n *ast.NewExpr, env *object.Environment) object.Object {
 func evalAwait(n *ast.AwaitExpr, env *object.Environment) object.Object {
 	val := Eval(n.Value, env)
 	if promise, ok := val.(*object.Promise); ok {
-		return promise.Wait()
+		result := promise.Wait()
+		if promise.State() == object.PROMISE_REJECTED {
+			if err, ok := result.(*object.Error); ok {
+				err.Runtime = true
+				if err.Pos.IsZero() {
+					err.Pos = n.Pos()
+				}
+				if err.Stack == "" {
+					err.Stack = err.FormatStack()
+				}
+				return err
+			}
+			return object.NewError(n.Pos(), "%s", result.Inspect())
+		}
+		return result
 	}
 	return val
 }
@@ -1188,7 +1460,7 @@ func evalAwait(n *ast.AwaitExpr, env *object.Environment) object.Object {
 
 func evalMatch(n *ast.MatchExpr, env *object.Environment) object.Object {
 	subject := Eval(n.Expr, env)
-	if object.IsError(subject) {
+	if object.IsRuntimeError(subject) {
 		return subject
 	}
 	for _, arm := range n.Arms {

@@ -30,14 +30,54 @@ func Go(fn func()) {
 func registerAsync(env *object.Environment) {
 	env.Set("Promise", &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
-			hk("resolve"): {Key: &object.String{Value: "resolve"}, Value: &object.Builtin{Name: "Promise.resolve", Fn: builtinPromiseResolve}},
-			hk("reject"):  {Key: &object.String{Value: "reject"}, Value: &object.Builtin{Name: "Promise.reject", Fn: builtinPromiseReject}},
-			hk("all"):     {Key: &object.String{Value: "all"}, Value: &object.Builtin{Name: "Promise.all", Fn: builtinPromiseAll}},
+			hk("__promiseConstructor"): {Key: &object.String{Value: "__promiseConstructor"}, Value: object.TRUE},
+			hk("resolve"):              {Key: &object.String{Value: "resolve"}, Value: &object.Builtin{Name: "Promise.resolve", Fn: builtinPromiseResolve}},
+			hk("reject"):               {Key: &object.String{Value: "reject"}, Value: &object.Builtin{Name: "Promise.reject", Fn: builtinPromiseReject}},
+			hk("all"):                  {Key: &object.String{Value: "all"}, Value: &object.Builtin{Name: "Promise.all", Fn: builtinPromiseAll}},
 		},
 	})
 	env.Set("setTimeout", &object.Builtin{Name: "setTimeout", Fn: builtinSetTimeout})
 	env.Set("setInterval", &object.Builtin{Name: "setInterval", Fn: builtinSetInterval})
 	env.Set("sleep", &object.Builtin{Name: "sleep", Fn: builtinSleep})
+}
+
+func constructPromise(env *object.Environment, args []object.Object, pos ast.Position) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "TypeError: Promise constructor requires an executor function")
+	}
+	executor, ok := args[0].(*object.Function)
+	if !ok {
+		return object.NewError(pos, "TypeError: Promise executor must be a function")
+	}
+	promise := object.NewPromise()
+	resolve := &object.Builtin{Name: "Promise.resolveExecutor", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		var value object.Object = object.UNDEFINED
+		if len(args) > 0 {
+			value = args[0]
+		}
+		if nested, ok := value.(*object.Promise); ok {
+			value = nested.Wait()
+			if nested.State() == object.PROMISE_REJECTED {
+				promise.Reject(value)
+				return object.UNDEFINED
+			}
+		}
+		promise.Resolve(value)
+		return object.UNDEFINED
+	}}
+	reject := &object.Builtin{Name: "Promise.rejectExecutor", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		var reason object.Object = object.UNDEFINED
+		if len(args) > 0 {
+			reason = args[0]
+		}
+		promise.Reject(reason)
+		return object.UNDEFINED
+	}}
+	result := applyFunction(executor, env, []object.Object{resolve, reject}, pos)
+	if object.IsRuntimeError(result) {
+		promise.Reject(result)
+	}
+	return promise
 }
 
 func builtinPromiseResolve(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

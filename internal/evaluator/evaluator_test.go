@@ -405,6 +405,180 @@ func TestEval_StringMethods(t *testing.T) {
 	}
 }
 
+func TestEval_ConstCannotBeReassigned(t *testing.T) {
+	evaluated := testEval(`const x = 1; x = 2;`)
+	err, ok := evaluated.(*object.Error)
+	if !ok {
+		t.Fatalf("want error, got %T", evaluated)
+	}
+	if !strings.Contains(err.Message, "assignment to constant") {
+		t.Fatalf("unexpected error: %s", err.Inspect())
+	}
+}
+
+func TestEval_AssignUndeclaredFails(t *testing.T) {
+	evaluated := testEval(`x = 1;`)
+	err, ok := evaluated.(*object.Error)
+	if !ok {
+		t.Fatalf("want error, got %T", evaluated)
+	}
+	if err.Name != "ReferenceError" {
+		t.Fatalf("unexpected error: %s", err.Inspect())
+	}
+}
+
+func TestEval_BreakAndContinueInLoops(t *testing.T) {
+	input := `
+let sum = 0;
+let i = 0;
+while (i < 6) {
+  i = i + 1;
+  if (i === 1) { continue; }
+  if (i === 5) { break; }
+  sum = sum + i;
+}
+sum;
+`
+	evaluated := testEval(input)
+	testNumber(t, evaluated, "9")
+}
+
+func TestEval_BreakOutsideLoopFails(t *testing.T) {
+	evaluated := testEval(`break;`)
+	err, ok := evaluated.(*object.Error)
+	if !ok {
+		t.Fatalf("want error, got %T", evaluated)
+	}
+	if !strings.Contains(err.Message, "break outside loop") {
+		t.Fatalf("unexpected error: %s", err.Inspect())
+	}
+}
+
+func TestEval_ContinueOutsideLoopFails(t *testing.T) {
+	evaluated := testEval(`continue;`)
+	err, ok := evaluated.(*object.Error)
+	if !ok {
+		t.Fatalf("want error, got %T", evaluated)
+	}
+	if !strings.Contains(err.Message, "continue outside loop") {
+		t.Fatalf("unexpected error: %s", err.Inspect())
+	}
+}
+
+func TestEval_ErrorObjectFields(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{`let e = new Error("boom"); e.name;`, "Error"},
+		{`let e = new Error("boom"); e.message;`, "boom"},
+		{`let e = new TypeError("bad"); e.name;`, "TypeError"},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testString(t, evaluated, tt.expected)
+	}
+}
+
+func TestEval_ErrorObjectStack(t *testing.T) {
+	evaluated := testEval(`let e = new SyntaxError("bad syntax"); e.stack;`)
+	stack, ok := evaluated.(*object.String)
+	if !ok {
+		t.Fatalf("want stack string, got %T", evaluated)
+	}
+	if !strings.Contains(stack.Value, "SyntaxError: bad syntax") {
+		t.Fatalf("unexpected stack: %q", stack.Value)
+	}
+}
+
+func TestEval_ThrowScriptErrorCatchFields(t *testing.T) {
+	input := `
+try {
+  throw new TypeError("bad input");
+} catch (e) {
+  e.name + ":" + e.message;
+}
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "TypeError:bad input")
+}
+
+func TestEval_RuntimeErrorHasNameAndStack(t *testing.T) {
+	evaluated := testEval(`missingValue;`)
+	err, ok := evaluated.(*object.Error)
+	if !ok {
+		t.Fatalf("want runtime error, got %T", evaluated)
+	}
+	if err.Name != "ReferenceError" {
+		t.Fatalf("want ReferenceError, got %q", err.Name)
+	}
+	if !strings.Contains(err.Stack, "ReferenceError") {
+		t.Fatalf("stack should include error name, got %q", err.Stack)
+	}
+}
+
+func TestEval_PromiseConstructorThenCatchFinally(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{`new Promise(function(resolve, reject) { resolve(2); }).then(function(x) { return x + 3; });`, "5"},
+		{`Promise.reject(new TypeError("bad")).catch(function(e) { return e.name + ":" + e.message; });`, "TypeError:bad"},
+		{`let done = false; Promise.resolve(1).finally(function() { done = true; }).then(function(x) { return done ? x + 1 : 0; });`, "2"},
+	}
+
+	for _, tt := range tests {
+		evaluated := waitIfPromise(testEval(tt.input))
+		testStringOrNumber(t, evaluated, tt.expected)
+	}
+}
+
+func TestEval_AsyncRuntimeErrorRejectsPromise(t *testing.T) {
+	input := `
+async function fail() {
+  throw new TypeError("bad async");
+}
+let handle = function(e) { return e.name + ":" + e.message; };
+fail().catch(handle);
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "TypeError:bad async")
+}
+
+func TestEval_AwaitRejectedPromiseCanBeCaught(t *testing.T) {
+	input := `
+async function main() {
+  try {
+    await Promise.reject(new ReferenceError("missing"));
+    return "no";
+  } catch (e) {
+    return e.name + ":" + e.message;
+  }
+}
+main();
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "ReferenceError:missing")
+}
+
+func TestEval_PromiseThenPropagatesReturnedRejection(t *testing.T) {
+	input := `
+Promise.resolve(1)
+  .then(function(x) { return Promise.reject(new Error("nested")); })
+  .catch(function(e) { return e.message; });
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "nested")
+}
+
+func waitIfPromise(obj object.Object) object.Object {
+	if promise, ok := obj.(*object.Promise); ok {
+		return promise.Wait()
+	}
+	return obj
+}
+
 func testStringOrNumOrBool(t *testing.T, obj object.Object, expected string) {
 	t.Helper()
 	if err, ok := obj.(*object.Error); ok {

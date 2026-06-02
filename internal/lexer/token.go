@@ -20,45 +20,45 @@ const (
 	TOKEN_TEMPLATE TokenType = "TEMPLATE"
 
 	// --- Keywords ---
-	TOKEN_LET       TokenType = "LET"       // let
-	TOKEN_CONST     TokenType = "CONST"     // const
-	TOKEN_VAR       TokenType = "VAR"       // var
-	TOKEN_FUNCTION  TokenType = "FUNCTION"  // function
-	TOKEN_CLASS     TokenType = "CLASS"     // class
-	TOKEN_EXTENDS   TokenType = "EXTENDS"   // extends
-	TOKEN_IF        TokenType = "IF"        // if
-	TOKEN_ELSE      TokenType = "ELSE"      // else
-	TOKEN_WHILE     TokenType = "WHILE"     // while
-	TOKEN_FOR       TokenType = "FOR"       // for
-	TOKEN_IN        TokenType = "IN"        // in
-	TOKEN_OF        TokenType = "OF"        // of
-	TOKEN_RETURN    TokenType = "RETURN"    // return
-	TOKEN_BREAK     TokenType = "BREAK"     // break
-	TOKEN_CONTINUE  TokenType = "CONTINUE"  // continue
-	TOKEN_TRUE      TokenType = "TRUE"      // true
-	TOKEN_FALSE     TokenType = "FALSE"     // false
-	TOKEN_NULL      TokenType = "NULL"      // null
-	TOKEN_UNDEFINED TokenType = "UNDEFINED" // undefined
-	TOKEN_NEW       TokenType = "NEW"       // new
-	TOKEN_THIS      TokenType = "THIS"      // this
-	TOKEN_SUPER     TokenType = "SUPER"     // super
-	TOKEN_TRY       TokenType = "TRY"       // try
-	TOKEN_CATCH     TokenType = "CATCH"     // catch
-	TOKEN_FINALLY   TokenType = "FINALLY"   // finally
-	TOKEN_THROW     TokenType = "THROW"     // throw
-	TOKEN_ASYNC     TokenType = "ASYNC"     // async
-	TOKEN_AWAIT     TokenType = "AWAIT"     // await
-	TOKEN_IMPORT    TokenType = "IMPORT"    // import
-	TOKEN_EXPORT    TokenType = "EXPORT"    // export
-	TOKEN_FROM      TokenType = "FROM"      // from
-	TOKEN_AS        TokenType = "AS"        // as
-	TOKEN_DELETE    TokenType = "DELETE"    // delete
-	TOKEN_TYPEOF    TokenType = "TYPEOF"    // typeof
+	TOKEN_LET        TokenType = "LET"        // let
+	TOKEN_CONST      TokenType = "CONST"      // const
+	TOKEN_VAR        TokenType = "VAR"        // var
+	TOKEN_FUNCTION   TokenType = "FUNCTION"   // function
+	TOKEN_CLASS      TokenType = "CLASS"      // class
+	TOKEN_EXTENDS    TokenType = "EXTENDS"    // extends
+	TOKEN_IF         TokenType = "IF"         // if
+	TOKEN_ELSE       TokenType = "ELSE"       // else
+	TOKEN_WHILE      TokenType = "WHILE"      // while
+	TOKEN_FOR        TokenType = "FOR"        // for
+	TOKEN_IN         TokenType = "IN"         // in
+	TOKEN_OF         TokenType = "OF"         // of
+	TOKEN_RETURN     TokenType = "RETURN"     // return
+	TOKEN_BREAK      TokenType = "BREAK"      // break
+	TOKEN_CONTINUE   TokenType = "CONTINUE"   // continue
+	TOKEN_TRUE       TokenType = "TRUE"       // true
+	TOKEN_FALSE      TokenType = "FALSE"      // false
+	TOKEN_NULL       TokenType = "NULL"       // null
+	TOKEN_UNDEFINED  TokenType = "UNDEFINED"  // undefined
+	TOKEN_NEW        TokenType = "NEW"        // new
+	TOKEN_THIS       TokenType = "THIS"       // this
+	TOKEN_SUPER      TokenType = "SUPER"      // super
+	TOKEN_TRY        TokenType = "TRY"        // try
+	TOKEN_CATCH      TokenType = "CATCH"      // catch
+	TOKEN_FINALLY    TokenType = "FINALLY"    // finally
+	TOKEN_THROW      TokenType = "THROW"      // throw
+	TOKEN_ASYNC      TokenType = "ASYNC"      // async
+	TOKEN_AWAIT      TokenType = "AWAIT"      // await
+	TOKEN_IMPORT     TokenType = "IMPORT"     // import
+	TOKEN_EXPORT     TokenType = "EXPORT"     // export
+	TOKEN_FROM       TokenType = "FROM"       // from
+	TOKEN_AS         TokenType = "AS"         // as
+	TOKEN_DELETE     TokenType = "DELETE"     // delete
+	TOKEN_TYPEOF     TokenType = "TYPEOF"     // typeof
 	TOKEN_INSTANCEOF TokenType = "INSTANCEOF" // instanceof
-	TOKEN_VOID      TokenType = "VOID"      // void
-	TOKEN_STATIC    TokenType = "STATIC"    // static
-	TOKEN_MATCH     TokenType = "MATCH"     // match
-	TOKEN_DEFAULT   TokenType = "DEFAULT"   // (reserved, not implemented)
+	TOKEN_VOID       TokenType = "VOID"       // void
+	TOKEN_STATIC     TokenType = "STATIC"     // static
+	TOKEN_MATCH      TokenType = "MATCH"      // match
+	TOKEN_DEFAULT    TokenType = "DEFAULT"    // (reserved, not implemented)
 
 	// --- Single-character operators ---
 	TOKEN_PLUS     TokenType = "PLUS"     // +
@@ -76,24 +76,24 @@ const (
 	TOKEN_DOT      TokenType = "DOT"      // .
 
 	// --- Multi-character operators ---
-	TOKEN_PLUS_PLUS  TokenType = "PLUS_PLUS"   // ++
+	TOKEN_PLUS_PLUS   TokenType = "PLUS_PLUS"   // ++
 	TOKEN_MINUS_MINUS TokenType = "MINUS_MINUS" // --
-	TOKEN_POW        TokenType = "POW"        // **
-	TOKEN_EQ         TokenType = "EQ"         // =
-	TOKEN_EQ_EQ_EQ   TokenType = "EQ_EQ_EQ"   // ===
-	TOKEN_NEQ_EQ     TokenType = "NEQ_EQ"     // !==
-	TOKEN_LT         TokenType = "LT"         // <
-	TOKEN_LT_EQ      TokenType = "LT_EQ"      // <=
-	TOKEN_GT         TokenType = "GT"         // >
-	TOKEN_GT_EQ      TokenType = "GT_EQ"      // >=
-	TOKEN_AND_AND    TokenType = "AND_AND"    // &&
-	TOKEN_OR_OR      TokenType = "OR_OR"      // ||
-	TOKEN_QM_QM      TokenType = "QM_QM"      // ??
-	TOKEN_ARROW      TokenType = "ARROW"      // =>
-	TOKEN_ELLIPSIS   TokenType = "ELLIPSIS"   // ...
-	TOKEN_DOT_DOT    TokenType = "DOT_DOT"    // ..
-	TOKEN_DOT_DOT_EQ TokenType = "DOT_DOT_EQ" // ..=
-	TOKEN_QM_DOT     TokenType = "QM_DOT"     // ?.
+	TOKEN_POW         TokenType = "POW"         // **
+	TOKEN_EQ          TokenType = "EQ"          // =
+	TOKEN_EQ_EQ_EQ    TokenType = "EQ_EQ_EQ"    // ===
+	TOKEN_NEQ_EQ      TokenType = "NEQ_EQ"      // !==
+	TOKEN_LT          TokenType = "LT"          // <
+	TOKEN_LT_EQ       TokenType = "LT_EQ"       // <=
+	TOKEN_GT          TokenType = "GT"          // >
+	TOKEN_GT_EQ       TokenType = "GT_EQ"       // >=
+	TOKEN_AND_AND     TokenType = "AND_AND"     // &&
+	TOKEN_OR_OR       TokenType = "OR_OR"       // ||
+	TOKEN_QM_QM       TokenType = "QM_QM"       // ??
+	TOKEN_ARROW       TokenType = "ARROW"       // =>
+	TOKEN_ELLIPSIS    TokenType = "ELLIPSIS"    // ...
+	TOKEN_DOT_DOT     TokenType = "DOT_DOT"     // ..
+	TOKEN_DOT_DOT_EQ  TokenType = "DOT_DOT_EQ"  // ..=
+	TOKEN_QM_DOT      TokenType = "QM_DOT"      // ?.
 
 	// --- Compound assignment ---
 	TOKEN_PLUS_EQ    TokenType = "PLUS_EQ"
@@ -102,9 +102,9 @@ const (
 	TOKEN_SLASH_EQ   TokenType = "SLASH_EQ"
 	TOKEN_PERCENT_EQ TokenType = "PERCENT_EQ"
 	TOKEN_POW_EQ     TokenType = "POW_EQ"
-	TOKEN_LSHIFT     TokenType = "LSHIFT"     // <<
-	TOKEN_RSHIFT     TokenType = "RSHIFT"     // >>
-	TOKEN_URSHIFT    TokenType = "URSHIFT"    // >>>
+	TOKEN_LSHIFT     TokenType = "LSHIFT"  // <<
+	TOKEN_RSHIFT     TokenType = "RSHIFT"  // >>
+	TOKEN_URSHIFT    TokenType = "URSHIFT" // >>>
 	TOKEN_LSHIFT_EQ  TokenType = "LSHIFT_EQ"
 	TOKEN_RSHIFT_EQ  TokenType = "RSHIFT_EQ"
 	TOKEN_URSHIFT_EQ TokenType = "URSHIFT_EQ"
@@ -166,6 +166,7 @@ var keywords = map[string]TokenType{
 	"void":       TOKEN_VOID,
 	"static":     TOKEN_STATIC,
 	"match":      TOKEN_MATCH,
+	"default":    TOKEN_DEFAULT,
 }
 
 func LookupIdent(ident string) TokenType {
@@ -185,7 +186,7 @@ func IsKeyword(t TokenType) bool {
 		TOKEN_FINALLY, TOKEN_THROW, TOKEN_ASYNC, TOKEN_AWAIT,
 		TOKEN_IMPORT, TOKEN_EXPORT, TOKEN_FROM, TOKEN_AS,
 		TOKEN_DELETE, TOKEN_TYPEOF, TOKEN_INSTANCEOF, TOKEN_VOID,
-		TOKEN_STATIC, TOKEN_MATCH:
+		TOKEN_STATIC, TOKEN_MATCH, TOKEN_DEFAULT:
 		return true
 	}
 	return false

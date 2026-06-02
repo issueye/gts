@@ -24,7 +24,7 @@ type LetStmt struct {
 	Value    Expression
 }
 
-func (ls *LetStmt) statementNode()      {}
+func (ls *LetStmt) statementNode()       {}
 func (ls *LetStmt) TokenLiteral() string { return ls.TokenLit }
 func (ls *LetStmt) Pos() Position        { return ls.Pos_ }
 
@@ -37,7 +37,7 @@ type ConstStmt struct {
 	Value    Expression
 }
 
-func (cs *ConstStmt) statementNode()      {}
+func (cs *ConstStmt) statementNode()       {}
 func (cs *ConstStmt) TokenLiteral() string { return cs.TokenLit }
 func (cs *ConstStmt) Pos() Position        { return cs.Pos_ }
 
@@ -50,7 +50,7 @@ type VarStmt struct {
 	Value    Expression
 }
 
-func (vs *VarStmt) statementNode()      {}
+func (vs *VarStmt) statementNode()       {}
 func (vs *VarStmt) TokenLiteral() string { return vs.TokenLit }
 func (vs *VarStmt) Pos() Position        { return vs.Pos_ }
 
@@ -65,8 +65,8 @@ type FuncDecl struct {
 	IsAsync  bool
 }
 
-func (fd *FuncDecl) statementNode()      {}
-func (fd *FuncDecl) expressionNode()     {}
+func (fd *FuncDecl) statementNode()       {}
+func (fd *FuncDecl) expressionNode()      {}
 func (fd *FuncDecl) TokenLiteral() string { return fd.TokenLit }
 func (fd *FuncDecl) Pos() Position        { return fd.Pos_ }
 
@@ -86,7 +86,7 @@ type BlockStmt struct {
 	Statements []Statement
 }
 
-func (bs *BlockStmt) statementNode()      {}
+func (bs *BlockStmt) statementNode()       {}
 func (bs *BlockStmt) TokenLiteral() string { return bs.TokenLit }
 func (bs *BlockStmt) Pos() Position        { return bs.Pos_ }
 
@@ -99,7 +99,7 @@ type IfStmt struct {
 	Alternative Statement
 }
 
-func (is *IfStmt) statementNode()      {}
+func (is *IfStmt) statementNode()       {}
 func (is *IfStmt) TokenLiteral() string { return is.TokenLit }
 func (is *IfStmt) Pos() Position        { return is.Pos_ }
 
@@ -111,7 +111,7 @@ type WhileStmt struct {
 	Body     *BlockStmt
 }
 
-func (ws *WhileStmt) statementNode()      {}
+func (ws *WhileStmt) statementNode()       {}
 func (ws *WhileStmt) TokenLiteral() string { return ws.TokenLit }
 func (ws *WhileStmt) Pos() Position        { return ws.Pos_ }
 
@@ -125,7 +125,7 @@ type ForStmt struct {
 	Body     *BlockStmt
 }
 
-func (fs *ForStmt) statementNode()      {}
+func (fs *ForStmt) statementNode()       {}
 func (fs *ForStmt) TokenLiteral() string { return fs.TokenLit }
 func (fs *ForStmt) Pos() Position        { return fs.Pos_ }
 
@@ -138,7 +138,7 @@ type ForInStmt struct {
 	Body     *BlockStmt
 }
 
-func (fs *ForInStmt) statementNode()      {}
+func (fs *ForInStmt) statementNode()       {}
 func (fs *ForInStmt) TokenLiteral() string { return fs.TokenLit }
 func (fs *ForInStmt) Pos() Position        { return fs.Pos_ }
 
@@ -151,7 +151,7 @@ type ForOfStmt struct {
 	Body     *BlockStmt
 }
 
-func (fs *ForOfStmt) statementNode()      {}
+func (fs *ForOfStmt) statementNode()       {}
 func (fs *ForOfStmt) TokenLiteral() string { return fs.TokenLit }
 func (fs *ForOfStmt) Pos() Position        { return fs.Pos_ }
 
@@ -162,7 +162,7 @@ type ReturnStmt struct {
 	Value    Expression
 }
 
-func (rs *ReturnStmt) statementNode()      {}
+func (rs *ReturnStmt) statementNode()       {}
 func (rs *ReturnStmt) TokenLiteral() string { return rs.TokenLit }
 func (rs *ReturnStmt) Pos() Position        { return rs.Pos_ }
 
@@ -173,7 +173,7 @@ type BreakStmt struct {
 	Label    string
 }
 
-func (bs *BreakStmt) statementNode()      {}
+func (bs *BreakStmt) statementNode()       {}
 func (bs *BreakStmt) TokenLiteral() string { return bs.TokenLit }
 func (bs *BreakStmt) Pos() Position        { return bs.Pos_ }
 
@@ -184,7 +184,7 @@ type ContinueStmt struct {
 	Label    string
 }
 
-func (cs *ContinueStmt) statementNode()      {}
+func (cs *ContinueStmt) statementNode()       {}
 func (cs *ContinueStmt) TokenLiteral() string { return cs.TokenLit }
 func (cs *ContinueStmt) Pos() Position        { return cs.Pos_ }
 
@@ -197,7 +197,7 @@ type TryStmt struct {
 	Finalizer *BlockStmt
 }
 
-func (ts *TryStmt) statementNode()      {}
+func (ts *TryStmt) statementNode()       {}
 func (ts *TryStmt) TokenLiteral() string { return ts.TokenLit }
 func (ts *TryStmt) Pos() Position        { return ts.Pos_ }
 
@@ -216,7 +216,7 @@ type ThrowStmt struct {
 	Value    Expression
 }
 
-func (ts *ThrowStmt) statementNode()      {}
+func (ts *ThrowStmt) statementNode()       {}
 func (ts *ThrowStmt) TokenLiteral() string { return ts.TokenLit }
 func (ts *ThrowStmt) Pos() Position        { return ts.Pos_ }
 
@@ -228,8 +228,8 @@ type MatchExpr struct {
 	Arms     []*MatchArm
 }
 
-func (me *MatchExpr) statementNode()      {}
-func (me *MatchExpr) expressionNode()     {}
+func (me *MatchExpr) statementNode()       {}
+func (me *MatchExpr) expressionNode()      {}
 func (me *MatchExpr) TokenLiteral() string { return me.TokenLit }
 func (me *MatchExpr) Pos() Position        { return me.Pos_ }
 
@@ -250,8 +250,8 @@ type ClassDecl struct {
 	Body     *ClassBody
 }
 
-func (cd *ClassDecl) statementNode()      {}
-func (cd *ClassDecl) expressionNode()     {}
+func (cd *ClassDecl) statementNode()       {}
+func (cd *ClassDecl) expressionNode()      {}
 func (cd *ClassDecl) TokenLiteral() string { return cd.TokenLit }
 func (cd *ClassDecl) Pos() Position        { return cd.Pos_ }
 
@@ -280,33 +280,40 @@ type ExprStmt struct {
 	Expr Expression
 }
 
-func (es *ExprStmt) statementNode()      {}
+func (es *ExprStmt) statementNode()       {}
 func (es *ExprStmt) TokenLiteral() string { return es.Expr.TokenLiteral() }
 func (es *ExprStmt) Pos() Position        { return es.Pos_ }
 
 // ImportDecl is `import x from "mod"`.
 type ImportDecl struct {
-	Pos_     Position
-	TokenLit string
-	Default  string
-	Names    []string
-	Aliases  map[string]string
-	Source   string
+	Pos_      Position
+	TokenLit  string
+	Default   string
+	Namespace string
+	Names     []string
+	Aliases   map[string]string
+	Source    string
 }
 
-func (id *ImportDecl) statementNode()      {}
+func (id *ImportDecl) statementNode()       {}
 func (id *ImportDecl) TokenLiteral() string { return id.TokenLit }
 func (id *ImportDecl) Pos() Position        { return id.Pos_ }
 
 // ExportDecl is `export x` or `export default expr`.
 type ExportDecl struct {
-	Pos_      Position
-	TokenLit  string
-	IsDefault bool
-	Decl      Statement
+	Pos_       Position
+	TokenLit   string
+	IsDefault  bool
+	Decl       Statement
+	Specifiers []ExportSpec
 }
 
-func (ed *ExportDecl) statementNode()      {}
+type ExportSpec struct {
+	Name  string
+	Alias string
+}
+
+func (ed *ExportDecl) statementNode()       {}
 func (ed *ExportDecl) TokenLiteral() string { return ed.TokenLit }
 func (ed *ExportDecl) Pos() Position        { return ed.Pos_ }
 
@@ -317,6 +324,6 @@ type LabeledStmt struct {
 	Stmt  Statement
 }
 
-func (ls *LabeledStmt) statementNode()      {}
+func (ls *LabeledStmt) statementNode()       {}
 func (ls *LabeledStmt) TokenLiteral() string { return ls.Stmt.TokenLiteral() }
 func (ls *LabeledStmt) Pos() Position        { return ls.Pos_ }

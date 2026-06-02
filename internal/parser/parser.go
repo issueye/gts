@@ -71,7 +71,7 @@ func New(l *lexer.Lexer, file string) *Parser {
 	p.registerPrefix(lexer.TOKEN_DELETE, p.parsePrefix)
 	p.registerPrefix(lexer.TOKEN_PLUS_PLUS, p.parsePrefix)
 	p.registerPrefix(lexer.TOKEN_MINUS_MINUS, p.parsePrefix)
-	p.registerPrefix(lexer.TOKEN_AWAIT, p.parsePrefix)
+	p.registerPrefix(lexer.TOKEN_AWAIT, p.parseAwait)
 	p.registerPrefix(lexer.TOKEN_LPAREN, p.parseParenOrArrow)
 	p.registerPrefix(lexer.TOKEN_LBRACK, p.parseArray)
 	p.registerPrefix(lexer.TOKEN_LBRACE, p.parseObjectOrBlock)
@@ -120,14 +120,14 @@ func New(l *lexer.Lexer, file string) *Parser {
 func (p *Parser) Errors() []string { return append([]string{}, p.errors...) }
 
 func (p *Parser) registerPrefix(t lexer.TokenType, fn prefixFn) { p.prefixFns[t] = fn }
-func (p *Parser) registerInfix(t lexer.TokenType, fn infixFn)    { p.infixFns[t] = fn }
+func (p *Parser) registerInfix(t lexer.TokenType, fn infixFn)   { p.infixFns[t] = fn }
 
 func (p *Parser) nextToken() {
 	p.cur = p.peek
 	p.peek = p.l.NextToken()
 }
 
-func (p *Parser) curTokenIs(t lexer.TokenType) bool { return p.cur.Type == t }
+func (p *Parser) curTokenIs(t lexer.TokenType) bool  { return p.cur.Type == t }
 func (p *Parser) peekTokenIs(t lexer.TokenType) bool { return p.peek.Type == t }
 
 func (p *Parser) addError(msg string) {
@@ -162,50 +162,50 @@ func (p *Parser) peekPrecedence() int {
 }
 
 var precedences = map[lexer.TokenType]int{
-	lexer.TOKEN_COMMA:    PREC_COMMA,
-	lexer.TOKEN_EQ:       PREC_ASSIGN,
-	lexer.TOKEN_PLUS_EQ:  PREC_ASSIGN,
-	lexer.TOKEN_MINUS_EQ: PREC_ASSIGN,
-	lexer.TOKEN_STAR_EQ:  PREC_ASSIGN,
-	lexer.TOKEN_SLASH_EQ: PREC_ASSIGN,
-	lexer.TOKEN_PERCENT_EQ: PREC_ASSIGN,
-	lexer.TOKEN_POW_EQ:     PREC_ASSIGN,
-	lexer.TOKEN_LSHIFT_EQ:  PREC_ASSIGN,
-	lexer.TOKEN_RSHIFT_EQ:  PREC_ASSIGN,
-	lexer.TOKEN_URSHIFT_EQ: PREC_ASSIGN,
-	lexer.TOKEN_AMP_EQ:     PREC_ASSIGN,
-	lexer.TOKEN_PIPE_EQ:    PREC_ASSIGN,
-	lexer.TOKEN_CARET_EQ:   PREC_ASSIGN,
-	lexer.TOKEN_QUESTION:   PREC_TERNARY,
-	lexer.TOKEN_OR_OR:      PREC_OR_OR,
-	lexer.TOKEN_AND_AND:    PREC_AND_AND,
-	lexer.TOKEN_PIPE:       PREC_BIT_OR,
-	lexer.TOKEN_CARET:      PREC_BIT_XOR,
-	lexer.TOKEN_AMP:        PREC_BIT_AND,
-	lexer.TOKEN_EQ_EQ_EQ:   PREC_EQUALS,
-	lexer.TOKEN_NEQ_EQ:     PREC_EQUALS,
-	lexer.TOKEN_LT:         PREC_COMPARE,
-	lexer.TOKEN_LT_EQ:      PREC_COMPARE,
-	lexer.TOKEN_GT:         PREC_COMPARE,
-	lexer.TOKEN_GT_EQ:      PREC_COMPARE,
-	lexer.TOKEN_IN:         PREC_COMPARE,
-	lexer.TOKEN_INSTANCEOF: PREC_COMPARE,
-	lexer.TOKEN_LSHIFT:     PREC_SHIFT,
-	lexer.TOKEN_RSHIFT:     PREC_SHIFT,
-	lexer.TOKEN_URSHIFT:    PREC_SHIFT,
-	lexer.TOKEN_PLUS:       PREC_SUM,
-	lexer.TOKEN_MINUS:      PREC_SUM,
-	lexer.TOKEN_STAR:       PREC_PRODUCT,
-	lexer.TOKEN_SLASH:      PREC_PRODUCT,
-	lexer.TOKEN_PERCENT:    PREC_PRODUCT,
-	lexer.TOKEN_POW:        PREC_EXPONENT,
-	lexer.TOKEN_LPAREN:     PREC_CALL,
-	lexer.TOKEN_DOT:        PREC_CALL,
-	lexer.TOKEN_LBRACK:     PREC_CALL,
-	lexer.TOKEN_QM_DOT:     PREC_CALL,
-	lexer.TOKEN_PLUS_PLUS:  PREC_POSTFIX,
+	lexer.TOKEN_COMMA:       PREC_COMMA,
+	lexer.TOKEN_EQ:          PREC_ASSIGN,
+	lexer.TOKEN_PLUS_EQ:     PREC_ASSIGN,
+	lexer.TOKEN_MINUS_EQ:    PREC_ASSIGN,
+	lexer.TOKEN_STAR_EQ:     PREC_ASSIGN,
+	lexer.TOKEN_SLASH_EQ:    PREC_ASSIGN,
+	lexer.TOKEN_PERCENT_EQ:  PREC_ASSIGN,
+	lexer.TOKEN_POW_EQ:      PREC_ASSIGN,
+	lexer.TOKEN_LSHIFT_EQ:   PREC_ASSIGN,
+	lexer.TOKEN_RSHIFT_EQ:   PREC_ASSIGN,
+	lexer.TOKEN_URSHIFT_EQ:  PREC_ASSIGN,
+	lexer.TOKEN_AMP_EQ:      PREC_ASSIGN,
+	lexer.TOKEN_PIPE_EQ:     PREC_ASSIGN,
+	lexer.TOKEN_CARET_EQ:    PREC_ASSIGN,
+	lexer.TOKEN_QUESTION:    PREC_TERNARY,
+	lexer.TOKEN_OR_OR:       PREC_OR_OR,
+	lexer.TOKEN_AND_AND:     PREC_AND_AND,
+	lexer.TOKEN_PIPE:        PREC_BIT_OR,
+	lexer.TOKEN_CARET:       PREC_BIT_XOR,
+	lexer.TOKEN_AMP:         PREC_BIT_AND,
+	lexer.TOKEN_EQ_EQ_EQ:    PREC_EQUALS,
+	lexer.TOKEN_NEQ_EQ:      PREC_EQUALS,
+	lexer.TOKEN_LT:          PREC_COMPARE,
+	lexer.TOKEN_LT_EQ:       PREC_COMPARE,
+	lexer.TOKEN_GT:          PREC_COMPARE,
+	lexer.TOKEN_GT_EQ:       PREC_COMPARE,
+	lexer.TOKEN_IN:          PREC_COMPARE,
+	lexer.TOKEN_INSTANCEOF:  PREC_COMPARE,
+	lexer.TOKEN_LSHIFT:      PREC_SHIFT,
+	lexer.TOKEN_RSHIFT:      PREC_SHIFT,
+	lexer.TOKEN_URSHIFT:     PREC_SHIFT,
+	lexer.TOKEN_PLUS:        PREC_SUM,
+	lexer.TOKEN_MINUS:       PREC_SUM,
+	lexer.TOKEN_STAR:        PREC_PRODUCT,
+	lexer.TOKEN_SLASH:       PREC_PRODUCT,
+	lexer.TOKEN_PERCENT:     PREC_PRODUCT,
+	lexer.TOKEN_POW:         PREC_EXPONENT,
+	lexer.TOKEN_LPAREN:      PREC_CALL,
+	lexer.TOKEN_DOT:         PREC_CALL,
+	lexer.TOKEN_LBRACK:      PREC_CALL,
+	lexer.TOKEN_QM_DOT:      PREC_CALL,
+	lexer.TOKEN_PLUS_PLUS:   PREC_POSTFIX,
 	lexer.TOKEN_MINUS_MINUS: PREC_POSTFIX,
-	lexer.TOKEN_ARROW:      PREC_ASSIGN,
+	lexer.TOKEN_ARROW:       PREC_ASSIGN,
 }
 
 // ============================================================================
@@ -213,7 +213,7 @@ var precedences = map[lexer.TokenType]int{
 // ============================================================================
 
 func (p *Parser) ParseProgram() *ast.Program {
-	prog := &ast.Program{Pos_: p.pos(),}
+	prog := &ast.Program{Pos_: p.pos()}
 	for !p.curTokenIs(lexer.TOKEN_EOF) {
 		stmt := p.parseStatement()
 		if stmt != nil {
@@ -334,20 +334,21 @@ func (p *Parser) skipSemicolon() {
 // Variable Declarations
 // ============================================================================
 
-func (p *Parser) parseVarDecl(kind string) ast.Statement {tokLit := p.cur.Literal
-	p.nextToken()                    // skip let/const/var
-	name := p.cur.Literal            // identifier
+func (p *Parser) parseVarDecl(kind string) ast.Statement {
+	tokLit := p.cur.Literal
+	p.nextToken()         // skip let/const/var
+	name := p.cur.Literal // identifier
 
 	var tAnno *ast.TypeAnnotation
-	p.nextToken()                    // advance past identifier, cur = : = or ;
+	p.nextToken() // advance past identifier, cur = : = or ;
 	if p.curTokenIs(lexer.TOKEN_COLON) {
-		p.nextToken()                // cur = type name
-		tAnno = p.parseType()        // parseType advances to next token
+		p.nextToken()         // cur = type name
+		tAnno = p.parseType() // parseType advances to next token
 	}
 
 	var val ast.Expression
 	if p.curTokenIs(lexer.TOKEN_EQ) {
-		p.nextToken()                // cur = start of value expression
+		p.nextToken() // cur = start of value expression
 		val = p.parseExpression(PREC_COMMA)
 	}
 
@@ -385,7 +386,8 @@ func (p *Parser) parseBlock() *ast.BlockStmt {
 // If / While / For
 // ============================================================================
 
-func (p *Parser) parseIf() *ast.IfStmt {tokLit := p.cur.Literal
+func (p *Parser) parseIf() *ast.IfStmt {
+	tokLit := p.cur.Literal
 	if !p.peekTokenIs(lexer.TOKEN_LPAREN) {
 		p.addError("expected ( after if")
 		return nil
@@ -410,7 +412,8 @@ func (p *Parser) parseIf() *ast.IfStmt {tokLit := p.cur.Literal
 	return &ast.IfStmt{Pos_: p.pos(), TokenLit: tokLit, Cond: cond, Consequence: cons, Alternative: alt}
 }
 
-func (p *Parser) parseWhile() *ast.WhileStmt {tokLit := p.cur.Literal
+func (p *Parser) parseWhile() *ast.WhileStmt {
+	tokLit := p.cur.Literal
 	if !p.peekTokenIs(lexer.TOKEN_LPAREN) {
 		p.addError("expected ( after while")
 		return nil
@@ -426,7 +429,8 @@ func (p *Parser) parseWhile() *ast.WhileStmt {tokLit := p.cur.Literal
 	return &ast.WhileStmt{Pos_: p.pos(), TokenLit: tokLit, Cond: cond, Body: body}
 }
 
-func (p *Parser) parseFor() ast.Statement {tokLit := p.cur.Literal
+func (p *Parser) parseFor() ast.Statement {
+	tokLit := p.cur.Literal
 	if !p.peekTokenIs(lexer.TOKEN_LPAREN) {
 		p.addError("expected ( after for")
 		return nil
@@ -507,7 +511,8 @@ func (p *Parser) parseFor() ast.Statement {tokLit := p.cur.Literal
 // Return / Break / Continue / Throw
 // ============================================================================
 
-func (p *Parser) parseReturn() *ast.ReturnStmt {tokLit := p.cur.Literal
+func (p *Parser) parseReturn() *ast.ReturnStmt {
+	tokLit := p.cur.Literal
 	p.nextToken()
 	var val ast.Expression
 	if !p.curTokenIs(lexer.TOKEN_SEMI) && !p.curTokenIs(lexer.TOKEN_RBRACE) && !p.curTokenIs(lexer.TOKEN_EOF) {
@@ -517,7 +522,8 @@ func (p *Parser) parseReturn() *ast.ReturnStmt {tokLit := p.cur.Literal
 	return &ast.ReturnStmt{Pos_: p.pos(), TokenLit: tokLit, Value: val}
 }
 
-func (p *Parser) parseBreak() *ast.BreakStmt {tokLit := p.cur.Literal
+func (p *Parser) parseBreak() *ast.BreakStmt {
+	tokLit := p.cur.Literal
 	label := ""
 	if p.peekTokenIs(lexer.TOKEN_IDENT) {
 		p.nextToken()
@@ -528,7 +534,8 @@ func (p *Parser) parseBreak() *ast.BreakStmt {tokLit := p.cur.Literal
 	return &ast.BreakStmt{Pos_: p.pos(), TokenLit: tokLit, Label: label}
 }
 
-func (p *Parser) parseContinue() *ast.ContinueStmt {tokLit := p.cur.Literal
+func (p *Parser) parseContinue() *ast.ContinueStmt {
+	tokLit := p.cur.Literal
 	label := ""
 	if p.peekTokenIs(lexer.TOKEN_IDENT) {
 		p.nextToken()
@@ -539,7 +546,8 @@ func (p *Parser) parseContinue() *ast.ContinueStmt {tokLit := p.cur.Literal
 	return &ast.ContinueStmt{Pos_: p.pos(), TokenLit: tokLit, Label: label}
 }
 
-func (p *Parser) parseThrow() *ast.ThrowStmt {tokLit := p.cur.Literal
+func (p *Parser) parseThrow() *ast.ThrowStmt {
+	tokLit := p.cur.Literal
 	p.nextToken()
 	val := p.parseExpression(PREC_COMMA)
 	p.skipSemicolon()
@@ -550,7 +558,8 @@ func (p *Parser) parseThrow() *ast.ThrowStmt {tokLit := p.cur.Literal
 // Try / Catch / Finally
 // ============================================================================
 
-func (p *Parser) parseTry() *ast.TryStmt {tokLit := p.cur.Literal
+func (p *Parser) parseTry() *ast.TryStmt {
+	tokLit := p.cur.Literal
 	p.nextToken() // skip try, cur = {
 	block := p.parseBlock()
 
@@ -558,7 +567,7 @@ func (p *Parser) parseTry() *ast.TryStmt {tokLit := p.cur.Literal
 	if p.curTokenIs(lexer.TOKEN_CATCH) {
 		p.nextToken() // catch, cur = (
 		p.nextToken() // (, cur = ident
-		catch = &ast.CatchClause{Pos_: p.pos(),}
+		catch = &ast.CatchClause{Pos_: p.pos()}
 		if p.curTokenIs(lexer.TOKEN_IDENT) {
 			catch.Name = p.cur.Literal
 			if p.peekTokenIs(lexer.TOKEN_COLON) {
@@ -587,7 +596,8 @@ func (p *Parser) parseTry() *ast.TryStmt {tokLit := p.cur.Literal
 // Function / Class Declaration
 // ============================================================================
 
-func (p *Parser) parseFuncDecl() *ast.FuncDecl {tokLit := p.cur.Literal
+func (p *Parser) parseFuncDecl() *ast.FuncDecl {
+	tokLit := p.cur.Literal
 	p.expectPeek(lexer.TOKEN_IDENT)
 	name := p.cur.Literal
 	p.nextToken()
@@ -657,7 +667,8 @@ func (p *Parser) parseFuncParams() ([]*ast.Param, *ast.TypeAnnotation) {
 	return params, retT
 }
 
-func (p *Parser) parseClassDecl() *ast.ClassDecl {tokLit := p.cur.Literal
+func (p *Parser) parseClassDecl() *ast.ClassDecl {
+	tokLit := p.cur.Literal
 	if !p.peekTokenIs(lexer.TOKEN_IDENT) {
 		p.addError("expected class name")
 		return nil
@@ -681,7 +692,7 @@ func (p *Parser) parseClassBody() *ast.ClassBody {
 		return nil
 	}
 	p.nextToken() // {
-	body := &ast.ClassBody{Pos_: p.pos(),}
+	body := &ast.ClassBody{Pos_: p.pos()}
 	for !p.curTokenIs(lexer.TOKEN_RBRACE) && !p.curTokenIs(lexer.TOKEN_EOF) {
 		member := p.parseClassMember()
 		if member != nil {
@@ -750,9 +761,20 @@ func (p *Parser) parseClassMember() *ast.ClassMember {
 // Import / Export
 // ============================================================================
 
-func (p *Parser) parseImport() *ast.ImportDecl {tokLit := p.cur.Literal
+func (p *Parser) parseImport() *ast.ImportDecl {
+	tokLit := p.cur.Literal
 	p.nextToken() // import
 	decl := &ast.ImportDecl{Pos_: p.pos(), TokenLit: tokLit, Aliases: make(map[string]string)}
+	if p.curTokenIs(lexer.TOKEN_STAR) {
+		p.nextToken()
+		if !p.curTokenIs(lexer.TOKEN_AS) {
+			p.addError("expected as after * in namespace import")
+			return decl
+		}
+		p.nextToken()
+		decl.Namespace = p.cur.Literal
+		p.nextToken()
+	}
 	if p.curTokenIs(lexer.TOKEN_IDENT) && !p.peekTokenIs(lexer.TOKEN_FROM) && !p.peekTokenIs(lexer.TOKEN_LBRACE) {
 		decl.Default = p.cur.Literal
 		if p.peekTokenIs(lexer.TOKEN_COMMA) {
@@ -791,7 +813,8 @@ func (p *Parser) parseImport() *ast.ImportDecl {tokLit := p.cur.Literal
 	return decl
 }
 
-func (p *Parser) parseExport() *ast.ExportDecl {tokLit := p.cur.Literal
+func (p *Parser) parseExport() *ast.ExportDecl {
+	tokLit := p.cur.Literal
 	p.nextToken() // export
 	isDefault := false
 	if p.curTokenIs(lexer.TOKEN_DEFAULT) {
@@ -799,13 +822,35 @@ func (p *Parser) parseExport() *ast.ExportDecl {tokLit := p.cur.Literal
 		p.nextToken()
 	}
 	var decl ast.Statement
+	var specs []ast.ExportSpec
 	if !isDefault {
-		decl = p.parseStatement()
+		if p.curTokenIs(lexer.TOKEN_LBRACE) {
+			p.nextToken()
+			for !p.curTokenIs(lexer.TOKEN_RBRACE) && !p.curTokenIs(lexer.TOKEN_EOF) {
+				name := p.cur.Literal
+				alias := name
+				p.nextToken()
+				if p.curTokenIs(lexer.TOKEN_AS) {
+					p.nextToken()
+					alias = p.cur.Literal
+					p.nextToken()
+				}
+				specs = append(specs, ast.ExportSpec{Name: name, Alias: alias})
+				if p.curTokenIs(lexer.TOKEN_COMMA) {
+					p.nextToken()
+				}
+			}
+			p.nextToken()
+			p.skipSemicolon()
+		} else {
+			decl = p.parseStatement()
+		}
 	} else {
 		expr := p.parseExpression(PREC_COMMA)
 		decl = &ast.ExprStmt{Pos_: p.pos(), Expr: expr}
+		p.skipSemicolon()
 	}
-	return &ast.ExportDecl{Pos_: p.pos(), TokenLit: tokLit, IsDefault: isDefault, Decl: decl}
+	return &ast.ExportDecl{Pos_: p.pos(), TokenLit: tokLit, IsDefault: isDefault, Decl: decl, Specifiers: specs}
 }
 
 // ============================================================================
@@ -818,9 +863,14 @@ func (p *Parser) parseExpression(prec int) ast.Expression {
 		p.addError(fmt.Sprintf("no prefix parser for %s (%q)", p.cur.Type, p.cur.Literal))
 		return nil
 	}
+	start := p.cur
 	left := prefix()
-	// advance past the prefix token so infix operators can be checked
-	p.nextToken()
+	// Simple prefix parsers leave cur on the token they consumed; compound
+	// parsers like function/new/array/object/paren already advance to the next
+	// token after the full expression.
+	if p.cur == start {
+		p.nextToken()
+	}
 	for prec < p.curPrecedence() && !p.curTokenIs(lexer.TOKEN_SEMI) {
 		infix := p.infixFns[p.cur.Type]
 		if infix == nil {
@@ -833,10 +883,12 @@ func (p *Parser) parseExpression(prec int) ast.Expression {
 
 // ——— Prefix Parsers ———
 
-func (p *Parser) parseIdent() ast.Expression {return &ast.Ident{Pos_: p.pos(), TokenLit: p.cur.Literal}
+func (p *Parser) parseIdent() ast.Expression {
+	return &ast.Ident{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
-func (p *Parser) parseNumber() ast.Expression {lit := p.cur.Literal
+func (p *Parser) parseNumber() ast.Expression {
+	lit := p.cur.Literal
 	val, _ := strconv.ParseFloat(lit, 64)
 	isInt := true
 	for _, c := range lit {
@@ -848,35 +900,51 @@ func (p *Parser) parseNumber() ast.Expression {lit := p.cur.Literal
 	return &ast.NumberLit{Pos_: p.pos(), TokenLit: lit, Value: val, IsInt: isInt}
 }
 
-func (p *Parser) parseString() ast.Expression {return &ast.StringLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
+func (p *Parser) parseString() ast.Expression {
+	return &ast.StringLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
-func (p *Parser) parseTemplate() ast.Expression {return &ast.TemplateLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
+func (p *Parser) parseTemplate() ast.Expression {
+	return &ast.TemplateLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
-func (p *Parser) parseBool() ast.Expression {return &ast.BoolLit{Pos_: p.pos(), TokenLit: p.cur.Literal, Value: p.curTokenIs(lexer.TOKEN_TRUE)}
+func (p *Parser) parseBool() ast.Expression {
+	return &ast.BoolLit{Pos_: p.pos(), TokenLit: p.cur.Literal, Value: p.curTokenIs(lexer.TOKEN_TRUE)}
 }
 
-func (p *Parser) parseNull() ast.Expression {return &ast.NullLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
+func (p *Parser) parseNull() ast.Expression {
+	return &ast.NullLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
-func (p *Parser) parseUndefined() ast.Expression {return &ast.UndefinedLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
+func (p *Parser) parseUndefined() ast.Expression {
+	return &ast.UndefinedLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
-func (p *Parser) parseThis() ast.Expression {return &ast.ThisExpr{Pos_: p.pos(), TokenLit: p.cur.Literal}
+func (p *Parser) parseThis() ast.Expression {
+	return &ast.ThisExpr{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
-func (p *Parser) parseSuper() ast.Expression {return &ast.SuperExpr{Pos_: p.pos(), TokenLit: p.cur.Literal}
+func (p *Parser) parseSuper() ast.Expression {
+	return &ast.SuperExpr{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
-func (p *Parser) parsePrefix() ast.Expression {op := p.cur.Literal
+func (p *Parser) parsePrefix() ast.Expression {
+	op := p.cur.Literal
 	tokLit := p.cur.Literal
 	p.nextToken()
 	right := p.parseExpression(PREC_PREFIX)
 	return &ast.PrefixExpr{Pos_: p.pos(), TokenLit: tokLit, Op: op, Right: right}
 }
 
-func (p *Parser) parseParenOrArrow() ast.Expression {p.nextToken()
+func (p *Parser) parseAwait() ast.Expression {
+	tokLit := p.cur.Literal
+	p.nextToken()
+	value := p.parseExpression(PREC_PREFIX)
+	return &ast.AwaitExpr{Pos_: p.pos(), TokenLit: tokLit, Value: value}
+}
+
+func (p *Parser) parseParenOrArrow() ast.Expression {
+	p.nextToken()
 	if p.curTokenIs(lexer.TOKEN_RPAREN) {
 		p.nextToken() // )
 		if p.curTokenIs(lexer.TOKEN_ARROW) {
@@ -954,7 +1022,8 @@ func (p *Parser) parseParamList() []*ast.Param {
 	}
 }
 
-func (p *Parser) parseArray() ast.Expression {tokLit := p.cur.Literal
+func (p *Parser) parseArray() ast.Expression {
+	tokLit := p.cur.Literal
 	p.nextToken()
 	elems := make([]ast.Expression, 0)
 	if p.curTokenIs(lexer.TOKEN_RBRACK) {
@@ -983,7 +1052,8 @@ func (p *Parser) parseArray() ast.Expression {tokLit := p.cur.Literal
 	return &ast.ArrayLit{Pos_: p.pos(), TokenLit: tokLit, Elements: elems}
 }
 
-func (p *Parser) parseObjectOrBlock() ast.Expression {tokLit := p.cur.Literal
+func (p *Parser) parseObjectOrBlock() ast.Expression {
+	tokLit := p.cur.Literal
 	p.nextToken() // {
 	props := make([]*ast.Property, 0)
 	if p.curTokenIs(lexer.TOKEN_RBRACE) {
@@ -1065,7 +1135,8 @@ func (p *Parser) parseProperty() *ast.Property {
 // parseMethod is no longer needed as it's inlined.
 // Remove the standalone function. (Will check compilation)
 
-func (p *Parser) parseNew() ast.Expression {tokLit := p.cur.Literal
+func (p *Parser) parseNew() ast.Expression {
+	tokLit := p.cur.Literal
 	p.nextToken()
 	callee := p.parseExpression(PREC_CALL)
 	var args []ast.Expression
@@ -1081,7 +1152,8 @@ func (p *Parser) parseNew() ast.Expression {tokLit := p.cur.Literal
 	return &ast.NewExpr{Pos_: p.pos(), TokenLit: tokLit, Callee: callee, Args: args}
 }
 
-func (p *Parser) parseIndex(left ast.Expression) ast.Expression {p.nextToken()
+func (p *Parser) parseIndex(left ast.Expression) ast.Expression {
+	p.nextToken()
 	idx := p.parseExpression(PREC_COMMA)
 	if !p.curTokenIs(lexer.TOKEN_RBRACK) {
 		p.addError("expected ]")
@@ -1091,7 +1163,8 @@ func (p *Parser) parseIndex(left ast.Expression) ast.Expression {p.nextToken()
 	return &ast.IndexExpr{Pos_: p.pos(), TokenLit: "[]", Left: left, Index: idx}
 }
 
-func (p *Parser) parseFunction() ast.Expression {tokLit := p.cur.Literal
+func (p *Parser) parseFunction() ast.Expression {
+	tokLit := p.cur.Literal
 	name := ""
 	if p.peekTokenIs(lexer.TOKEN_IDENT) {
 		p.nextToken()
@@ -1117,26 +1190,30 @@ func (p *Parser) parseAsyncFunc() ast.Expression {
 	return p.parseIdent()
 }
 
-func (p *Parser) parseClassExpr() ast.Expression {decl := p.parseClassDecl()
+func (p *Parser) parseClassExpr() ast.Expression {
+	decl := p.parseClassDecl()
 	return &ast.ClassDecl{Pos_: p.pos(), TokenLit: decl.TokenLit, Name: decl.Name, Super: decl.Super, Body: decl.Body}
 }
 
 // ——— Infix Parsers ———
 
-func (p *Parser) parseInfix(left ast.Expression) ast.Expression {op := p.cur.Literal
+func (p *Parser) parseInfix(left ast.Expression) ast.Expression {
+	op := p.cur.Literal
 	prec := p.curPrecedence()
 	p.nextToken()
 	right := p.parseExpression(prec)
 	return &ast.InfixExpr{Pos_: p.pos(), TokenLit: op, Op: op, Left: left, Right: right}
 }
 
-func (p *Parser) parseAssign(left ast.Expression) ast.Expression {op := p.cur.Literal
+func (p *Parser) parseAssign(left ast.Expression) ast.Expression {
+	op := p.cur.Literal
 	p.nextToken()
 	right := p.parseExpression(PREC_ASSIGN - 1)
 	return &ast.AssignExpr{Pos_: p.pos(), TokenLit: op, Op: op, Left: left, Right: right}
 }
 
-func (p *Parser) parseTernary(left ast.Expression) ast.Expression {p.nextToken() // skip ?
+func (p *Parser) parseTernary(left ast.Expression) ast.Expression {
+	p.nextToken() // skip ?
 	cons := p.parseExpression(PREC_COMMA)
 	if !p.curTokenIs(lexer.TOKEN_COLON) {
 		p.addError("expected : in ternary")
@@ -1147,7 +1224,8 @@ func (p *Parser) parseTernary(left ast.Expression) ast.Expression {p.nextToken()
 	return &ast.TernaryExpr{Pos_: p.pos(), TokenLit: "?:", Cond: left, Consequent: cons, Alternate: alt}
 }
 
-func (p *Parser) parseCall(callee ast.Expression) ast.Expression {p.nextToken() // skip (
+func (p *Parser) parseCall(callee ast.Expression) ast.Expression {
+	p.nextToken() // skip (
 	args := p.parseCallArgs()
 	if !p.curTokenIs(lexer.TOKEN_RPAREN) {
 		p.addError("expected )")
@@ -1381,7 +1459,8 @@ func (p *Parser) parsePrimaryPattern() ast.Pattern {
 	}
 }
 
-func (p *Parser) parseOrPatternContinue(first ast.Pattern) ast.Pattern {alts := []ast.Pattern{first}
+func (p *Parser) parseOrPatternContinue(first ast.Pattern) ast.Pattern {
+	alts := []ast.Pattern{first}
 	for p.curTokenIs(lexer.TOKEN_PIPE) {
 		p.nextToken()
 		next := p.parsePrimaryPattern()
@@ -1446,4 +1525,3 @@ func (p *Parser) parseType() *ast.TypeAnnotation {
 	}
 	return t
 }
-

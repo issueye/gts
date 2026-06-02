@@ -14,7 +14,7 @@ func registerJSON(env *object.Environment) {
 	env.Set("JSON", &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hk("stringify"): {Key: &object.String{Value: "stringify"}, Value: &object.Builtin{Name: "JSON.stringify", Fn: builtinJSONStringify}},
-			hk("parse"):    {Key: &object.String{Value: "parse"}, Value: &object.Builtin{Name: "JSON.parse", Fn: builtinJSONParse}},
+			hk("parse"):     {Key: &object.String{Value: "parse"}, Value: &object.Builtin{Name: "JSON.parse", Fn: builtinJSONParse}},
 		},
 	})
 }
@@ -27,7 +27,7 @@ func builtinJSONStringify(env *object.Environment, pos ast.Position, args ...obj
 	}
 	result := toJSON(args[0])
 	if result == "" {
-		return &object.Error{Message: "JSON.stringify: unsupported value", Pos: pos}
+		return object.NewError(pos, "JSON.stringify: unsupported value")
 	}
 	return &object.String{Value: result}
 }

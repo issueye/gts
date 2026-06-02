@@ -1,6 +1,6 @@
 # binaries
-gs.exe
-gs
+/gs.exe
+/gs
 *.exe
 
 # build output

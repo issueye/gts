@@ -44,7 +44,7 @@ func TestLexer_BasicTokens(t *testing.T) {
 }
 
 func TestLexer_Keywords(t *testing.T) {
-	input := `let const var function class extends if else while for in of return break continue true false null undefined new this super try catch finally throw async await import export from as delete typeof instanceof void static match`
+	input := `let const var function class extends if else while for in of return break continue true false null undefined new this super try catch finally throw async await import export from as delete typeof instanceof void static match default`
 	tests := []struct {
 		Type TokenType
 		Lit  string
@@ -60,7 +60,7 @@ func TestLexer_Keywords(t *testing.T) {
 		{TOKEN_ASYNC, "async"}, {TOKEN_AWAIT, "await"},
 		{TOKEN_IMPORT, "import"}, {TOKEN_EXPORT, "export"}, {TOKEN_FROM, "from"}, {TOKEN_AS, "as"},
 		{TOKEN_DELETE, "delete"}, {TOKEN_TYPEOF, "typeof"}, {TOKEN_INSTANCEOF, "instanceof"}, {TOKEN_VOID, "void"},
-		{TOKEN_STATIC, "static"}, {TOKEN_MATCH, "match"},
+		{TOKEN_STATIC, "static"}, {TOKEN_MATCH, "match"}, {TOKEN_DEFAULT, "default"},
 		{TOKEN_EOF, ""},
 	}
 	tokenEq(t, input, tests)
