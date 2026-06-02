@@ -635,6 +635,42 @@ gotKind + ":" + okKind;
 	}
 }
 
+func TestStdTerminalModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "terminal.gs")
+	if err := os.WriteFile(script, []byte(`
+let terminal = require("@std/terminal");
+let tty = terminal.isTTY("stdout");
+let size = terminal.size();
+let writeCount = terminal.write("");
+let ttyKind = "bool";
+if (tty === true || tty === false) {
+  ttyKind = "bool";
+}
+let sizeKind = "bad";
+if (size.cols > 0 && size.rows > 0) {
+  sizeKind = "size";
+}
+let writeKind = "bad";
+if (writeCount === 0) {
+  writeKind = "write";
+}
+ttyKind + ":" + sizeKind + ":" + writeKind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "bool:size:write" {
+		t.Fatalf("want bool:size:write, got %T %v", result, result)
+	}
+}
+
 func TestStdStreamAndSSEModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "stream_sse.gs")

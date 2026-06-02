@@ -8,6 +8,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/microsoft/go-mssqldb v1.10.0
 	github.com/pelletier/go-toml/v2 v2.3.1
+	golang.org/x/term v0.43.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.51.0
 )

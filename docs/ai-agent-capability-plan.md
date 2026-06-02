@@ -77,6 +77,7 @@
 | `@std/os` | 已完成增强版 | `platform/arch/eol/type/release/homedir/tmpdir/hostname/cpus/userInfo` |
 | `@std/exec` | 已完成交互基础版 | `run/output/combinedOutput/start/command/spawn`；`spawn` 支持 stdin 写入、stdout/stderr stream、cwd/env、timeoutMs、kill/wait |
 | `@std/pty` | 已完成基础版 | `spawn/open`；支持 PTY/ConPTY 创建、终端输出 stream、写入、resize、kill/wait/close |
+| `@std/terminal` | 已完成基础版 | `isTTY/size/read/write/writeln/setRawMode`；支持宿主终端探测、尺寸读取、输出和 raw mode restore |
 | `@std/crypto` | 已完成基础版 | `randomUUID/sha256/randomBytes` |
 | `@std/schema` | 已完成基础版 | JSON Schema 子集：`type/properties/required/items/enum/additionalProperties/min/max` 等 |
 | `@std/db` | 已完成增强版 | 统一 `open/exec/query/queryOne/prepare/begin/ping/close`，支持事务、预编译语句、连接池配置；SQLite 使用 `modernc.org/sqlite` no-cgo 驱动 |
@@ -87,7 +88,7 @@
 | 脚本 coding tools | 已完成最小版 | `@agent/tools/bash`、`@agent/tools/grep`、`@agent/tools/coding` 已可由脚本执行 shell、纯文本搜索并聚合工具 |
 | 脚本 session | 已完成最小版 | `@agent/session/jsonl` 已可写入和读取 JSONL 会话记录 |
 | 脚本 agent loop | 已完成最小版 | `@agent/core/agent` + `@agent/llm/fake` 已能完成“provider 产生 tool call -> registry 调用工具 -> provider 返回最终消息”的两轮闭环 |
-| 脚本 smoke | 已完成基础版 | `scripts/agent/smoke_import.gs`、`smoke_std.gs`、`smoke_env.gs`、`smoke_schema.gs`、`smoke_config_codecs.gs`、`smoke_exec_spawn.gs`、`smoke_pty.gs`、`smoke_tools.gs`、`smoke_coding_tools.gs`、`smoke_agent_loop.gs` 可验证脚本层使用标准库、工具库和最小 agent loop |
+| 脚本 smoke | 已完成基础版 | `scripts/agent/smoke_import.gs`、`smoke_std.gs`、`smoke_env.gs`、`smoke_schema.gs`、`smoke_config_codecs.gs`、`smoke_exec_spawn.gs`、`smoke_pty.gs`、`smoke_terminal.gs`、`smoke_tools.gs`、`smoke_coding_tools.gs`、`smoke_agent_loop.gs` 可验证脚本层使用标准库、工具库和最小 agent loop |
 
 这些交付仍然是“基础版”：它们已足够让脚本开始实现 coding tools、session 和 tool schema。L3 已开始补齐 HTTP streaming、SSE 和 stream 抽象；真实 provider 适配仍应由 `.gs` 脚本实现。
 
@@ -107,7 +108,7 @@
 | 配置格式标准库 | `@std/toml`、`@std/yaml`、`@std/xml` 已有基础版，仍需 XML 查询/命名空间、YAML schema 细节 | 项目配置、skills、外部工具配置和结构化文本都依赖 |
 | 文件/路径标准库 | `@std/fs`、`@std/path` 已有增强版，仍需 watch、权限细节、更完整 glob 规则 | read/write/edit/session/skills 都依赖 |
 | HTTP streaming/SSE | 已有基础版，仍需 async iterator、abort、背压和更完整超时模型 | LLM provider 流式输出的底层能力 |
-| 进程执行增强 | `@std/exec.spawn` 已支持 cwd/env/timeoutMs/stdin/stdout/stderr/kill/wait；`@std/pty` 已支持基础 PTY/ConPTY、输出流和 resize，Windows PTY 输入自动化仍需继续打磨 | `bash` tool 和 TUI/RPC 子进程封装都依赖 |
+| 进程执行增强 | `@std/exec.spawn` 已支持 cwd/env/timeoutMs/stdin/stdout/stderr/kill/wait；`@std/pty` 已支持基础 PTY/ConPTY、输出流和 resize；`@std/terminal` 已支持宿主终端探测、尺寸、读写和 raw mode | `bash` tool 和 TUI/RPC 子进程封装都依赖 |
 | Schema 校验 | 已有 JSON Schema 子集，仍需默认值、格式校验和更完整错误聚合 | 工具调用参数必须校验 |
 | 数据库标准库 | 已有 `@std/db` 增强版，仍需命名参数、schema introspection、类型细化 | Agent 可用脚本实现数据库工具和数据查询任务 |
 
@@ -257,18 +258,19 @@ Agent 行为则在 `scripts/agent` 中完成。
 | `@std/os` | platform、arch、eol、type、release、homedir、tmpdir、hostname、cpus、userInfo |
 | `@std/exec` | cwd、env、timeoutMs、stdin 写入、stdout/stderr stream、kill、wait、exitCode |
 | `@std/pty` | PTY/ConPTY spawn、终端输出 stream、write/writeln、resize、kill、wait、close |
+| `@std/terminal` | isTTY、size、read、write/writeln、setRawMode/restore |
 
 **当前状态：**
 
 - `@std/fs`、`@std/path`、`@std/process`、`@std/os` 已完成同步增强 API。
 - `@std/fs` 已支持文本读写、追加写、原子写、带类型目录项、递归 walk、glob、copy、临时目录、真实路径、lstat 和递归/强制删除。
-- 下一步应补 `@std/fs.watch`、权限细节、更完整 glob 规则，以及 `@std/pty` 的 Windows 输入自动化、终端 raw mode 和尺寸事件。
+- 下一步应补 `@std/fs.watch`、权限细节、更完整 glob 规则，以及 `@std/pty`/`@std/terminal` 的 Windows 输入自动化、按键事件和尺寸事件。
 
 **验收：**
 
 - `read/write/bash/ls/find` 工具可以主要用 GoScript 写。
 - shell 输出可流式读取并可被取消；普通交互式子进程可脚本化封装。
-- 真正依赖 TTY 的全屏 TUI 已有 `@std/pty` 基础承载，后续需要补 raw mode、按键事件、窗口尺寸事件和更稳定的 Windows ConPTY 输入策略。
+- 真正依赖 TTY 的全屏 TUI 已有 `@std/pty` 和 `@std/terminal` 基础承载，后续需要补按键事件、窗口尺寸事件和更稳定的 Windows ConPTY 输入策略。
 
 ### L3：HTTP、SSE、Stream
 
