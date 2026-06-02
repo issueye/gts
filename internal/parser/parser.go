@@ -1224,6 +1224,7 @@ func (p *Parser) parseArrowInfix(left ast.Expression) ast.Expression {
 
 func (p *Parser) parsePostfix(left ast.Expression) ast.Expression {
 	op := p.cur.Literal
+	p.nextToken()
 	return &ast.InfixExpr{Pos_: p.pos(), TokenLit: op, Op: op, Left: left, Right: nil}
 }
 

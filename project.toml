@@ -1,0 +1,7 @@
+# GoScript 项目配置文件
+# 放在项目根目录，gs run 会自动发现并执行入口文件
+
+[project]
+name = "hello"
+version = "0.1.0"
+entry = "main.gs"          # 入口脚本（默认值）

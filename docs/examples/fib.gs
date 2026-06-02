@@ -1,15 +1,20 @@
-// fib.gs —— 闭包、循环、模板字符串
-function fib(n: int): int {
-  if (n < 2) return n;
-  let a: int = 0, b: int = 1;
-  for (let i: int = 2; i <= n; i++) {
-    let t: int = a + b;
+// fib.gs —— 闭包、循环
+function fib(n) {
+  if (n < 2) { return n; }
+  let a = 0;
+  let b = 1;
+  let i = 2;
+  while (i <= n) {
+    let t = a + b;
     a = b;
     b = t;
+    i = i + 1;
   }
   return b;
 }
 
-for (let i: int = 0; i < 10; i++) {
-  console.log(`fib(${i}) = ${fib(i)}`);
+let i = 0;
+while (i < 10) {
+  println("fib(", i, ") = ", fib(i));
+  i = i + 1;
 }

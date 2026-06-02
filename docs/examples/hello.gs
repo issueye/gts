@@ -1,7 +1,8 @@
 // hello.gs —— 最小示例
-let name: string = "GoScript";
+let name = "GoScript";
 console.log("Hello, " + name + "!");
 
-let nums: number[] = [1, 2, 3, 4, 5];
-let sum: number = nums.reduce((a: number, b: number) => a + b, 0);
+let nums = [1, 2, 3, 4, 5];
+let sum = 0;
+nums.forEach(x => { sum = sum + x; });
 console.log("sum =", sum);
