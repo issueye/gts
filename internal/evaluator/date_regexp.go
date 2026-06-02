@@ -43,6 +43,13 @@ var dateMethods = map[string]object.BuiltinFunc{
 	"setMinutes":         builtinDateSetMinutes,
 	"setSeconds":         builtinDateSetSeconds,
 	"setMilliseconds":    builtinDateSetMilliseconds,
+	"setUTCFullYear":     builtinDateSetUTCFullYear,
+	"setUTCMonth":        builtinDateSetUTCMonth,
+	"setUTCDate":         builtinDateSetUTCDate,
+	"setUTCHours":        builtinDateSetUTCHours,
+	"setUTCMinutes":      builtinDateSetUTCMinutes,
+	"setUTCSeconds":      builtinDateSetUTCSeconds,
+	"setUTCMilliseconds": builtinDateSetUTCMilliseconds,
 }
 
 var regexpMethods = map[string]object.BuiltinFunc{
@@ -290,49 +297,91 @@ func builtinDateSetTime(env *object.Environment, pos ast.Position, args ...objec
 	return &object.Number{Value: dateMillis(d.Time)}
 }
 
-func setLocalDate(env *object.Environment, pos ast.Position, args []object.Object, update func(time.Time, []object.Object) time.Time, name string) object.Object {
+func setDateInZone(env *object.Environment, pos ast.Position, args []object.Object, utc bool, update func(time.Time, []object.Object, *time.Location) time.Time, name string) object.Object {
 	d, err := dateReceiver(env, pos, name)
 	if err != nil {
 		return err
 	}
-	d.Time = update(d.Time.Local(), args)
+	loc := time.Local
+	t := d.Time.Local()
+	if utc {
+		loc = time.UTC
+		t = d.Time.UTC()
+	}
+	d.Time = update(t, args, loc)
 	return &object.Number{Value: dateMillis(d.Time)}
 }
 
 func builtinDateSetFullYear(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	return setLocalDate(env, pos, args, func(t time.Time, args []object.Object) time.Time {
-		return time.Date(dateNumber(args, 0, t.Year()), time.Month(dateNumber(args, 1, int(t.Month())-1)+1), dateNumber(args, 2, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
+	return setDateInZone(env, pos, args, false, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(dateNumber(args, 0, t.Year()), time.Month(dateNumber(args, 1, int(t.Month())-1)+1), dateNumber(args, 2, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 	}, "Date.setFullYear")
 }
 func builtinDateSetMonth(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	return setLocalDate(env, pos, args, func(t time.Time, args []object.Object) time.Time {
-		return time.Date(t.Year(), time.Month(dateNumber(args, 0, int(t.Month())-1)+1), dateNumber(args, 1, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
+	return setDateInZone(env, pos, args, false, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), time.Month(dateNumber(args, 0, int(t.Month())-1)+1), dateNumber(args, 1, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 	}, "Date.setMonth")
 }
 func builtinDateSetDate(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	return setLocalDate(env, pos, args, func(t time.Time, args []object.Object) time.Time {
-		return time.Date(t.Year(), t.Month(), dateNumber(args, 0, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.Local)
+	return setDateInZone(env, pos, args, false, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), dateNumber(args, 0, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
 	}, "Date.setDate")
 }
 func builtinDateSetHours(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	return setLocalDate(env, pos, args, func(t time.Time, args []object.Object) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), dateNumber(args, 0, t.Hour()), dateNumber(args, 1, t.Minute()), dateNumber(args, 2, t.Second()), dateNumber(args, 3, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), time.Local)
+	return setDateInZone(env, pos, args, false, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), dateNumber(args, 0, t.Hour()), dateNumber(args, 1, t.Minute()), dateNumber(args, 2, t.Second()), dateNumber(args, 3, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
 	}, "Date.setHours")
 }
 func builtinDateSetMinutes(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	return setLocalDate(env, pos, args, func(t time.Time, args []object.Object) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), dateNumber(args, 0, t.Minute()), dateNumber(args, 1, t.Second()), dateNumber(args, 2, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), time.Local)
+	return setDateInZone(env, pos, args, false, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), dateNumber(args, 0, t.Minute()), dateNumber(args, 1, t.Second()), dateNumber(args, 2, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
 	}, "Date.setMinutes")
 }
 func builtinDateSetSeconds(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	return setLocalDate(env, pos, args, func(t time.Time, args []object.Object) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), dateNumber(args, 0, t.Second()), dateNumber(args, 1, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), time.Local)
+	return setDateInZone(env, pos, args, false, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), dateNumber(args, 0, t.Second()), dateNumber(args, 1, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
 	}, "Date.setSeconds")
 }
 func builtinDateSetMilliseconds(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	return setLocalDate(env, pos, args, func(t time.Time, args []object.Object) time.Time {
-		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), dateNumber(args, 0, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), time.Local)
+	return setDateInZone(env, pos, args, false, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), dateNumber(args, 0, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
 	}, "Date.setMilliseconds")
+}
+
+func builtinDateSetUTCFullYear(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return setDateInZone(env, pos, args, true, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(dateNumber(args, 0, t.Year()), time.Month(dateNumber(args, 1, int(t.Month())-1)+1), dateNumber(args, 2, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+	}, "Date.setUTCFullYear")
+}
+func builtinDateSetUTCMonth(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return setDateInZone(env, pos, args, true, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), time.Month(dateNumber(args, 0, int(t.Month())-1)+1), dateNumber(args, 1, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+	}, "Date.setUTCMonth")
+}
+func builtinDateSetUTCDate(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return setDateInZone(env, pos, args, true, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), dateNumber(args, 0, t.Day()), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+	}, "Date.setUTCDate")
+}
+func builtinDateSetUTCHours(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return setDateInZone(env, pos, args, true, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), dateNumber(args, 0, t.Hour()), dateNumber(args, 1, t.Minute()), dateNumber(args, 2, t.Second()), dateNumber(args, 3, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
+	}, "Date.setUTCHours")
+}
+func builtinDateSetUTCMinutes(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return setDateInZone(env, pos, args, true, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), dateNumber(args, 0, t.Minute()), dateNumber(args, 1, t.Second()), dateNumber(args, 2, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
+	}, "Date.setUTCMinutes")
+}
+func builtinDateSetUTCSeconds(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return setDateInZone(env, pos, args, true, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), dateNumber(args, 0, t.Second()), dateNumber(args, 1, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
+	}, "Date.setUTCSeconds")
+}
+func builtinDateSetUTCMilliseconds(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return setDateInZone(env, pos, args, true, func(t time.Time, args []object.Object, loc *time.Location) time.Time {
+		return time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), dateNumber(args, 0, t.Nanosecond()/int(time.Millisecond))*int(time.Millisecond), loc)
+	}, "Date.setUTCMilliseconds")
 }
 
 func builtinRegExp(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

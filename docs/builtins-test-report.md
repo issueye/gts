@@ -45,7 +45,7 @@
 | 7 | `String.raw` | 已实现基础调用形态：读取 `{ raw: [...] }` 并交织替换值 | 已覆盖 |
 | 8 | Number 静态属性、静态方法、实例方法 | 已实现文档列出项：安全整数边界、浮点常量、Infinity/NaN、`isInteger/isFinite/isNaN/isSafeInteger/parseFloat/parseInt`、`toString/toFixed/toPrecision/toExponential` | 已覆盖 |
 | 9 | Boolean wrapper | 已实现基础版：`new Boolean(...).valueOf()`、`toString()`；全局 `Boolean()` 保持原始布尔转换 | 已覆盖 |
-| 10 | Date | 已实现基础版：构造、`Date.now/parse/UTC`、常用 getter/setter、`getTime/valueOf/toISOString/toLocale*` | 已覆盖 |
+| 10 | Date | 已实现基础版：构造、`Date.now/parse/UTC`、本地与 UTC getter/setter、`getTime/valueOf/toISOString/toLocale*` | 已覆盖 |
 | 11 | RegExp | 已实现基础版：构造、`test/exec`、`source/flags/global/ignoreCase`；字符串 `match/search/replace` 已支持 RegExp 基础协作 | 已覆盖 |
 | 12 | `new Promise`、`resolve`、`reject`、`all`、实例 `then/catch/finally` | 已实现 | 已覆盖 |
 | 12 | `Promise.race`、`Promise.allSettled` | 已实现基础版 | 已覆盖 |
@@ -99,6 +99,6 @@
 ## 后续补齐建议
 
 1. 先拆分 `docs/builtins.md`：把“当前已实现 API”和“路线图/目标 API”分开，避免使用者误判。
-2. 第一优先级补强 Date/RegExp/Map/Set 的完整语义：UTC 系列、RegExp flags 全量兼容、迭代协议。
+2. 第一优先级补强 RegExp/Map/Set 的完整语义：RegExp flags 全量兼容、迭代协议细节。
 3. 第二优先级修正文档中的标准模块命名：当前网络模块使用 `@std/net/http/client`、`@std/net/http/server`、`@std/net/socket/*`、`@std/net/ws/*`，而不是裸 `net/http/url`。
 4. Go 嵌入章节需要按当前 `lexer/parser/evaluator/object/module` API 重写可运行示例。
