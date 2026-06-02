@@ -58,6 +58,7 @@ const (
 	TOKEN_VOID      TokenType = "VOID"      // void
 	TOKEN_STATIC    TokenType = "STATIC"    // static
 	TOKEN_MATCH     TokenType = "MATCH"     // match
+	TOKEN_DEFAULT   TokenType = "DEFAULT"   // (reserved, not implemented)
 
 	// --- Single-character operators ---
 	TOKEN_PLUS     TokenType = "PLUS"     // +
