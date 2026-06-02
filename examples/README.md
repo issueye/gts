@@ -45,6 +45,7 @@ go run ./cmd/gs examples/01-basics.gs
 | 稳定回归 | `docs/examples/fib.gs` |
 | 稳定回归 | `docs/examples/counter.gs` |
 | 稳定回归 | `docs/examples/modules.gs` |
+| 稳定回归 | `docs/examples/sqlite.gs` |
 
 其余示例目前保留为教学/目标行为示例，暂不纳入自动测试。主要原因是部分示例使用了尚未完整支持的语法、类型检查能力，或包含异步、网络、长时间运行行为。后续每修复一类能力，再把对应示例移动到稳定回归清单。
 

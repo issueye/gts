@@ -234,6 +234,42 @@ text + ":" + names[0] + ":" + fileKind + ":" + existsKind;
 	}
 }
 
+func TestStdFSEnhancedModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "fs_enhanced.gs")
+	work := filepath.Join(dir, "work")
+	appSource := strings.ReplaceAll(`
+let fs = require("@std/fs");
+let path = require("@std/path");
+let root = "__WORK__";
+fs.mkdirSync(path.join(root, "nested"), { recursive: true });
+let file = path.join(root, "nested", "note.txt");
+fs.writeFileAtomicSync(file, "one");
+fs.appendFileSync(file, "\ntwo");
+let text = fs.readTextSync(file);
+let entries = fs.walkSync(root, { includeDirs: false });
+let countKind = "bad";
+if (entries.length === 1) {
+  countKind = "one-file";
+}
+text + ":" + countKind + ":" + entries[0].relativePath;
+`, "__WORK__", strings.ReplaceAll(work, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	want := "one\ntwo:one-file:" + filepath.Join("nested", "note.txt")
+	if !ok || str.Value != want {
+		t.Fatalf("want %q, got %T %v", want, result, result)
+	}
+}
+
 func TestStdProcessAndOSModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "env.gs")
@@ -423,6 +459,84 @@ okKind + ":" + first.data + ":" + second.type + ":" + second.data;
 	}
 }
 
+func TestStdDBSQLiteModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "db_sqlite.gs")
+	if err := os.WriteFile(script, []byte(`
+let dbmod = require("@std/db");
+let conn = dbmod.open("sqlite", ":memory:");
+conn.exec("create table users (id integer primary key, name text, age integer)");
+conn.exec("insert into users (name, age) values (?, ?)", ["Ada", 36]);
+conn.exec("insert into users (name, age) values (?, ?)", ["Linus", 55]);
+let rows = conn.query("select name, age from users where age > ? order by age", [40]);
+let one = conn.queryOne("select name from users where name = ?", ["Ada"]);
+conn.close();
+let rowsKind = "rows-bad";
+if (rows.length === 1) {
+  rowsKind = "rows-ok";
+}
+rowsKind + ":" + rows[0].name + ":" + one.name;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "rows-ok:Linus:Ada" {
+		t.Fatalf("want rows-ok:Linus:Ada, got %T %v", result, result)
+	}
+}
+
+func TestStdDBSQLiteAdvancedModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "db_sqlite_advanced.gs")
+	if err := os.WriteFile(script, []byte(`
+let dbmod = require("@std/db");
+let conn = dbmod.open("sqlite", ":memory:");
+conn.setMaxOpenConns(1);
+conn.setMaxIdleConns(1);
+conn.exec("create table items (id integer primary key, name text)");
+
+let tx = conn.begin();
+let insert = tx.prepare("insert into items (name) values (?)");
+insert.exec(["committed"]);
+insert.close();
+tx.commit();
+
+let rolled = conn.begin();
+rolled.exec("insert into items (name) values (?)", ["rolled-back"]);
+rolled.rollback();
+
+let select = conn.prepare("select name from items order by id");
+let rows = select.query();
+select.close();
+let one = conn.queryOne("select name from items where id = ?", [1]);
+conn.close();
+
+let rowsKind = "bad";
+if (rows.length === 1) {
+  rowsKind = "one-row";
+}
+rowsKind + ":" + rows[0].name + ":" + one.name;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "one-row:committed:committed" {
+		t.Fatalf("want one-row:committed:committed, got %T %v", result, result)
+	}
+}
+
 func TestImportNamedExports(t *testing.T) {
 	dir := t.TempDir()
 	mathFile := filepath.Join(dir, "math.gs")
@@ -601,6 +715,7 @@ func TestStableExamples(t *testing.T) {
 		filepath.Join(root, "docs", "examples", "fib.gs"),
 		filepath.Join(root, "docs", "examples", "counter.gs"),
 		filepath.Join(root, "docs", "examples", "modules.gs"),
+		filepath.Join(root, "docs", "examples", "sqlite.gs"),
 	}
 
 	for _, example := range examples {

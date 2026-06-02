@@ -31,7 +31,7 @@ func initPathModule(exports *object.Hash) {
 func pathJoin(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	parts, err := stringArgs("path.join", args)
 	if err != "" {
-		return object.NewError(pos, err)
+		return object.NewError(pos, "%s", err)
 	}
 	return &object.String{Value: filepath.Join(parts...)}
 }
@@ -39,7 +39,7 @@ func pathJoin(env *object.Environment, pos ast.Position, args ...object.Object) 
 func pathResolve(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	parts, err := stringArgs("path.resolve", args)
 	if err != "" {
-		return object.NewError(pos, err)
+		return object.NewError(pos, "%s", err)
 	}
 	joined := filepath.Join(parts...)
 	if joined == "" {

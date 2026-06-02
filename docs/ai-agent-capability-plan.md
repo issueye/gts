@@ -14,7 +14,7 @@
 | 层级 | 实现位置 | 说明 |
 |---|---|---|
 | 语言语法和求值语义 | Go 解释器 | 模块、异步、错误、对象、迭代、类型/schema 等基础能力 |
-| 原生标准库 | Go 原生模块 | 文件、路径、进程、HTTP、SSE、WebSocket、stream、buffer、crypto 等宿主能力 |
+| 原生标准库 | Go 原生模块 | 文件、路径、进程、HTTP、SSE、WebSocket、stream、buffer、crypto、database 等宿主能力 |
 | Agent 框架 | GoScript 脚本 | `Agent`、agent loop、provider 适配、tool registry、session、资源发现 |
 | Coding tools | 优先 GoScript 脚本，必要时调用原生标准库 | `read/write/edit/bash/grep/find/ls` 等工具 |
 | CLI 外壳 | Go + GoScript | Go 负责加载入口脚本和宿主参数，agent 行为由脚本库完成 |
@@ -35,6 +35,7 @@
 | Agent loop | async/await 稳定、队列、事件分发、可组合模块 |
 | 会话持久化 | fs/path/os/process、JSONL 读写、时间/uuid/hash |
 | Coding tools | 文件读写、目录遍历、进程执行、正则/搜索、diff/patch 辅助 |
+| 数据库访问 | SQLite/PostgreSQL/MySQL/MSSQL 原生驱动、统一 query/exec API、连接生命周期 |
 | Skills/Prompt templates | 文件发现、Markdown 文本处理、模板渲染、路径规范化 |
 | 扩展机制 | 动态模块加载、稳定 module cache、插件入口约定、脚本隔离/错误边界 |
 | TUI/RPC | stdin/stdout stream、JSONL framing、终端输入输出、可取消任务 |
@@ -71,11 +72,12 @@
 | C 风格 `for` 循环 | 已修复基础缺陷 | 修复 `for (let i = 0; ...)` 试探解析吞 token 的问题，闭包和工具 registry 循环可稳定运行 |
 | Agent 模块别名 | 已完成基础版 | `@agent/*` 映射到项目根目录下 `scripts/agent/*`，并支持默认 `.gs` 扩展 |
 | `@std/path` | 已完成基础版 | `join/resolve/relative/normalize/dirname/basename/extname/sep` |
-| `@std/fs` | 已完成基础版 | `readFileSync/writeFileSync/existsSync/readdirSync/mkdirSync/statSync/renameSync/unlinkSync` |
+| `@std/fs` | 已完成增强版 | `readFileSync/writeFileSync/readTextSync/writeTextSync/appendFileSync/writeFileAtomicSync/existsSync/readdirSync/walkSync/mkdirSync/statSync/renameSync/unlinkSync` |
 | `@std/process` | 已完成基础版 | `argv/env/pid/cwd/chdir/getenv/setenv/unsetenv/exit` |
 | `@std/os` | 已完成基础版 | `platform/arch/homedir/tmpdir/hostname` |
 | `@std/crypto` | 已完成基础版 | `randomUUID/sha256/randomBytes` |
 | `@std/schema` | 已完成基础版 | JSON Schema 子集：`type/properties/required/items/enum/additionalProperties/min/max` 等 |
+| `@std/db` | 已完成增强版 | 统一 `open/exec/query/queryOne/prepare/begin/ping/close`，支持事务、预编译语句、连接池配置；SQLite 使用 `modernc.org/sqlite` no-cgo 驱动 |
 | 脚本工具库 | 已完成最小版 | `@agent/tools/registry`、`@agent/tools/files` 已能完成工具注册、schema 校验、文件读写和目录列表 |
 | 脚本 coding tools | 已完成最小版 | `@agent/tools/bash`、`@agent/tools/grep`、`@agent/tools/coding` 已可由脚本执行 shell、纯文本搜索并聚合工具 |
 | 脚本 session | 已完成最小版 | `@agent/session/jsonl` 已可写入和读取 JSONL 会话记录 |
@@ -97,10 +99,11 @@
 | 完整模块语义 | `import/export`、循环依赖、native import 仍需加固 | agent 框架要拆成多个 `.gs` 模块 |
 | 结构化错误 | `Error` 子类、`stack`、file/line 不完整 | provider/tool/session 错误必须可诊断 |
 | JSON 和对象稳定性 | `JSON.stringify`、对象枚举、深层结构仍需加强 | provider payload、tool result、session JSONL 都依赖 |
-| 文件/路径标准库 | `@std/fs`、`@std/path` 已有基础版，仍需 glob、walk、原子写、权限细节 | read/write/edit/session/skills 都依赖 |
+| 文件/路径标准库 | `@std/fs`、`@std/path` 已有增强版，仍需 glob、权限细节、watch | read/write/edit/session/skills 都依赖 |
 | HTTP streaming/SSE | 已有基础版，仍需 async iterator、abort、背压和更完整超时模型 | LLM provider 流式输出的底层能力 |
 | 进程执行增强 | `@std/exec` 已有，但缺少 cwd/env/timeout/stream/cancel 完整模型 | `bash` tool 必须可靠可控 |
 | Schema 校验 | 已有 JSON Schema 子集，仍需默认值、格式校验和更完整错误聚合 | 工具调用参数必须校验 |
+| 数据库标准库 | 已有 `@std/db` 增强版，仍需命名参数、schema introspection、类型细化 | Agent 可用脚本实现数据库工具和数据查询任务 |
 
 ### 4.2 P1：Agent MVP 需要
 
@@ -156,6 +159,7 @@ internal/stdlib
   @std/schema
   @std/buffer
   @std/crypto
+  @std/db
 
 scripts/agent/
   core/agent.gs
@@ -246,8 +250,9 @@ Agent 行为则在 `scripts/agent` 中完成。
 
 **当前状态：**
 
-- `@std/fs`、`@std/path`、`@std/process`、`@std/os` 已完成基础同步 API。
-- 下一步应补 `@std/fs.walk/glob/readText/writeText/appendFileSync`、原子写、以及 `@std/exec` 的 timeout/env/cwd 一体化选项。
+- `@std/fs`、`@std/path`、`@std/process`、`@std/os` 已完成同步 API。
+- `@std/fs` 已支持文本读写、追加写、原子写和递归 walk。
+- 下一步应补 `@std/fs.glob/watch`、权限细节，以及 `@std/exec` 的 timeout/env/cwd 一体化选项。
 
 **验收：**
 
@@ -315,17 +320,25 @@ Agent 行为则在 `scripts/agent` 中完成。
   - randomUUID
   - sha256
   - randomBytes
+- `@std/db`：
+  - SQLite/PostgreSQL/MySQL/MSSQL 驱动注册
+  - open/exec/query/queryOne/ping/close
+  - SQLite 使用 no-cgo 驱动
+  - 事务、预编译语句、连接池配置
+  - 命名参数、schema introspection 后续补齐
 
 **当前状态：**
 
 - `@std/schema` 已支持 tool 参数校验常用子集，但还未支持 `default` 写回、`format`、`oneOf/anyOf`。
 - `@std/crypto` 已支持 `randomUUID/sha256/randomBytes`，后续应补 base64、HMAC、hex 编解码与 Buffer/bytes 互操作。
+- `@std/db` 已支持统一数据库 API、事务、预编译语句和连接池配置；SQLite 已通过内存库 smoke 和测试，PostgreSQL/MySQL/MSSQL 已注册驱动，实际连接测试依赖外部服务。
 
 **验收：**
 
 - tool 参数校验错误能指出字段路径。
 - session JSONL 可稳定写入/读取。
 - provider payload 能稳定序列化。
+- SQLite no-cgo 查询可在无外部数据库服务时通过 smoke。
 
 ### L5：脚本化 Agent 标准库
 

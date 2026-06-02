@@ -3,6 +3,7 @@ package stdlib
 import (
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/module"
@@ -19,9 +20,14 @@ func init() {
 
 func initFSModule(exports *object.Hash) {
 	setHashMember(exports, "readFileSync", &object.Builtin{Name: "fs.readFileSync", Fn: fsReadFileSync})
+	setHashMember(exports, "readTextSync", &object.Builtin{Name: "fs.readTextSync", Fn: fsReadFileSync})
 	setHashMember(exports, "writeFileSync", &object.Builtin{Name: "fs.writeFileSync", Fn: fsWriteFileSync})
+	setHashMember(exports, "writeTextSync", &object.Builtin{Name: "fs.writeTextSync", Fn: fsWriteFileSync})
+	setHashMember(exports, "appendFileSync", &object.Builtin{Name: "fs.appendFileSync", Fn: fsAppendFileSync})
+	setHashMember(exports, "writeFileAtomicSync", &object.Builtin{Name: "fs.writeFileAtomicSync", Fn: fsWriteFileAtomicSync})
 	setHashMember(exports, "existsSync", &object.Builtin{Name: "fs.existsSync", Fn: fsExistsSync})
 	setHashMember(exports, "readdirSync", &object.Builtin{Name: "fs.readdirSync", Fn: fsReaddirSync})
+	setHashMember(exports, "walkSync", &object.Builtin{Name: "fs.walkSync", Fn: fsWalkSync})
 	setHashMember(exports, "mkdirSync", &object.Builtin{Name: "fs.mkdirSync", Fn: fsMkdirSync})
 	setHashMember(exports, "statSync", &object.Builtin{Name: "fs.statSync", Fn: fsStatSync})
 	setHashMember(exports, "renameSync", &object.Builtin{Name: "fs.renameSync", Fn: fsRenameSync})
@@ -58,6 +64,64 @@ func fsWriteFileSync(env *object.Environment, pos ast.Position, args ...object.O
 	return object.UNDEFINED
 }
 
+func fsAppendFileSync(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	path, errObj := requiredString(pos, "fs.appendFileSync", args, 0, "path")
+	if errObj != nil {
+		return errObj
+	}
+	if len(args) < 2 {
+		return object.NewError(pos, "fs.appendFileSync requires data")
+	}
+	data := objectToText(args[1])
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return object.NewError(pos, "fs.appendFileSync: %v", err)
+	}
+	defer file.Close()
+	if _, err := file.WriteString(data); err != nil {
+		return object.NewError(pos, "fs.appendFileSync: %v", err)
+	}
+	return object.UNDEFINED
+}
+
+func fsWriteFileAtomicSync(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	path, errObj := requiredString(pos, "fs.writeFileAtomicSync", args, 0, "path")
+	if errObj != nil {
+		return errObj
+	}
+	if len(args) < 2 {
+		return object.NewError(pos, "fs.writeFileAtomicSync requires data")
+	}
+	data := objectToText(args[1])
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return object.NewError(pos, "fs.writeFileAtomicSync: %v", err)
+	}
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return object.NewError(pos, "fs.writeFileAtomicSync: %v", err)
+	}
+	tmpName := tmp.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(data); err != nil {
+		_ = tmp.Close()
+		return object.NewError(pos, "fs.writeFileAtomicSync: %v", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return object.NewError(pos, "fs.writeFileAtomicSync: %v", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return object.NewError(pos, "fs.writeFileAtomicSync: %v", err)
+	}
+	ok = true
+	return object.UNDEFINED
+}
+
 func fsExistsSync(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	path, errObj := requiredString(pos, "fs.existsSync", args, 0, "path")
 	if errObj != nil {
@@ -81,6 +145,54 @@ func fsReaddirSync(env *object.Environment, pos ast.Position, args ...object.Obj
 		elements[i] = &object.String{Value: entry.Name()}
 	}
 	return &object.Array{Elements: elements}
+}
+
+func fsWalkSync(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	root, errObj := requiredString(pos, "fs.walkSync", args, 0, "root")
+	if errObj != nil {
+		return errObj
+	}
+	includeDirs := true
+	if len(args) >= 2 {
+		if opts, ok := args[1].(*object.Hash); ok {
+			if v, ok := hashValue(opts, "includeDirs"); ok {
+				if b, ok := v.(*object.Boolean); ok {
+					includeDirs = b.Value
+				}
+			}
+		}
+	}
+	entries := []object.Object{}
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == root {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if info.IsDir() && !includeDirs {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			rel = path
+		}
+		item := statObject(path, info)
+		setHashMember(item, "relativePath", &object.String{Value: rel})
+		entries = append(entries, item)
+		return nil
+	})
+	if err != nil {
+		return object.NewError(pos, "fs.walkSync: %v", err)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Inspect() < entries[j].Inspect()
+	})
+	return &object.Array{Elements: entries}
 }
 
 func fsMkdirSync(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -158,6 +270,8 @@ func statObject(path string, info os.FileInfo) *object.Hash {
 	setHashMember(stat, "size", &object.Number{Value: float64(info.Size())})
 	setHashMember(stat, "mode", &object.String{Value: info.Mode().String()})
 	setHashMember(stat, "mtimeMs", &object.Number{Value: float64(info.ModTime().UnixMilli())})
+	setHashMember(stat, "isFileValue", object.NativeBool(info.Mode().IsRegular()))
+	setHashMember(stat, "isDirectoryValue", object.NativeBool(info.IsDir()))
 	setHashMember(stat, "isFile", &object.Builtin{Name: "fs.stat.isFile", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 		return object.NativeBool(info.Mode().IsRegular())
 	}})
@@ -165,6 +279,13 @@ func statObject(path string, info os.FileInfo) *object.Hash {
 		return object.NativeBool(info.IsDir())
 	}})
 	return stat
+}
+
+func objectToText(obj object.Object) string {
+	if s, ok := obj.(*object.String); ok {
+		return s.Value
+	}
+	return obj.Inspect()
 }
 
 func requiredString(pos ast.Position, name string, args []object.Object, index int, label string) (string, *object.Error) {
