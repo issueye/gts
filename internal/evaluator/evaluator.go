@@ -886,7 +886,10 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 		}
 		return result
 	case *object.Builtin:
-		return f.Fn(env, pos, args...)
+		env.Extra = f.Extra
+		result := f.Fn(env, pos, args...)
+		env.Extra = nil
+		return result
 	case *object.Class:
 		inst := &object.Instance{Class: f, Props: make(map[string]object.Object), Pos: pos}
 		for k, v := range f.Fields {
@@ -1012,6 +1015,10 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 		switch name {
 		case "length":
 			return &object.Number{Value: float64(len(o.Elements))}
+		default:
+			if fn, ok := arrayMethods[name]; ok {
+				return &object.Builtin{Name: "Array." + name, Fn: fn, Extra: o}
+			}
 		}
 	}
 	return object.NewError(pos, "TypeError: cannot read property '%s' of %s", name, obj.Type())

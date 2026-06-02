@@ -145,9 +145,15 @@ func (f *Function) Inspect() string {
 
 // --- Builtin ---
 
+// BuiltinFunc is the signature for built-in function implementations.
+type BuiltinFunc func(env *Environment, pos ast.Position, args ...Object) Object
+
+// --- Builtin ---
+
 type Builtin struct {
-	Name string
-	Fn   func(env *Environment, pos ast.Position, args ...Object) Object
+	Name  string
+	Fn    BuiltinFunc
+	Extra Object // context for array/string method binding
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_OBJ }

@@ -101,6 +101,7 @@ func New(l *lexer.Lexer, file string) *Parser {
 	p.registerInfix(lexer.TOKEN_PLUS_PLUS, p.parsePostfix)
 	p.registerInfix(lexer.TOKEN_MINUS_MINUS, p.parsePostfix)
 	p.registerInfix(lexer.TOKEN_QUESTION, p.parseTernary)
+	p.registerInfix(lexer.TOKEN_ARROW, p.parseArrowInfix)
 	p.registerInfix(lexer.TOKEN_EQ, p.parseAssign)
 	for _, t := range []lexer.TokenType{
 		lexer.TOKEN_PLUS_EQ, lexer.TOKEN_MINUS_EQ, lexer.TOKEN_STAR_EQ,
@@ -204,6 +205,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.TOKEN_QM_DOT:     PREC_CALL,
 	lexer.TOKEN_PLUS_PLUS:  PREC_POSTFIX,
 	lexer.TOKEN_MINUS_MINUS: PREC_POSTFIX,
+	lexer.TOKEN_ARROW:      PREC_ASSIGN,
 }
 
 // ============================================================================
@@ -1203,11 +1205,31 @@ func (p *Parser) parseOptional(left ast.Expression) ast.Expression {
 	return &ast.OptionalExpr{Pos_: p.pos(), TokenLit: "?.", Object: left, Property: prop}
 }
 
-func (p *Parser) parsePostfix(left ast.Expression) ast.Expression {op := p.cur.Literal
+func (p *Parser) parseArrowInfix(left ast.Expression) ast.Expression {
+	ident, ok := left.(*ast.Ident)
+	if !ok {
+		p.nextToken() // skip stray =>
+		return left
+	}
+	params := []*ast.Param{{Pos_: ident.Pos_, Name: ident.TokenLit}}
+	p.nextToken() // skip =>
+	var body ast.Node
+	if p.curTokenIs(lexer.TOKEN_LBRACE) {
+		body = p.parseBlock()
+	} else {
+		body = p.parseExpression(PREC_COMMA)
+	}
+	return &ast.ArrowFuncExpr{Pos_: p.pos(), TokenLit: "=>", Params: params, Body: body}
+}
+
+func (p *Parser) parsePostfix(left ast.Expression) ast.Expression {
+	op := p.cur.Literal
 	return &ast.InfixExpr{Pos_: p.pos(), TokenLit: op, Op: op, Left: left, Right: nil}
 }
 
-func (p *Parser) parseMatch() ast.Expression {tokLit := p.cur.Literal
+func (p *Parser) parseMatch() ast.Expression {
+	start := p.pos()
+	tokLit := p.cur.Literal
 	p.nextToken() // skip match
 	expr := p.parseExpression(PREC_COMMA)
 	if !p.curTokenIs(lexer.TOKEN_LBRACE) {
@@ -1232,7 +1254,7 @@ func (p *Parser) parseMatch() ast.Expression {tokLit := p.cur.Literal
 		p.nextToken()
 	}
 	p.nextToken() // }
-	return &ast.MatchExpr{Pos_: p.pos(), TokenLit: tokLit, Expr: expr, Arms: arms}
+	return &ast.MatchExpr{Pos_: start, TokenLit: tokLit, Expr: expr, Arms: arms}
 }
 
 func (p *Parser) parseMatchArm() *ast.MatchArm {
@@ -1281,7 +1303,7 @@ func (p *Parser) parsePattern() ast.Pattern {// Parse first primary pattern
 
 func (p *Parser) parsePrimaryPattern() ast.Pattern {switch p.cur.Type {
 	case lexer.TOKEN_NUMBER, lexer.TOKEN_STRING, lexer.TOKEN_TRUE, lexer.TOKEN_FALSE, lexer.TOKEN_NULL, lexer.TOKEN_UNDEFINED:
-		lit := p.parseExpression(PREC_COMMA)
+		lit := p.parseExpression(PREC_COMMA - 1)
 		// After parseExpression, cur is past the literal. Check for range.
 		if p.curTokenIs(lexer.TOKEN_DOT_DOT) || p.curTokenIs(lexer.TOKEN_DOT_DOT_EQ) {
 			inclusive := p.curTokenIs(lexer.TOKEN_DOT_DOT_EQ)

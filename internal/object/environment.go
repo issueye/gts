@@ -6,6 +6,7 @@ import "github.com/issueye/goscript/internal/ast"
 type Environment struct {
 	store  map[string]Object
 	parent *Environment
+	Extra  Object // bound context for method dispatch (array/string instance)
 	Pos    ast.Position
 }
 
