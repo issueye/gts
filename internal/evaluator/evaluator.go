@@ -420,31 +420,55 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 		Name:    n.Name,
 		Methods: make(map[string]*object.Function),
 		Fields:  make(map[string]object.Object),
+		Statics: make(map[string]object.Object),
 		Pos:     n.Pos(),
 	}
+	// Resolve super class
+	if n.Super != nil {
+		superVal := Eval(n.Super, env)
+		if superClass, ok := superVal.(*object.Class); ok {
+			cls.Super = superClass
+			// Copy parent methods
+			for k, v := range superClass.Methods {
+				cls.Methods[k] = v
+			}
+		} else {
+			return object.NewError(n.Pos(), "TypeError: superclass must be a class")
+		}
+	}
+	// Parse members
 	for _, m := range n.Body.Members {
 		switch m.Kind {
 		case "constructor", "method":
-			var methParams []*ast.Param
-			var methBody *ast.BlockStmt
-			if m.Body != nil {
-				methParams = m.Params
-				methBody = m.Body
+			if m.IsStatic {
+				fn := &object.Function{
+					Name:       m.Name,
+					Parameters: m.Params,
+					Body:       m.Body,
+					Env:        env,
+					Pos:        m.Pos_,
+				}
+				cls.Statics[m.Name] = fn
+				continue
 			}
 			fn := &object.Function{
 				Name:       m.Name,
-				Parameters: methParams,
-				Body:       methBody,
+				Parameters: m.Params,
+				Body:       m.Body,
 				Env:        env,
 				Pos:        m.Pos_,
 			}
 			cls.Methods[m.Name] = fn
 		case "field":
-		var val object.Object = object.UNDEFINED
+			var val object.Object = object.UNDEFINED
 			if m.DefaultVal != nil {
 				val = Eval(m.DefaultVal, env)
 			}
-			cls.Fields[m.Name] = val
+			if m.IsStatic {
+				cls.Statics[m.Name] = val
+			} else {
+				cls.Fields[m.Name] = val
+			}
 		}
 	}
 	env.Set(n.Name, cls)
@@ -793,6 +817,11 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 			hash.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: right}
 			return right
 		}
+		if inst, ok := obj.(*object.Instance); ok {
+			name := left.Property.(*ast.Ident).TokenLit
+			inst.Props[name] = right
+			return right
+		}
 		return object.NewError(left.Pos(), "TypeError: cannot assign to property of %T", obj)
 	case *ast.IndexExpr:
 		arr := Eval(left.Left, env)
@@ -894,6 +923,14 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 		inst := &object.Instance{Class: f, Props: make(map[string]object.Object), Pos: pos}
 		for k, v := range f.Fields {
 			inst.Props[k] = v
+		}
+		// Call super constructor first if there's a parent class
+		if f.Super != nil {
+			if superCon, ok := f.Super.Methods["constructor"]; ok {
+				scope := superCon.Env.NewScope()
+				scope.Set("this", inst)
+				Eval(superCon.Body, scope)
+			}
 		}
 		if con, ok := f.Methods["constructor"]; ok {
 			scope := con.Env.NewScope()
@@ -1006,6 +1043,15 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 			bound.Env = methodScope
 			return &bound
 		}
+		return object.NewError(pos, "TypeError: '%s' is not a property of %s", name, o.Class.Name)
+	case *object.Class:
+		if v, ok := o.Statics[name]; ok {
+			return v
+		}
+		if m, ok := o.Methods[name]; ok {
+			return m
+		}
+		return object.NewError(pos, "TypeError: '%s' is not a static member of %s", name, o.Name)
 	case *object.String:
 		switch name {
 		case "length":

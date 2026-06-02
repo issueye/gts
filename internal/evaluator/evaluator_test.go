@@ -331,6 +331,49 @@ func TestEval_NaN(t *testing.T) {
 	}
 }
 
+func TestEval_ClassBasic(t *testing.T) {
+	input := `
+class Animal {
+  constructor(name) { this.name = name; }
+  speak() { println(this.name, "says hi"); }
+}
+let a = new Animal("Rex");
+a.name;
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "Rex")
+}
+
+func TestEval_ClassExtends(t *testing.T) {
+	input := `
+class Animal {
+  constructor(name) { this.name = name; }
+  greet() { return this.name; }
+}
+class Dog extends Animal {
+  bark() { return this.name + " barks"; }
+}
+let d = new Dog("Rex");
+d.greet() + " " + d.bark();
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "Rex Rex barks")
+}
+
+func TestEval_ClassThisBinding(t *testing.T) {
+	input := `
+class Counter {
+  constructor(start) { this.n = start; }
+  inc() { this.n = this.n + 1; return this.n; }
+  dec() { this.n = this.n - 1; return this.n; }
+}
+let c = new Counter(5);
+c.inc(); c.inc(); c.dec();
+`
+	evaluated := testEval(input)
+	testNumber(t, evaluated, "6")
+}
+
 func TestEval_StringMethods(t *testing.T) {
 	tests := []struct{ input, expected string }{
 		{`"hello".length;`, "5"},

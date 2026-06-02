@@ -181,6 +181,7 @@ type Class struct {
 	Super   *Class
 	Methods map[string]*Function
 	Fields  map[string]Object
+	Statics map[string]Object
 	Pos     ast.Position
 }
 
