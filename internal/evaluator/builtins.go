@@ -50,6 +50,24 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 	})
 	registerJSON(env)
 	registerObject(env)
+	registerAsync(env)
+
+	// Wire up the goroutine pool
+	if Pool != nil {
+		object.Spawn = Pool.Go
+	} else {
+		object.Spawn = Go
+	}
+
+	// Wire up the async evaluator bridge
+	object.EvalPromiseFn = func(node interface{}, env *object.Environment, promise *object.Promise) {
+		result := Eval(node.(ast.Node), env)
+		if rv, ok := result.(*object.ReturnValue); ok {
+			promise.Resolve(rv.Value)
+			return
+		}
+		promise.Resolve(result)
+	}
 
 	if require != nil {
 		env.Set("require", &object.Builtin{Name: "require", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

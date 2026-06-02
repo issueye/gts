@@ -909,6 +909,20 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 				scope.Set(p.Name, object.UNDEFINED)
 			}
 		}
+		if f.IsAsync {
+			promise := object.NewPromise()
+			AsyncWG.Add(1)
+			Go(func() {
+				defer AsyncWG.Done()
+				result := Eval(f.Body, scope)
+				if rv, ok := result.(*object.ReturnValue); ok {
+					promise.Resolve(rv.Value)
+				} else {
+					promise.Resolve(result)
+				}
+			})
+			return promise
+		}
 		result := Eval(f.Body, scope)
 		if rv, ok := result.(*object.ReturnValue); ok {
 			return rv.Value
@@ -1114,6 +1128,7 @@ func evalFuncExpr(n *ast.FuncExpr, env *object.Environment) object.Object {
 		Parameters: n.Params,
 		Body:       n.Body,
 		Env:        env,
+		IsAsync:    n.IsAsync,
 		Pos:        n.Pos(),
 	}
 }
@@ -1155,7 +1170,11 @@ func evalNew(n *ast.NewExpr, env *object.Environment) object.Object {
 // ============================================================================
 
 func evalAwait(n *ast.AwaitExpr, env *object.Environment) object.Object {
-	return Eval(n.Value, env)
+	val := Eval(n.Value, env)
+	if promise, ok := val.(*object.Promise); ok {
+		return promise.Wait()
+	}
+	return val
 }
 
 // ============================================================================

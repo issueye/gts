@@ -599,7 +599,9 @@ func (p *Parser) parseFuncDecl() *ast.FuncDecl {tokLit := p.cur.Literal
 func (p *Parser) parseAsyncFuncDecl() *ast.FuncDecl {
 	p.nextToken()
 	if p.curTokenIs(lexer.TOKEN_FUNCTION) {
-		return p.parseFuncDecl()
+		fn := p.parseFuncDecl()
+		fn.IsAsync = true
+		return fn
 	}
 	return nil
 }
@@ -1101,7 +1103,8 @@ func (p *Parser) parseFunction() ast.Expression {tokLit := p.cur.Literal
 	return &ast.FuncExpr{Pos_: p.pos(), TokenLit: tokLit, Name: name, Params: params, ReturnT: retT, Body: body}
 }
 
-func (p *Parser) parseAsyncFunc() ast.Expression {p.nextToken()
+func (p *Parser) parseAsyncFunc() ast.Expression {
+	p.nextToken()
 	if p.curTokenIs(lexer.TOKEN_FUNCTION) {
 		fn := p.parseFunction()
 		fn.(*ast.FuncExpr).IsAsync = true
@@ -1111,7 +1114,7 @@ func (p *Parser) parseAsyncFunc() ast.Expression {p.nextToken()
 	if p.curTokenIs(lexer.TOKEN_LPAREN) {
 		return p.parseParenOrArrow()
 	}
-	return p.parseIdent() // async as expression, then maybe call
+	return p.parseIdent()
 }
 
 func (p *Parser) parseClassExpr() ast.Expression {decl := p.parseClassDecl()

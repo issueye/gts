@@ -1,0 +1,45 @@
+{
+  "name": "goscript",
+  "displayName": "GoScript",
+  "description": "GoScript language support with syntax highlighting",
+  "version": "0.1.0",
+  "publisher": "issueye",
+  "license": "MIT",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "goscript",
+        "aliases": [
+          "GoScript",
+          "goscript"
+        ],
+        "extensions": [
+          ".gs"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "goscript",
+        "scopeName": "source.gs",
+        "path": "./syntaxes/gs.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "package": "npx @vscode/vsce package",
+    "install:local": "npx @vscode/vsce package --skip-version-check && code --install-extension *.vsix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/issueye/goscript"
+  }
+}
