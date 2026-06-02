@@ -1173,12 +1173,15 @@ func (p *Parser) parseCallArgs() []ast.Expression {
 	return args
 }
 
-func (p *Parser) parseMember(left ast.Expression) ast.Expression {p.nextToken()
+func (p *Parser) parseMember(left ast.Expression) ast.Expression {
+	p.nextToken()
 	prop := &ast.Ident{Pos_: p.pos(), TokenLit: p.cur.Literal}
+	p.nextToken()
 	return &ast.MemberExpr{Pos_: p.pos(), TokenLit: ".", Object: left, Property: prop, Computed: false}
 }
 
-func (p *Parser) parseOptional(left ast.Expression) ast.Expression {p.nextToken() // skip ?.
+func (p *Parser) parseOptional(left ast.Expression) ast.Expression {
+	p.nextToken() // skip ?.
 	if p.curTokenIs(lexer.TOKEN_LBRACK) {
 		p.nextToken()
 		idx := p.parseExpression(PREC_COMMA)
