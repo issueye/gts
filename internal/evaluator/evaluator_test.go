@@ -300,7 +300,9 @@ func TestEval_ArrayFlat(t *testing.T) {
 }
 
 func TestEval_Match(t *testing.T) {
-	t.Skip("match pattern evaluation: recursive parsePattern needs fix")
+	input := `match 1 { 1 => "one", _ => "other" };`
+	evaluated := testEval(input)
+	testString(t, evaluated, "one")
 }
 
 func TestEval_TypeError_PlusMixed(t *testing.T) {
