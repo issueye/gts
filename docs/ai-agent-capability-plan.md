@@ -14,7 +14,7 @@
 | 层级 | 实现位置 | 说明 |
 |---|---|---|
 | 语言语法和求值语义 | Go 解释器 | 模块、异步、错误、对象、迭代、类型/schema 等基础能力 |
-| 原生标准库 | Go 原生模块 | 文件、路径、进程、HTTP、SSE、WebSocket、stream、buffer、crypto、database 等宿主能力 |
+| 原生标准库 | Go 原生模块 | 文件、路径、进程、HTTP、SSE、WebSocket、stream、buffer、crypto、database、TOML/YAML/XML 等宿主能力 |
 | Agent 框架 | GoScript 脚本 | `Agent`、agent loop、provider 适配、tool registry、session、资源发现 |
 | Coding tools | 优先 GoScript 脚本，必要时调用原生标准库 | `read/write/edit/bash/grep/find/ls` 等工具 |
 | CLI 外壳 | Go + GoScript | Go 负责加载入口脚本和宿主参数，agent 行为由脚本库完成 |
@@ -36,7 +36,7 @@
 | 会话持久化 | fs/path/os/process、JSONL 读写、时间/uuid/hash |
 | Coding tools | 文件读写、目录遍历、进程执行、正则/搜索、diff/patch 辅助 |
 | 数据库访问 | SQLite/PostgreSQL/MySQL/MSSQL 原生驱动、统一 query/exec API、连接生命周期 |
-| Skills/Prompt templates | 文件发现、Markdown 文本处理、模板渲染、路径规范化 |
+| Skills/Prompt templates | 文件发现、Markdown/TOML/YAML/XML 文本处理、模板渲染、路径规范化 |
 | 扩展机制 | 动态模块加载、稳定 module cache、插件入口约定、脚本隔离/错误边界 |
 | TUI/RPC | stdin/stdout stream、JSONL framing、终端输入输出、可取消任务 |
 
@@ -78,11 +78,14 @@
 | `@std/crypto` | 已完成基础版 | `randomUUID/sha256/randomBytes` |
 | `@std/schema` | 已完成基础版 | JSON Schema 子集：`type/properties/required/items/enum/additionalProperties/min/max` 等 |
 | `@std/db` | 已完成增强版 | 统一 `open/exec/query/queryOne/prepare/begin/ping/close`，支持事务、预编译语句、连接池配置；SQLite 使用 `modernc.org/sqlite` no-cgo 驱动 |
+| `@std/toml` | 已完成基础版 | `parse/stringify/readFileSync/writeFileSync`，用于项目配置、agent 配置和 metadata |
+| `@std/yaml` | 已完成基础版 | `parse/stringify/readFileSync/writeFileSync`，用于配置、skills metadata 和工具输入输出 |
+| `@std/xml` | 已完成基础版 | `parse/stringify/readFileSync/writeFileSync`，返回 `name/attributes/children/text` 节点树 |
 | 脚本工具库 | 已完成最小版 | `@agent/tools/registry`、`@agent/tools/files` 已能完成工具注册、schema 校验、文件读写和目录列表 |
 | 脚本 coding tools | 已完成最小版 | `@agent/tools/bash`、`@agent/tools/grep`、`@agent/tools/coding` 已可由脚本执行 shell、纯文本搜索并聚合工具 |
 | 脚本 session | 已完成最小版 | `@agent/session/jsonl` 已可写入和读取 JSONL 会话记录 |
 | 脚本 agent loop | 已完成最小版 | `@agent/core/agent` + `@agent/llm/fake` 已能完成“provider 产生 tool call -> registry 调用工具 -> provider 返回最终消息”的两轮闭环 |
-| 脚本 smoke | 已完成基础版 | `scripts/agent/smoke_import.gs`、`smoke_std.gs`、`smoke_env.gs`、`smoke_schema.gs`、`smoke_tools.gs`、`smoke_coding_tools.gs`、`smoke_agent_loop.gs` 可验证脚本层使用标准库、工具库和最小 agent loop |
+| 脚本 smoke | 已完成基础版 | `scripts/agent/smoke_import.gs`、`smoke_std.gs`、`smoke_env.gs`、`smoke_schema.gs`、`smoke_config_codecs.gs`、`smoke_tools.gs`、`smoke_coding_tools.gs`、`smoke_agent_loop.gs` 可验证脚本层使用标准库、工具库和最小 agent loop |
 
 这些交付仍然是“基础版”：它们已足够让脚本开始实现 coding tools、session 和 tool schema。L3 已开始补齐 HTTP streaming、SSE 和 stream 抽象；真实 provider 适配仍应由 `.gs` 脚本实现。
 
@@ -99,6 +102,7 @@
 | 完整模块语义 | `import/export`、循环依赖、native import 仍需加固 | agent 框架要拆成多个 `.gs` 模块 |
 | 结构化错误 | `Error` 子类、`stack`、file/line 不完整 | provider/tool/session 错误必须可诊断 |
 | JSON 和对象稳定性 | `JSON.stringify`、对象枚举、深层结构仍需加强 | provider payload、tool result、session JSONL 都依赖 |
+| 配置格式标准库 | `@std/toml`、`@std/yaml`、`@std/xml` 已有基础版，仍需 XML 查询/命名空间、YAML schema 细节 | 项目配置、skills、外部工具配置和结构化文本都依赖 |
 | 文件/路径标准库 | `@std/fs`、`@std/path` 已有增强版，仍需 watch、权限细节、更完整 glob 规则 | read/write/edit/session/skills 都依赖 |
 | HTTP streaming/SSE | 已有基础版，仍需 async iterator、abort、背压和更完整超时模型 | LLM provider 流式输出的底层能力 |
 | 进程执行增强 | `@std/exec` 已有，但缺少 cwd/env/timeout/stream/cancel 完整模型 | `bash` tool 必须可靠可控 |
@@ -160,6 +164,9 @@ internal/stdlib
   @std/buffer
   @std/crypto
   @std/db
+  @std/toml
+  @std/yaml
+  @std/xml
 
 scripts/agent/
   core/agent.gs
@@ -326,12 +333,18 @@ Agent 行为则在 `scripts/agent` 中完成。
   - SQLite 使用 no-cgo 驱动
   - 事务、预编译语句、连接池配置
   - 命名参数、schema introspection 后续补齐
+- `@std/toml` / `@std/yaml` / `@std/xml`：
+  - `parse/stringify`
+  - `readFileSync/writeFileSync`
+  - XML 使用通用节点树：`name/attributes/children/text`
+  - 后续补 XML namespace、XPath/选择器、YAML schema/tag 细节
 
 **当前状态：**
 
 - `@std/schema` 已支持 tool 参数校验常用子集，但还未支持 `default` 写回、`format`、`oneOf/anyOf`。
 - `@std/crypto` 已支持 `randomUUID/sha256/randomBytes`，后续应补 base64、HMAC、hex 编解码与 Buffer/bytes 互操作。
 - `@std/db` 已支持统一数据库 API、事务、预编译语句和连接池配置；SQLite 已通过内存库 smoke 和测试，PostgreSQL/MySQL/MSSQL 已注册驱动，实际连接测试依赖外部服务。
+- `@std/toml`、`@std/yaml`、`@std/xml` 已支持原生解析、序列化和文件读写；XML 当前是基础节点树模型。
 
 **验收：**
 

@@ -365,6 +365,9 @@ err.stack;
 | `@std/fs` | `readFileSync`, `readTextSync`, `writeFileSync`, `writeTextSync`, `appendFileSync`, `writeFileAtomicSync`, `existsSync`, `readdirSync`, `walkSync`, `globSync`, `copyFileSync`, `rmSync`, `mkdtempSync`, `realpathSync`, `lstatSync`, `mkdirSync`, `statSync`, `renameSync`, `unlinkSync` |
 | `@std/path` | `join`, `resolve`, `relative`, `normalize`, `dirname`, `basename`, `extname`, `isAbs`, `toSlash`, `fromSlash`, `matches`, `parse`, `format`, `splitList`, `sep`, `delimiter` |
 | `@std/os` | `platform`, `arch`, `eol`, `type`, `release`, `hostname`, `cpus`, `homedir`, `tmpdir`, `userInfo` |
+| `@std/toml` | `parse`, `stringify`, `readFileSync`, `writeFileSync` |
+| `@std/yaml` | `parse`, `stringify`, `readFileSync`, `writeFileSync` |
+| `@std/xml` | `parse`, `stringify`, `readFileSync`, `writeFileSync`；XML 节点为 `{ name, attributes, children, text }` |
 | `net` | `fetch`（基于 Go `net/http`），`Server` 类（TCP） |
 | `http` | `createServer`, `request`, `get` |
 | `url` | `URL` 类，`URLSearchParams` 类 |

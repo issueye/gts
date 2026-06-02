@@ -448,6 +448,67 @@ okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind;
 	}
 }
 
+func TestStdConfigCodecModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "config_codecs.gs")
+	work := filepath.Join(dir, "work")
+	appSource := strings.ReplaceAll(`
+let fs = require("@std/fs");
+let path = require("@std/path");
+let toml = require("@std/toml");
+let yaml = require("@std/yaml");
+let xml = require("@std/xml");
+
+let root = "__WORK__";
+fs.mkdirSync(root, { recursive: true });
+
+let tomlDoc = toml.parse("[agent]\nname = \"coder\"\nsteps = [\"read\", \"write\"]\n");
+let tomlFile = path.join(root, "agent.toml");
+toml.writeFileSync(tomlFile, tomlDoc);
+let tomlRead = toml.readFileSync(tomlFile);
+let tomlText = toml.stringify(tomlRead);
+
+let yamlDoc = yaml.parse("agent:\n  name: coder\n  enabled: true\n  tools:\n    - read\n    - write\n");
+let yamlFile = path.join(root, "agent.yaml");
+yaml.writeFileSync(yamlFile, yamlDoc);
+let yamlRead = yaml.readFileSync(yamlFile);
+let yamlText = yaml.stringify(yamlRead);
+
+let xmlDoc = xml.parse("<agent name=\"coder\"><tool>read</tool><tool>write</tool></agent>");
+let xmlFile = path.join(root, "agent.xml");
+xml.writeFileSync(xmlFile, xmlDoc);
+let xmlRead = xml.readFileSync(xmlFile);
+let xmlText = xml.stringify(xmlRead);
+
+let tomlKind = "bad";
+if (tomlRead.agent.name === "coder" && tomlRead.agent.steps.length === 2 && tomlText.includes("agent")) {
+  tomlKind = "toml";
+}
+let yamlKind = "bad";
+if (yamlRead.agent.enabled && yamlRead.agent.tools[1] === "write" && yamlText.includes("agent")) {
+  yamlKind = "yaml";
+}
+let xmlKind = "bad";
+if (xmlRead.name === "agent" && xmlRead.attributes.name === "coder" && xmlRead.children[0].text === "read" && xmlText.includes("<agent")) {
+  xmlKind = "xml";
+}
+tomlKind + ":" + yamlKind + ":" + xmlKind;
+`, "__WORK__", strings.ReplaceAll(work, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "toml:yaml:xml" {
+		t.Fatalf("want toml:yaml:xml, got %T %v", result, result)
+	}
+}
+
 func TestStdExecCommandRunSuccess(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "exec_success.gs")
