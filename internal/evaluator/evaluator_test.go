@@ -325,10 +325,67 @@ func TestEval_NaN(t *testing.T) {
 	input := `let x = 0; 0 / 0;`
 	evaluated := testEval(input)
 	if n, ok := evaluated.(*object.Number); ok {
-		// NaN is a Number in our system
 		_ = n
 	} else if _, ok := evaluated.(*object.Error); ok {
 		t.Logf("got error (expected): %s", evaluated.Inspect())
+	}
+}
+
+func TestEval_StringMethods(t *testing.T) {
+	tests := []struct{ input, expected string }{
+		{`"hello".length;`, "5"},
+		{`"hello".charAt(0);`, "h"},
+		{`"hello".toUpperCase();`, "HELLO"},
+		{`"HELLO".toLowerCase();`, "hello"},
+		{`"  a  ".trim();`, "a"},
+		{`"  a  ".trimStart();`, "a  "},
+		{`"  a  ".trimEnd();`, "  a"},
+		{`"hello".concat(" world");`, "hello world"},
+		{`"hello".includes("ell");`, "true"},
+		{`"hello".includes("xyz");`, "false"},
+		{`"hello".indexOf("l");`, "2"},
+		{`"hello".indexOf("z");`, "-1"},
+		{`"hello".lastIndexOf("l");`, "3"},
+		{`"hello".startsWith("he");`, "true"},
+		{`"hello".endsWith("lo");`, "true"},
+		{`"hello".slice(1, 4);`, "ell"},
+		{`"hello".slice(1);`, "ello"},
+		{`"hello".substring(1, 4);`, "ell"},
+		{`"hi".repeat(3);`, "hihihi"},
+		{`"1-2".replace("-", ":");`, "1:2"},
+		{`"ab".padStart(4, "x");`, "xxab"},
+		{`"ab".padEnd(5, "y");`, "abyyy"},
+	}
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testStringOrNumOrBool(t, evaluated, tt.expected)
+	}
+}
+
+func testStringOrNumOrBool(t *testing.T, obj object.Object, expected string) {
+	t.Helper()
+	if err, ok := obj.(*object.Error); ok {
+		t.Fatalf("eval error: %s", err.Inspect())
+	}
+	switch v := obj.(type) {
+	case *object.String:
+		if v.Value != expected {
+			t.Fatalf("want %q, got %q", expected, v.Value)
+		}
+	case *object.Number:
+		if v.Inspect() != expected {
+			t.Fatalf("want %q, got %q", expected, v.Inspect())
+		}
+	case *object.Boolean:
+		if v.Inspect() != expected {
+			t.Fatalf("want %q, got %q", expected, v.Inspect())
+		}
+	case *object.Array:
+		if v.Inspect() != expected {
+			t.Fatalf("want %q, got %q", expected, v.Inspect())
+		}
+	default:
+		t.Fatalf("unexpected type %T: %s", obj, obj.Inspect())
 	}
 }
 

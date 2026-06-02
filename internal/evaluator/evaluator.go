@@ -1010,6 +1010,10 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 		switch name {
 		case "length":
 			return &object.Number{Value: float64(len(o.Value))}
+		default:
+			if fn, ok := stringMethods[name]; ok {
+				return &object.Builtin{Name: "String." + name, Fn: fn, Extra: o}
+			}
 		}
 	case *object.Array:
 		switch name {
