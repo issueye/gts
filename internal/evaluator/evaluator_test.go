@@ -384,6 +384,7 @@ func TestEval_StringMethods(t *testing.T) {
 	tests := []struct{ input, expected string }{
 		{`"hello".length;`, "5"},
 		{`"hello".charAt(0);`, "h"},
+		{`"ABC".charCodeAt(1);`, "66"},
 		{`"hello".toUpperCase();`, "HELLO"},
 		{`"HELLO".toLowerCase();`, "hello"},
 		{`"  a  ".trim();`, "a"},
@@ -399,7 +400,9 @@ func TestEval_StringMethods(t *testing.T) {
 		{`"hello".endsWith("lo");`, "true"},
 		{`"hello".slice(1, 4);`, "ell"},
 		{`"hello".slice(1);`, "ello"},
+		{`"hello".slice(-2);`, "lo"},
 		{`"hello".substring(1, 4);`, "ell"},
+		{`"a,b,c".split(",", 2).join("|");`, "a|b"},
 		{`"hi".repeat(3);`, "hihihi"},
 		{`"1-2".replace("-", ":");`, "1:2"},
 		{`"ab".padStart(4, "x");`, "xxab"},
@@ -409,6 +412,222 @@ func TestEval_StringMethods(t *testing.T) {
 		evaluated := testEval(tt.input)
 		testStringOrNumOrBool(t, evaluated, tt.expected)
 	}
+}
+
+func TestEval_BuiltinsDocs_GlobalConsoleMathJSON(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+
+assert(print("") === undefined, "print return");
+assert(println("") === undefined, "println return");
+assert(console.log("docs") === undefined, "console.log return");
+
+assert(String(12) === "12", "String number");
+assert(String(true) === "true", "String boolean");
+assert(Number("12.5") === 12.5, "Number string");
+assert(Number(true) === 1, "Number true");
+assert(Number(false) === 0, "Number false");
+assert(Boolean(1) === true, "Boolean true");
+assert(Boolean(0) === false, "Boolean false");
+assert(parseInt("42") === 42, "parseInt string");
+assert(parseInt(42.9) === 42, "parseInt number");
+assert(parseFloat("3.5") === 3.5, "parseFloat string");
+assert(isNaN(0 / 0) === true, "isNaN");
+assert(isFinite(1) === true, "isFinite finite");
+assert(isFinite(0 / 0) === false, "isFinite nan");
+
+assert(Math.abs(-3) === 3, "Math.abs");
+assert(Math.floor(3.8) === 3, "Math.floor");
+assert(Math.ceil(3.2) === 4, "Math.ceil");
+assert(Math.round(3.5) === 4, "Math.round");
+assert(Math.max(1, 5, 2) === 5, "Math.max");
+assert(Math.min(1, -5, 2) === -5, "Math.min");
+assert(Math.pow(2, 3) === 8, "Math.pow");
+assert(Math.sqrt(9) === 3, "Math.sqrt");
+assert(Math.PI > 3, "Math.PI");
+let randomValue = Math.random();
+assert(randomValue >= 0, "Math.random lower");
+assert(randomValue < 1, "Math.random upper");
+
+assert(JSON.stringify([1, "a", true, null]) === "[1,\"a\",true,null]", "JSON.stringify array");
+let parsed = JSON.parse("{\"a\":1,\"b\":[true,null]}");
+assert(parsed.a === 1, "JSON.parse object");
+assert(parsed.b[0] === true, "JSON.parse array boolean");
+assert(parsed.b[1] === null, "JSON.parse array null");
+
+"ok";
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "ok")
+}
+
+func TestEval_BuiltinsDocs_ObjectAndArray(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+
+let obj = { a: 1, b: 2 };
+assert(Object.keys(obj).length === 2, "Object.keys");
+assert(Object.values(obj).length === 2, "Object.values");
+assert(Object.entries({ only: 7 })[0][0] === "only", "Object.entries key");
+assert(Object.entries({ only: 7 })[0][1] === 7, "Object.entries value");
+let assigned = Object.assign({ a: 1 }, { b: 2 }, { a: 3 });
+assert(assigned.a === 3, "Object.assign override");
+assert(assigned.b === 2, "Object.assign add");
+assert(Object.hasOwn(assigned, "a") === true, "Object.hasOwn true");
+assert(Object.hasOwn(assigned, "missing") === false, "Object.hasOwn false");
+
+let a = [1, 2];
+assert(a.length === 2, "Array.length");
+assert(a.push(3) === 3, "Array.push return");
+assert(a.pop() === 3, "Array.pop");
+assert(a.unshift(0) === 3, "Array.unshift return");
+assert(a.shift() === 0, "Array.shift");
+assert(a.concat([3, 4]).join("-") === "1-2-3-4", "Array.concat/join");
+assert([1, 2, 3, 4].slice(1, 3).join(",") === "2,3", "Array.slice");
+let spliceTarget = [1, 2, 3, 4];
+let removed = spliceTarget.splice(1, 2, 9, 10);
+assert(removed.join(",") === "2,3", "Array.splice removed");
+assert(spliceTarget.join(",") === "1,9,10,4", "Array.splice target");
+assert([1, 2, 3, 2].indexOf(2, 2) === 3, "Array.indexOf from");
+assert([1, 2, 3, 2].lastIndexOf(2) === 3, "Array.lastIndexOf");
+assert([1, 2, 3].includes(2) === true, "Array.includes");
+assert([1, 2, 3].find(function(x) { return x > 1; }) === 2, "Array.find");
+assert([1, 2, 3].findIndex(function(x) { return x > 1; }) === 1, "Array.findIndex");
+assert([1, 2, 3].filter(function(x) { return x > 1; }).join(",") === "2,3", "Array.filter");
+assert([1, 2, 3].map(function(x) { return x * 2; }).join(",") === "2,4,6", "Array.map");
+assert([1, 2, 3].reduce(function(acc, x) { return acc + x; }, 0) === 6, "Array.reduce");
+assert([1, 2, 3].reduceRight(function(acc, x) { return acc + x; }, 0) === 6, "Array.reduceRight");
+let sum = 0;
+[1, 2, 3].forEach(function(x) { sum = sum + x; });
+assert(sum === 6, "Array.forEach");
+assert([1, 2, 3].some(function(x) { return x === 2; }) === true, "Array.some");
+assert([1, 2, 3].every(function(x) { return x > 0; }) === true, "Array.every");
+assert([3, 1, 2].sort(function(a, b) { return a - b; }).join(",") === "1,2,3", "Array.sort");
+assert([1, 2, 3].reverse().join(",") === "3,2,1", "Array.reverse");
+assert([1, [2, [3]]].flat(2).join(",") === "1,2,3", "Array.flat");
+assert([1, 2].flatMap(function(x) { return [x, x + 10]; }).join(",") === "1,11,2,12", "Array.flatMap");
+assert([1, 2, 3].fill(9, 1, 3).join(",") === "1,9,9", "Array.fill");
+assert([1, 2, 3, 4].copyWithin(1, 2, 4).join(",") === "1,3,4,4", "Array.copyWithin");
+
+"ok";
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "ok")
+}
+
+func TestEval_BuiltinsDocs_PromiseStaticAll(t *testing.T) {
+	input := `
+Promise.all([Promise.resolve(1), 2, Promise.resolve(3)])
+  .then(function(values) {
+    return values.join(",");
+  });
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "1,2,3")
+}
+
+func TestEval_BuiltinsDocs_ExtendedGlobalMathObjectArrayStringNumber(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+
+assert(encodeURI("https://a.test/x y?q=1&v=中").includes("%20"), "encodeURI space");
+assert(encodeURI("https://a.test/x y?q=1&v=中").includes("https://"), "encodeURI reserved");
+assert(decodeURIComponent(encodeURIComponent("a b 中")) === "a b 中", "component roundtrip");
+assert(parseInt("ff", 16) === 255, "parseInt radix");
+
+assert(Math.E > 2, "Math.E");
+assert(Math.LN2 > 0, "Math.LN2");
+assert(Math.LOG2E > 1, "Math.LOG2E");
+assert(Math.SQRT2 > 1, "Math.SQRT2");
+assert(Math.SQRT1_2 < 1, "Math.SQRT1_2");
+assert(Math.sign(-3) === -1, "Math.sign");
+assert(Math.trunc(3.8) === 3, "Math.trunc");
+assert(Math.cbrt(27) === 3, "Math.cbrt");
+assert(Math.exp(0) === 1, "Math.exp");
+assert(Math.log(Math.E) === 1, "Math.log");
+assert(Math.log2(8) === 3, "Math.log2");
+assert(Math.log10(100) === 2, "Math.log10");
+assert(Math.sin(0) === 0, "Math.sin");
+assert(Math.cos(0) === 1, "Math.cos");
+assert(Math.tan(0) === 0, "Math.tan");
+assert(Math.asin(0) === 0, "Math.asin");
+assert(Math.acos(1) === 0, "Math.acos");
+assert(Math.atan(0) === 0, "Math.atan");
+assert(Math.atan2(0, 1) === 0, "Math.atan2");
+assert(Math.hypot(3, 4) === 5, "Math.hypot");
+assert(Math.clamp(9, 1, 5) === 5, "Math.clamp");
+assert(Math.lerp(10, 20, 0.25) === 12.5, "Math.lerp");
+
+let proto = { inherited: 7 };
+let made = Object.create(proto, { own: { value: 3 } });
+assert(made.inherited === 7, "Object.create proto");
+assert(made.own === 3, "Object.create props");
+assert(Object.getPrototypeOf(made) === proto, "Object.getPrototypeOf");
+Object.setPrototypeOf(made, { inherited: 9 });
+assert(made.inherited === 9, "Object.setPrototypeOf");
+assert(Object.fromEntries([["a", 1], ["b", 2]]).b === 2, "Object.fromEntries");
+assert(Object.is(0 / 0, 0 / 0) === true, "Object.is NaN");
+let descTarget = {};
+Object.defineProperty(descTarget, "x", { value: 42 });
+assert(descTarget.x === 42, "Object.defineProperty");
+assert(Object.getOwnPropertyDescriptor(descTarget, "x").value === 42, "Object.getOwnPropertyDescriptor");
+assert(Object.getOwnPropertyNames(descTarget)[0] === "x", "Object.getOwnPropertyNames");
+Object.seal(descTarget);
+assert(Object.isSealed(descTarget) === true, "Object.seal");
+Object.freeze(descTarget);
+assert(Object.isFrozen(descTarget) === true, "Object.freeze");
+
+assert(Array.isArray([1]) === true, "Array.isArray true");
+assert(Array.isArray({}) === false, "Array.isArray false");
+assert(Array.of(1, 2, 3).join(",") === "1,2,3", "Array.of");
+assert(Array.from("abc").join("-") === "a-b-c", "Array.from string");
+assert(Array.from([1, 2], function(x) { return x * 2; }).join(",") === "2,4", "Array.from map");
+
+assert(String.fromCharCode(65, 66) === "AB", "String.fromCharCode");
+assert(String.fromCodePoint(9731) === "☃", "String.fromCodePoint");
+assert("abc".codePointAt(1) === 98, "String.codePointAt");
+assert("a-a-a".replaceAll("-", ":") === "a:a:a", "String.replaceAll");
+assert("café".normalize() === "café", "String.normalize");
+assert("abc123".match("[a-z]+")[0] === "abc", "String.match");
+assert("abc123".search("[0-9]+") === 3, "String.search");
+assert("abc".at(-1) === "c", "String.at");
+assert("abc".isWellFormed() === true, "String.isWellFormed");
+assert("abc".toWellFormed() === "abc", "String.toWellFormed");
+
+assert(Number.MAX_SAFE_INTEGER > 9000000000000000, "Number.MAX_SAFE_INTEGER");
+assert(Number.MIN_SAFE_INTEGER < -9000000000000000, "Number.MIN_SAFE_INTEGER");
+assert(Number.MAX_VALUE > 1e100, "Number.MAX_VALUE");
+assert(Number.MIN_VALUE > 0, "Number.MIN_VALUE");
+assert(Number.EPSILON > 0, "Number.EPSILON");
+assert(Number.POSITIVE_INFINITY > Number.MAX_VALUE, "Number.POSITIVE_INFINITY");
+assert(Number.NEGATIVE_INFINITY < -Number.MAX_VALUE, "Number.NEGATIVE_INFINITY");
+assert(Number.isNaN(Number.NaN) === true, "Number.NaN/isNaN");
+assert(Number.isInteger(3) === true, "Number.isInteger");
+assert(Number.isFinite(3) === true, "Number.isFinite");
+assert(Number.isSafeInteger(9007199254740991) === true, "Number.isSafeInteger");
+assert(Number.parseFloat("1.5") === 1.5, "Number.parseFloat");
+assert(Number.parseInt("10", 2) === 2, "Number.parseInt");
+assert(15.toString(16) === "f", "Number.toString");
+assert(1.25.toFixed(1) === "1.2", "Number.toFixed");
+assert(1234.toPrecision(3) === "1.23e+03", "Number.toPrecision");
+assert(12.toExponential(1) === "1.2e+01", "Number.toExponential");
+
+"ok";
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "ok")
 }
 
 func TestEval_ConstCannotBeReassigned(t *testing.T) {

@@ -1,8 +1,10 @@
 package evaluator
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/object"
@@ -12,26 +14,34 @@ var stringMethods map[string]object.BuiltinFunc
 
 func init() {
 	stringMethods = map[string]object.BuiltinFunc{
-		"charAt":      builtinStrCharAt,
-		"charCodeAt":  builtinStrCharCodeAt,
-		"concat":      builtinStrConcat,
-		"includes":    builtinStrIncludes,
-		"indexOf":     builtinStrIndexOf,
-		"lastIndexOf": builtinStrLastIndexOf,
-		"startsWith":  builtinStrStartsWith,
-		"endsWith":    builtinStrEndsWith,
-		"slice":       builtinStrSlice,
-		"substring":   builtinStrSubstring,
-		"split":       builtinStrSplit,
-		"trim":        builtinStrTrim,
-		"trimStart":   builtinStrTrimStart,
-		"trimEnd":     builtinStrTrimEnd,
-		"toUpperCase": builtinStrToUpper,
-		"toLowerCase": builtinStrToLower,
-		"replace":     builtinStrReplace,
-		"repeat":      builtinStrRepeat,
-		"padStart":    builtinStrPadStart,
-		"padEnd":      builtinStrPadEnd,
+		"charAt":       builtinStrCharAt,
+		"charCodeAt":   builtinStrCharCodeAt,
+		"codePointAt":  builtinStrCodePointAt,
+		"concat":       builtinStrConcat,
+		"includes":     builtinStrIncludes,
+		"indexOf":      builtinStrIndexOf,
+		"lastIndexOf":  builtinStrLastIndexOf,
+		"startsWith":   builtinStrStartsWith,
+		"endsWith":     builtinStrEndsWith,
+		"slice":        builtinStrSlice,
+		"substring":    builtinStrSubstring,
+		"split":        builtinStrSplit,
+		"trim":         builtinStrTrim,
+		"trimStart":    builtinStrTrimStart,
+		"trimEnd":      builtinStrTrimEnd,
+		"toUpperCase":  builtinStrToUpper,
+		"toLowerCase":  builtinStrToLower,
+		"replace":      builtinStrReplace,
+		"replaceAll":   builtinStrReplaceAll,
+		"repeat":       builtinStrRepeat,
+		"padStart":     builtinStrPadStart,
+		"padEnd":       builtinStrPadEnd,
+		"normalize":    builtinStrNormalize,
+		"match":        builtinStrMatch,
+		"search":       builtinStrSearch,
+		"at":           builtinStrAt,
+		"isWellFormed": builtinStrIsWellFormed,
+		"toWellFormed": builtinStrToWellFormed,
 	}
 }
 
@@ -68,6 +78,24 @@ func builtinStrCharCodeAt(env *object.Environment, pos ast.Position, args ...obj
 		return &object.Number{Value: float64(0)}
 	}
 	return &object.Number{Value: float64(s[idx])}
+}
+
+func builtinStrCodePointAt(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	s := getStr(env)
+	idx := 0
+	if len(args) > 0 {
+		if n, ok := args[0].(*object.Number); ok {
+			idx = int(n.Value)
+		}
+	}
+	if idx < 0 || idx >= len(s) {
+		return object.UNDEFINED
+	}
+	r, _ := utf8.DecodeRuneInString(s[idx:])
+	if r == utf8.RuneError {
+		return &object.Number{Value: float64(s[idx])}
+	}
+	return &object.Number{Value: float64(r)}
 }
 
 func builtinStrConcat(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -306,6 +334,16 @@ func builtinStrReplace(env *object.Environment, pos ast.Position, args ...object
 	return &object.String{Value: strings.Replace(s, old, newStr, 1)}
 }
 
+func builtinStrReplaceAll(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 2 {
+		return &object.String{Value: getStr(env)}
+	}
+	s := getStr(env)
+	old := args[0].Inspect()
+	newStr := args[1].Inspect()
+	return &object.String{Value: strings.ReplaceAll(s, old, newStr)}
+}
+
 func builtinStrRepeat(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	s := getStr(env)
 	count := 0
@@ -356,4 +394,71 @@ func builtinStrPadEnd(env *object.Environment, pos ast.Position, args ...object.
 	}
 	padding := strings.Repeat(padChar, (targetLen-len(s)+len(padChar)-1)/len(padChar))
 	return &object.String{Value: s + padding[:targetLen-len(s)]}
+}
+
+func builtinStrNormalize(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return &object.String{Value: getStr(env)}
+}
+
+func builtinStrMatch(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NULL
+	}
+	re, err := regexp.Compile(args[0].Inspect())
+	if err != nil {
+		return object.NewError(pos, "SyntaxError: invalid regexp: %v", err)
+	}
+	match := re.FindStringSubmatch(getStr(env))
+	if match == nil {
+		return object.NULL
+	}
+	elements := make([]object.Object, len(match))
+	for i, item := range match {
+		elements[i] = &object.String{Value: item}
+	}
+	return &object.Array{Elements: elements}
+}
+
+func builtinStrSearch(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return &object.Number{Value: -1}
+	}
+	re, err := regexp.Compile(args[0].Inspect())
+	if err != nil {
+		return object.NewError(pos, "SyntaxError: invalid regexp: %v", err)
+	}
+	loc := re.FindStringIndex(getStr(env))
+	if loc == nil {
+		return &object.Number{Value: -1}
+	}
+	return &object.Number{Value: float64(loc[0])}
+}
+
+func builtinStrAt(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	s := getStr(env)
+	idx := 0
+	if len(args) > 0 {
+		if n, ok := args[0].(*object.Number); ok {
+			idx = int(n.Value)
+		}
+	}
+	if idx < 0 {
+		idx = len(s) + idx
+	}
+	if idx < 0 || idx >= len(s) {
+		return object.UNDEFINED
+	}
+	return &object.String{Value: string(s[idx])}
+}
+
+func builtinStrIsWellFormed(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return object.NativeBool(utf8.ValidString(getStr(env)))
+}
+
+func builtinStrToWellFormed(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	s := getStr(env)
+	if utf8.ValidString(s) {
+		return &object.String{Value: s}
+	}
+	return &object.String{Value: strings.ToValidUTF8(s, "\uFFFD")}
 }

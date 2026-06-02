@@ -97,9 +97,11 @@ type HashPair struct {
 }
 
 type Hash struct {
-	Pairs map[HashKey]HashPair
-	Proto *Hash
-	Pos   ast.Position
+	Pairs  map[HashKey]HashPair
+	Proto  *Hash
+	Frozen bool
+	Sealed bool
+	Pos    ast.Position
 }
 
 func (h *Hash) Type() ObjectType { return OBJECT_OBJ }

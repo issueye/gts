@@ -1043,6 +1043,14 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 		obj := Eval(left.Object, env)
 		if hash, ok := obj.(*object.Hash); ok {
 			name := left.Property.(*ast.Ident).TokenLit
+			if hash.Frozen {
+				return object.NewError(left.Pos(), "TypeError: cannot assign to frozen object")
+			}
+			if hash.Sealed {
+				if _, ok := hash.Pairs[hashKey(&object.String{Value: name})]; !ok {
+					return object.NewError(left.Pos(), "TypeError: cannot add property to sealed object")
+				}
+			}
 			hash.Pairs[hashKey(&object.String{Value: name})] = object.HashPair{Key: &object.String{Value: name}, Value: right}
 			return right
 		}
@@ -1067,6 +1075,14 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 		}
 		if hash, ok := arr.(*object.Hash); ok {
 			idx := Eval(left.Index, env)
+			if hash.Frozen {
+				return object.NewError(left.Pos(), "TypeError: cannot assign to frozen object")
+			}
+			if hash.Sealed {
+				if _, ok := hash.Pairs[hashKey(idx)]; !ok {
+					return object.NewError(left.Pos(), "TypeError: cannot add property to sealed object")
+				}
+			}
 			hash.Pairs[hashKey(idx)] = object.HashPair{Key: idx, Value: right}
 			return right
 		}
@@ -1172,6 +1188,9 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 	case *object.Hash:
 		if promiseConstructor, ok := getHashKey(f, &object.String{Value: "__promiseConstructor"}).(*object.Boolean); ok && promiseConstructor.Value {
 			return constructPromise(env, args, pos)
+		}
+		if call, ok := getHashKey(f, &object.String{Value: "__call"}).(*object.Builtin); ok {
+			return applyFunction(call, env, args, pos)
 		}
 		return object.NewError(pos, "TypeError: object is not a function")
 	case *object.Class:
@@ -1334,6 +1353,10 @@ func getProperty(obj object.Object, name string, pos ast.Position) object.Object
 				return &object.Builtin{Name: "String." + name, Fn: fn, Extra: o}
 			}
 		}
+	case *object.Number:
+		if fn, ok := numberMethods[name]; ok {
+			return &object.Builtin{Name: "Number." + name, Fn: fn, Extra: o}
+		}
 	case *object.Array:
 		switch name {
 		case "length":
@@ -1356,6 +1379,9 @@ func getHashKey(obj object.Object, key object.Object) object.Object {
 	case *object.Hash:
 		if pair, ok := o.Pairs[hashKey(key)]; ok {
 			return pair.Value
+		}
+		if o.Proto != nil {
+			return getHashKey(o.Proto, key)
 		}
 		return object.UNDEFINED
 	default:

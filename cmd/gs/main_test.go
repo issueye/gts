@@ -431,7 +431,12 @@ let bytesKind = "wrong";
 if (bytes.length === 4) {
   bytesKind = "bytes4";
 }
-okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind;
+let uuid = crypto.randomUUID();
+let uuidKind = "uuid-bad";
+if (uuid.length === 36 && uuid.charAt(14) === "4") {
+  uuidKind = "uuid";
+}
+okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind + ":" + uuidKind;
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -442,7 +447,7 @@ okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind;
 		t.Fatal(err)
 	}
 	str, ok := result.(*object.String)
-	want := "ok:bad:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:bytes4"
+	want := "ok:bad:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:bytes4:uuid"
 	if !ok || str.Value != want {
 		t.Fatalf("want %q, got %T %v", want, result, result)
 	}
@@ -677,6 +682,30 @@ func TestStdStreamAndSSEModules(t *testing.T) {
 	if err := os.WriteFile(script, []byte(`
 let stream = require("@std/stream");
 let sse = require("@std/sse");
+
+let raw = stream.fromString("abcdef");
+let bytes = raw.read(2);
+let rawText = raw.readText(3);
+let rawRest = raw.readAll();
+raw.close();
+let bytesLenKind = "bad-len";
+if (bytes.length === 2) {
+  bytesLenKind = "len2";
+}
+let firstByteKind = "bad-byte";
+if (bytes[0] === 97) {
+  firstByteKind = "byte97";
+}
+
+let lines = stream.fromString("one\ntwo\n");
+let lineOne = lines.readLine();
+let lineTwo = lines.readLine();
+let lineEnd = lines.readLine();
+let lineEndKind = "not-end";
+if (lineEnd === null) {
+  lineEndKind = "end";
+}
+
 let body = stream.fromString("data: one\n\nevent: done\ndata: two\n\n");
 let reader = sse.reader(body);
 let first = reader.next();
@@ -686,7 +715,7 @@ let endKind = "not-end";
 if (end === null) {
   endKind = "end";
 }
-first.data + ":" + second.type + ":" + second.data + ":" + endKind;
+bytesLenKind + ":" + firstByteKind + ":" + rawText + ":" + rawRest + ":" + lineOne + ":" + lineTwo + ":" + lineEndKind + ":" + first.data + ":" + second.type + ":" + second.data + ":" + endKind;
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -697,8 +726,9 @@ first.data + ":" + second.type + ":" + second.data + ":" + endKind;
 		t.Fatal(err)
 	}
 	str, ok := result.(*object.String)
-	if !ok || str.Value != "one:done:two:end" {
-		t.Fatalf("want one:done:two:end, got %T %v", result, result)
+	want := "len2:byte97:cde:f:one:two:end:one:done:two:end"
+	if !ok || str.Value != want {
+		t.Fatalf("want %q, got %T %v", want, result, result)
 	}
 }
 
