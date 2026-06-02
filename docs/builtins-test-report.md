@@ -10,6 +10,11 @@
   - `TestEval_BuiltinsDocs_ObjectAndArray`
   - `TestEval_BuiltinsDocs_PromiseStaticAll`
   - `TestEval_BuiltinsDocs_ExtendedGlobalMathObjectArrayStringNumber`
+  - `TestEval_BuiltinsDocs_JSONStringMatchAllBooleanWrapper`
+  - `TestEval_BuiltinsDocs_MapSet`
+  - `TestEval_BuiltinsDocs_PromiseRaceAndAllSettled`
+  - `TestEval_BuiltinsDocs_TimersAndMicrotasks`
+  - Date / RegExp / console 相关 builtins 覆盖测试
   - 既有测试：`TestEval_StringMethods`、`TestEval_ErrorObjectFields`、`TestEval_ErrorObjectStack`、Promise 链式测试等
 - 标准模块脚本级测试：`cmd/gs/main_test.go`
   - `@std/fs`、`@std/path`、`@std/process`、`@std/os`
@@ -25,28 +30,26 @@
 |------|--------|----------|----------|
 | 1 | `print`、`println` | 已实现 | 已覆盖返回值与调用 |
 | 1 | `require` | 已实现，CLI runner 注册 | 已覆盖相对模块、缓存、原生模块 |
-| 1 | `setTimeout`、`setInterval` | 已实现基础调度 | 尚缺专门断言；现阶段不测无限 interval |
-| 1 | `clearTimeout`、`clearInterval` | 未实现 | 待补齐 |
-| 1 | `queueMicrotask` | 未实现 | 待补齐 |
+| 1 | `setTimeout`、`setInterval` | 已实现基础调度；返回 `TimerId`，支持传参 | 已覆盖 |
+| 1 | `clearTimeout`、`clearInterval` | 已实现基础取消 | 已覆盖 |
+| 1 | `queueMicrotask` | 已实现基础微任务调度 | 已覆盖 |
 | 1 | `parseInt`、`parseFloat`、`isNaN`、`isFinite` | 已实现；`parseInt` 支持 radix | 已覆盖 |
 | 1 | `encodeURI`、`decodeURI`、`encodeURIComponent`、`decodeURIComponent` | 已实现基础百分号编解码 | 已覆盖 |
-| 2 | `console.log` | 已实现 | 已覆盖 |
-| 2 | `console.info/warn/error/debug/assert/time/timeEnd/trace/count/countReset/group/groupEnd/table` | 未实现 | 待补齐 |
+| 2 | `console.log/info/warn/error/debug/assert/time/timeEnd/trace/count/countReset/group/groupEnd/table` | 已实现基础输出/状态行为 | 已覆盖 |
 | 3 | Math 常量与文档列出的函数 | 已实现：`E/LN2/LN10/LOG2E/LOG10E/PI/SQRT2/SQRT1_2` 与 `abs/sign/floor/ceil/round/trunc/min/max/pow/sqrt/cbrt/exp/log/log2/log10/sin/cos/tan/asin/acos/atan/atan2/random/hypot/clamp/lerp` | 已覆盖 |
-| 4 | `JSON.stringify(value)`、`JSON.parse(text)` | 已实现基础值、数组、对象 | 已覆盖 |
-| 4 | `replacer`、`reviver`、`space` | 未实现 | 待补齐 |
+| 4 | `JSON.stringify(value, replacer?, space?)`、`JSON.parse(text, reviver?)` | 已实现基础值、数组、对象，支持函数型 `replacer/reviver` 与缩进 `space` | 已覆盖 |
 | 5 | Object 文档列出的基础方法 | 已实现：`create/assign/keys/values/entries/fromEntries/freeze/isFrozen/seal/isSealed/getPrototypeOf/setPrototypeOf/hasOwn/is/defineProperty/getOwnPropertyDescriptor/getOwnPropertyNames`；描述符与冻结/封闭为浅层基础版 | 已覆盖 |
 | 6 | Array 实例属性与方法 | 已实现文档列出的实例项；`sort` 当前要求显式比较函数 | 已覆盖 |
 | 6 | `Array.isArray/of/from` | 已实现基础版；`Array.from` 支持数组、字符串、数组式对象和 mapFn | 已覆盖 |
-| 7 | String 实例与静态方法 | 已实现：静态 `fromCharCode/fromCodePoint`，实例 `length/charAt/charCodeAt/codePointAt/concat/includes/indexOf/lastIndexOf/startsWith/endsWith/slice/substring/split/replace/replaceAll/trim/trimStart/trimEnd/toUpperCase/toLowerCase/padStart/padEnd/repeat/normalize/match/search/at/isWellFormed/toWellFormed`；`match/search` 为字符串 pattern + Go regexp 基础版，`normalize` 当前返回原字符串 | 已覆盖 |
-| 7 | `String.raw`、`matchAll` | 未实现 | 待补齐 |
+| 7 | String 实例与静态方法 | 已实现：静态 `fromCharCode/fromCodePoint`，实例 `length/charAt/charCodeAt/codePointAt/concat/includes/indexOf/lastIndexOf/startsWith/endsWith/slice/substring/split/replace/replaceAll/trim/trimStart/trimEnd/toUpperCase/toLowerCase/padStart/padEnd/repeat/normalize/match/matchAll/search/at/isWellFormed/toWellFormed`；`normalize` 当前返回原字符串 | 已覆盖 |
+| 7 | `String.raw` | 未实现 | 待补齐 |
 | 8 | Number 静态属性、静态方法、实例方法 | 已实现文档列出项：安全整数边界、浮点常量、Infinity/NaN、`isInteger/isFinite/isNaN/isSafeInteger/parseFloat/parseInt`、`toString/toFixed/toPrecision/toExponential` | 已覆盖 |
-| 9 | Boolean wrapper | 未实现，仅有全局 `Boolean()` 转换 | 待补齐 |
-| 10 | Date | 未实现 | 待补齐 |
-| 11 | RegExp | 未实现 | 待补齐 |
+| 9 | Boolean wrapper | 已实现基础版：`new Boolean(...).valueOf()`、`toString()`；全局 `Boolean()` 保持原始布尔转换 | 已覆盖 |
+| 10 | Date | 已实现基础版：构造、`Date.now/parse/UTC`、常用 getter/setter、`getTime/valueOf/toISOString/toLocale*` | 已覆盖 |
+| 11 | RegExp | 已实现基础版：构造、`test/exec`、`source/flags/global/ignoreCase`；字符串 `match/search/replace` 已支持 RegExp 基础协作 | 已覆盖 |
 | 12 | `new Promise`、`resolve`、`reject`、`all`、实例 `then/catch/finally` | 已实现 | 已覆盖 |
-| 12 | `Promise.race`、`Promise.allSettled` | 未实现 | 待补齐 |
-| 13 | Map / Set | 未实现 | 待补齐 |
+| 12 | `Promise.race`、`Promise.allSettled` | 已实现基础版 | 已覆盖 |
+| 13 | Map / Set | 已实现基础版：构造、初始化、`set/get/has/delete/clear/add/size` | 已覆盖 |
 | 14 | `Error`、`TypeError`、`RangeError`、`ReferenceError`、`SyntaxError` 与 `name/message/stack` | 已实现 | 已覆盖 |
 | 15 | `@std/fs` | 已实现文档列出的同步 API | 已覆盖 |
 | 15 | `@std/path` | 已实现文档列出的 API | 已覆盖 |
@@ -80,10 +83,23 @@
 - String：补齐静态 `fromCharCode/fromCodePoint` 与一批实例方法。
 - Number：补齐静态常量、静态判断/解析方法和实例格式化方法。
 
+## 多 worker 并行补齐
+
+- Worker A：补齐 `Promise.race/allSettled`、`clearTimeout/clearInterval`、`queueMicrotask` 和 `TimerId`。
+- Worker B：补齐完整 console 章节的基础行为。
+- Worker C：补齐 Map / Set 基础版。
+- Worker D：补齐 Date / RegExp 基础版，并让 String 与 RegExp 基础协作。
+
+## 本轮增强
+
+- JSON：补齐函数型 `replacer/reviver` 与 `space` 缩进输出。
+- String：补齐 `matchAll`，并增强 `replaceAll(RegExp, replacement)`。
+- Boolean：补齐 `new Boolean(...).valueOf()` 与 `toString()` 基础 wrapper。
+
 ## 后续补齐建议
 
 1. 先拆分 `docs/builtins.md`：把“当前已实现 API”和“路线图/目标 API”分开，避免使用者误判。
-2. 第一优先级补齐异步与控制台：`clearTimeout/clearInterval/queueMicrotask`、完整 `console`。
-3. 第二优先级补齐语言运行时常用对象：Date、RegExp、Map、Set、Promise `race/allSettled`，并把 `String.match/search` 升级为完整 RegExp 语义。
+2. 第一优先级补齐剩余 String 静态 `String.raw`。
+3. 第二优先级补强 Date/RegExp/Map/Set 的完整语义：UTC 系列、RegExp flags 全量兼容、迭代协议。
 4. 第三优先级修正文档中的标准模块命名：当前网络模块使用 `@std/net/http/client`、`@std/net/http/server`、`@std/net/socket/*`、`@std/net/ws/*`，而不是裸 `net/http/url`。
 5. Go 嵌入章节需要按当前 `lexer/parser/evaluator/object/module` API 重写可运行示例。

@@ -328,15 +328,17 @@ m.has("k");          // true
 m.delete("k");
 m.size;
 m.clear();
-for (let [k, v] of m) { /* ... */ }
 
 let s = new Set([1, 2, 3]);
 s.add(4);
 s.has(2);            // true
 s.delete(2);
 s.size;
-for (let v of s) { /* ... */ }
+s.clear();
 ```
+
+支持 `new Map()`、`new Map([[k, v], ...])`、`set/get/has/delete/clear/size`；
+支持 `new Set(iterable?)`、`add/has/delete/clear/size`。
 
 ---
 
