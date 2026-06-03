@@ -1216,4 +1216,11 @@ func TestStableExamples(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("examples/13-package-modules", func(t *testing.T) {
+		r := newRunner(options{workers: 1, timeout: time.Second})
+		if err := r.runProject(filepath.Join(root, "examples", "13-package-modules")); err != nil {
+			t.Fatal(err)
+		}
+	})
 }

@@ -18,6 +18,7 @@
 | 10 | `10-classes.gs` | 类与继承 |
 | 11 | `11-async.gs` | 异步编程 async/await |
 | 12 | `12-comprehensive.gs` | 综合实战：图书管理系统 |
+| 13 | `13-package-modules/` | 包模块清单、导出映射与本地依赖引用 |
 
 ## 运行方式
 
@@ -30,9 +31,13 @@ go build -o gs ./cmd/gs
 
 # 或使用 go run
 go run ./cmd/gs examples/01-basics.gs
+
+# 运行带 project.toml 的包模块示例
+cd examples/13-package-modules
+go run ../../cmd/gs run
 ```
 
-每个 `.gs` 文件都是独立可执行的脚本，建议按编号顺序学习。
+编号 01-12 的 `.gs` 文件都是独立可执行的脚本；第 13 个示例是一个小项目，需要在示例目录内运行 `gs run`。
 
 ## 当前自动验证状态
 
