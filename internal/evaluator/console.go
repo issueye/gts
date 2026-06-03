@@ -24,6 +24,10 @@ var consoleState = struct {
 }
 
 func registerConsole(env *object.Environment) {
+	env.VM().SetGlobalConst("console", consoleObject())
+}
+
+func consoleObject() object.Object {
 	members := map[string]object.Object{
 		"log":        &object.Builtin{Name: "console.log", Fn: builtinConsoleLog},
 		"info":       &object.Builtin{Name: "console.info", Fn: builtinConsoleInfo},
@@ -45,7 +49,7 @@ func registerConsole(env *object.Environment) {
 		key := &object.String{Value: name}
 		pairs[hashKey(key)] = object.HashPair{Key: key, Value: value}
 	}
-	env.VM().SetGlobalConst("console", &object.Hash{Pairs: pairs})
+	return &object.Hash{Pairs: pairs}
 }
 
 func builtinConsoleLog(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

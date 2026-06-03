@@ -79,6 +79,26 @@ func (vm *VirtualMachine) SetGlobalConst(name string, val Object) Object {
 	return val
 }
 
+func (vm *VirtualMachine) SetGlobalConsts(values map[string]Object) {
+	if vm == nil || len(values) == 0 {
+		return
+	}
+	vm.globalMu.Lock()
+	defer vm.globalMu.Unlock()
+
+	current := vm.globalConstantMap()
+	next := make(map[string]Object, len(current)+len(values))
+	for key, value := range current {
+		next[key] = value
+	}
+	for key, value := range values {
+		if key != "" {
+			next[key] = value
+		}
+	}
+	vm.globalConstants.Store(next)
+}
+
 func (vm *VirtualMachine) GetGlobalConst(name string) (Object, bool) {
 	constants := vm.globalConstantMap()
 	obj, ok := constants[name]

@@ -9,7 +9,19 @@ import (
 )
 
 func registerAsync(env *object.Environment) {
-	env.VM().SetGlobalConst("Promise", &object.Hash{
+	env.VM().SetGlobalConsts(map[string]object.Object{
+		"Promise":        promiseConstructorObject(),
+		"setTimeout":     &object.Builtin{Name: "setTimeout", Fn: builtinSetTimeout},
+		"clearTimeout":   &object.Builtin{Name: "clearTimeout", Fn: builtinClearTimeout},
+		"setInterval":    &object.Builtin{Name: "setInterval", Fn: builtinSetInterval},
+		"clearInterval":  &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval},
+		"queueMicrotask": &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask},
+		"sleep":          &object.Builtin{Name: "sleep", Fn: builtinSleep},
+	})
+}
+
+func promiseConstructorObject() object.Object {
+	return &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hk("__promiseConstructor"): {Key: &object.String{Value: "__promiseConstructor"}, Value: object.TRUE},
 			hk("resolve"):              {Key: &object.String{Value: "resolve"}, Value: &object.Builtin{Name: "Promise.resolve", Fn: builtinPromiseResolve}},
@@ -18,13 +30,7 @@ func registerAsync(env *object.Environment) {
 			hk("race"):                 {Key: &object.String{Value: "race"}, Value: &object.Builtin{Name: "Promise.race", Fn: builtinPromiseRace}},
 			hk("allSettled"):           {Key: &object.String{Value: "allSettled"}, Value: &object.Builtin{Name: "Promise.allSettled", Fn: builtinPromiseAllSettled}},
 		},
-	})
-	env.VM().SetGlobalConst("setTimeout", &object.Builtin{Name: "setTimeout", Fn: builtinSetTimeout})
-	env.VM().SetGlobalConst("clearTimeout", &object.Builtin{Name: "clearTimeout", Fn: builtinClearTimeout})
-	env.VM().SetGlobalConst("setInterval", &object.Builtin{Name: "setInterval", Fn: builtinSetInterval})
-	env.VM().SetGlobalConst("clearInterval", &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval})
-	env.VM().SetGlobalConst("queueMicrotask", &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask})
-	env.VM().SetGlobalConst("sleep", &object.Builtin{Name: "sleep", Fn: builtinSleep})
+	}
 }
 
 func constructPromise(env *object.Environment, args []object.Object, pos ast.Position) object.Object {

@@ -6,7 +6,11 @@ import (
 )
 
 func registerObject(env *object.Environment) {
-	env.VM().SetGlobalConst("Object", &object.Hash{
+	env.VM().SetGlobalConst("Object", objectConstructorObject())
+}
+
+func objectConstructorObject() object.Object {
+	return &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hk("create"):                   {Key: &object.String{Value: "create"}, Value: &object.Builtin{Name: "Object.create", Fn: builtinObjCreate}},
 			hk("keys"):                     {Key: &object.String{Value: "keys"}, Value: &object.Builtin{Name: "Object.keys", Fn: builtinObjKeys}},
@@ -26,7 +30,7 @@ func registerObject(env *object.Environment) {
 			hk("getOwnPropertyDescriptor"): {Key: &object.String{Value: "getOwnPropertyDescriptor"}, Value: &object.Builtin{Name: "Object.getOwnPropertyDescriptor", Fn: builtinObjGetOwnPropertyDescriptor}},
 			hk("getOwnPropertyNames"):      {Key: &object.String{Value: "getOwnPropertyNames"}, Value: &object.Builtin{Name: "Object.getOwnPropertyNames", Fn: builtinObjKeys}},
 		},
-	})
+	}
 }
 
 func builtinObjCreate(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

@@ -48,15 +48,54 @@ func registerStandardGlobalConstants(env *object.Environment) {
 		return
 	}
 
-	registerConsole(env)
-	env.VM().SetGlobalConst("println", &object.Builtin{Name: "println", Fn: builtinPrintln})
-	env.VM().SetGlobalConst("print", &object.Builtin{Name: "print", Fn: builtinPrint})
-	env.VM().SetGlobalConst("String", callableBuiltinObject("String", builtinString, map[string]object.Object{
+	env.VM().SetGlobalConsts(map[string]object.Object{
+		"console":            consoleObject(),
+		"println":            &object.Builtin{Name: "println", Fn: builtinPrintln},
+		"print":              &object.Builtin{Name: "print", Fn: builtinPrint},
+		"String":             stringConstructorObject(),
+		"Number":             numberConstructorObject(),
+		"Boolean":            callableBuiltinObject("Boolean", builtinBoolean, map[string]object.Object{"__constructBoolean": object.TRUE}),
+		"Date":               dateConstructorObject(),
+		"RegExp":             callableBuiltinObject("RegExp", builtinRegExp, nil),
+		"Error":              &object.Builtin{Name: "Error", Fn: builtinError},
+		"TypeError":          &object.Builtin{Name: "TypeError", Fn: builtinNamedError("TypeError")},
+		"RangeError":         &object.Builtin{Name: "RangeError", Fn: builtinNamedError("RangeError")},
+		"ReferenceError":     &object.Builtin{Name: "ReferenceError", Fn: builtinNamedError("ReferenceError")},
+		"SyntaxError":        &object.Builtin{Name: "SyntaxError", Fn: builtinNamedError("SyntaxError")},
+		"parseInt":           &object.Builtin{Name: "parseInt", Fn: builtinParseInt},
+		"parseFloat":         &object.Builtin{Name: "parseFloat", Fn: builtinParseFloat},
+		"isNaN":              &object.Builtin{Name: "isNaN", Fn: builtinIsNaN},
+		"isFinite":           &object.Builtin{Name: "isFinite", Fn: builtinIsFinite},
+		"encodeURI":          &object.Builtin{Name: "encodeURI", Fn: builtinEncodeURI},
+		"decodeURI":          &object.Builtin{Name: "decodeURI", Fn: builtinDecodeURI},
+		"encodeURIComponent": &object.Builtin{Name: "encodeURIComponent", Fn: builtinEncodeURIComponent},
+		"decodeURIComponent": &object.Builtin{Name: "decodeURIComponent", Fn: builtinDecodeURIComponent},
+		"Math":               mathObject(),
+		"JSON":               jsonObject(),
+		"Object":             objectConstructorObject(),
+		"Array":              arrayConstructorObject(),
+		"Map":                callableBuiltinObject("Map", builtinMapConstructor, nil),
+		"Set":                callableBuiltinObject("Set", builtinSetConstructor, nil),
+		"Promise":            promiseConstructorObject(),
+		"setTimeout":         &object.Builtin{Name: "setTimeout", Fn: builtinSetTimeout},
+		"clearTimeout":       &object.Builtin{Name: "clearTimeout", Fn: builtinClearTimeout},
+		"setInterval":        &object.Builtin{Name: "setInterval", Fn: builtinSetInterval},
+		"clearInterval":      &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval},
+		"queueMicrotask":     &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask},
+		"sleep":              &object.Builtin{Name: "sleep", Fn: builtinSleep},
+	})
+}
+
+func stringConstructorObject() object.Object {
+	return callableBuiltinObject("String", builtinString, map[string]object.Object{
 		"fromCharCode":  &object.Builtin{Name: "String.fromCharCode", Fn: builtinStringFromCharCode},
 		"fromCodePoint": &object.Builtin{Name: "String.fromCodePoint", Fn: builtinStringFromCodePoint},
 		"raw":           &object.Builtin{Name: "String.raw", Fn: builtinStringRaw},
-	}))
-	env.VM().SetGlobalConst("Number", callableBuiltinObject("Number", builtinNumber, map[string]object.Object{
+	})
+}
+
+func numberConstructorObject() object.Object {
+	return callableBuiltinObject("Number", builtinNumber, map[string]object.Object{
 		"MAX_SAFE_INTEGER":  &object.Number{Value: 9007199254740991},
 		"MIN_SAFE_INTEGER":  &object.Number{Value: -9007199254740991},
 		"MAX_VALUE":         &object.Number{Value: math.MaxFloat64},
@@ -71,30 +110,19 @@ func registerStandardGlobalConstants(env *object.Environment) {
 		"isSafeInteger":     &object.Builtin{Name: "Number.isSafeInteger", Fn: builtinNumberIsSafeInteger},
 		"parseFloat":        &object.Builtin{Name: "Number.parseFloat", Fn: builtinParseFloat},
 		"parseInt":          &object.Builtin{Name: "Number.parseInt", Fn: builtinParseInt},
-	}))
-	env.VM().SetGlobalConst("Boolean", callableBuiltinObject("Boolean", builtinBoolean, map[string]object.Object{
-		"__constructBoolean": object.TRUE,
-	}))
-	env.VM().SetGlobalConst("Date", callableBuiltinObject("Date", builtinDate, map[string]object.Object{
+	})
+}
+
+func dateConstructorObject() object.Object {
+	return callableBuiltinObject("Date", builtinDate, map[string]object.Object{
 		"now":   &object.Builtin{Name: "Date.now", Fn: builtinDateNow},
 		"parse": &object.Builtin{Name: "Date.parse", Fn: builtinDateParse},
 		"UTC":   &object.Builtin{Name: "Date.UTC", Fn: builtinDateUTC},
-	}))
-	env.VM().SetGlobalConst("RegExp", callableBuiltinObject("RegExp", builtinRegExp, nil))
-	env.VM().SetGlobalConst("Error", &object.Builtin{Name: "Error", Fn: builtinError})
-	env.VM().SetGlobalConst("TypeError", &object.Builtin{Name: "TypeError", Fn: builtinNamedError("TypeError")})
-	env.VM().SetGlobalConst("RangeError", &object.Builtin{Name: "RangeError", Fn: builtinNamedError("RangeError")})
-	env.VM().SetGlobalConst("ReferenceError", &object.Builtin{Name: "ReferenceError", Fn: builtinNamedError("ReferenceError")})
-	env.VM().SetGlobalConst("SyntaxError", &object.Builtin{Name: "SyntaxError", Fn: builtinNamedError("SyntaxError")})
-	env.VM().SetGlobalConst("parseInt", &object.Builtin{Name: "parseInt", Fn: builtinParseInt})
-	env.VM().SetGlobalConst("parseFloat", &object.Builtin{Name: "parseFloat", Fn: builtinParseFloat})
-	env.VM().SetGlobalConst("isNaN", &object.Builtin{Name: "isNaN", Fn: builtinIsNaN})
-	env.VM().SetGlobalConst("isFinite", &object.Builtin{Name: "isFinite", Fn: builtinIsFinite})
-	env.VM().SetGlobalConst("encodeURI", &object.Builtin{Name: "encodeURI", Fn: builtinEncodeURI})
-	env.VM().SetGlobalConst("decodeURI", &object.Builtin{Name: "decodeURI", Fn: builtinDecodeURI})
-	env.VM().SetGlobalConst("encodeURIComponent", &object.Builtin{Name: "encodeURIComponent", Fn: builtinEncodeURIComponent})
-	env.VM().SetGlobalConst("decodeURIComponent", &object.Builtin{Name: "decodeURIComponent", Fn: builtinDecodeURIComponent})
-	env.VM().SetGlobalConst("Math", &object.Hash{
+	})
+}
+
+func mathObject() object.Object {
+	return &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hashKey(&object.String{Value: "E"}):       {Key: &object.String{Value: "E"}, Value: &object.Number{Value: math.E}},
 			hashKey(&object.String{Value: "LN2"}):     {Key: &object.String{Value: "LN2"}, Value: &object.Number{Value: math.Ln2}},
@@ -131,12 +159,7 @@ func registerStandardGlobalConstants(env *object.Environment) {
 			hashKey(&object.String{Value: "clamp"}):   {Key: &object.String{Value: "clamp"}, Value: &object.Builtin{Name: "Math.clamp", Fn: builtinMathClamp}},
 			hashKey(&object.String{Value: "lerp"}):    {Key: &object.String{Value: "lerp"}, Value: &object.Builtin{Name: "Math.lerp", Fn: builtinMathLerp}},
 		},
-	})
-	registerJSON(env)
-	registerObject(env)
-	registerArray(env)
-	registerMapSet(env)
-	registerAsync(env)
+	}
 }
 
 func builtinPrintln(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
