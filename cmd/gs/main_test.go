@@ -742,7 +742,22 @@ let uuidKind = "uuid-bad";
 if (uuid.length === 36 && uuid.charAt(14) === "4") {
   uuidKind = "uuid";
 }
-okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind + ":" + uuidKind;
+let cryptoKind = "crypto-bad";
+let pbk = crypto.pbkdf2("password", "salt", 1, 32, "sha256");
+let pbkBuffer = crypto.pbkdf2("password", "salt", 1, 32, "sha256", { asBuffer: true });
+if (
+  crypto.sha1("abc") === "a9993e364706816aba3e25717850c26c9cd0d89d" &&
+  crypto.sha256("abc") === "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" &&
+  crypto.sha512("abc") === "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f" &&
+  crypto.hmac("sha256", "key", "The quick brown fox jumps over the lazy dog") === "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8" &&
+  pbk === "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b" &&
+  pbkBuffer.length === 32 &&
+  crypto.timingSafeEqual("same", "same") &&
+  !crypto.timingSafeEqual("same", "diff")
+) {
+  cryptoKind = "crypto";
+}
+okKind + ":" + badKind + ":" + bytesKind + ":" + uuidKind + ":" + cryptoKind;
 `), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +768,7 @@ okKind + ":" + badKind + ":" + crypto.sha256("abc") + ":" + bytesKind + ":" + uu
 		t.Fatal(err)
 	}
 	str, ok := result.(*object.String)
-	want := "ok:bad:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad:bytes4:uuid"
+	want := "ok:bad:bytes4:uuid:crypto"
 	if !ok || str.Value != want {
 		t.Fatalf("want %q, got %T %v", want, result, result)
 	}
@@ -880,6 +895,117 @@ b64Kind + ":" + hexKind + ":" + csvKind;
 	str, ok := result.(*object.String)
 	if !ok || str.Value != "base64:hex:csv" {
 		t.Fatalf("want base64:hex:csv, got %T %v", result, result)
+	}
+}
+
+func TestStdHashAndGzipModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "hash_gzip.gs")
+	sourceFile := filepath.Join(dir, "source.txt")
+	gzipFile := filepath.Join(dir, "source.txt.gz")
+	outFile := filepath.Join(dir, "out.txt")
+	appSource := strings.NewReplacer(
+		"__SOURCE__", strings.ReplaceAll(sourceFile, `\`, `\\`),
+		"__GZIP__", strings.ReplaceAll(gzipFile, `\`, `\\`),
+		"__OUT__", strings.ReplaceAll(outFile, `\`, `\\`),
+	).Replace(`
+let fs = require("@std/fs");
+let buffer = require("@std/buffer");
+let hash = require("@std/hash");
+let gzip = require("@std/compress/gzip");
+
+let hashKind = "hash-bad";
+if (hash.crc32("hello") === "3610a686" && hash.adler32("hello") === "062c0215" && hash.fnv1a(buffer.from("hello")) === "a430d84680aabd0b" && hash.crc32Number("hello") === 907060870) {
+  hashKind = "hash";
+}
+
+let compressed = gzip.compress("hello gzip");
+let decompressed = gzip.decompress(compressed);
+let decompressedBuffer = gzip.decompress(compressed, { asBuffer: true });
+fs.writeFileSync("__SOURCE__", "file gzip");
+gzip.compressFileSync("__SOURCE__", "__GZIP__");
+gzip.decompressFileSync("__GZIP__", "__OUT__");
+
+let gzipKind = "gzip-bad";
+if (buffer.isBuffer(compressed) && decompressed === "hello gzip" && buffer.isBuffer(decompressedBuffer) && decompressedBuffer.toString() === "hello gzip" && fs.readFileSync("__OUT__") === "file gzip") {
+  gzipKind = "gzip";
+}
+
+hashKind + ":" + gzipKind;
+`)
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "hash:gzip" {
+		t.Fatalf("want hash:gzip, got %T %v", result, result)
+	}
+}
+
+func TestStdArchiveZipModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "zip.gs")
+	root := filepath.Join(dir, "root")
+	archive := filepath.Join(dir, "app.zip")
+	extract := filepath.Join(dir, "extract")
+	appSource := strings.NewReplacer(
+		"__ROOT__", strings.ReplaceAll(root, `\`, `\\`),
+		"__ARCHIVE__", strings.ReplaceAll(archive, `\`, `\\`),
+		"__EXTRACT__", strings.ReplaceAll(extract, `\`, `\\`),
+	).Replace(`
+let fs = require("@std/fs");
+let path = require("@std/path");
+let zip = require("@std/archive/zip");
+
+fs.mkdirSync(path.join("__ROOT__", "src"), { recursive: true });
+fs.writeFileSync(path.join("__ROOT__", "README.md"), "hello zip");
+fs.writeFileSync(path.join("__ROOT__", "src", "main.gs"), "println(\"zip\")");
+
+zip.create([
+  { path: path.join("__ROOT__", "README.md"), name: "README.md" },
+  { path: path.join("__ROOT__", "src"), name: "src" },
+], "__ARCHIVE__");
+
+let entries = zip.list("__ARCHIVE__");
+zip.extract("__ARCHIVE__", "__EXTRACT__");
+
+let hasReadme = false;
+let hasMain = false;
+for (let entry of entries) {
+  if (entry.name === "README.md" && entry.size === 9) {
+    hasReadme = true;
+  }
+  if (entry.name === "src/main.gs") {
+    hasMain = true;
+  }
+}
+
+let readme = fs.readFileSync(path.join("__EXTRACT__", "README.md"));
+let main = fs.readFileSync(path.join("__EXTRACT__", "src", "main.gs"));
+let zipKind = "zip-bad";
+if (hasReadme && hasMain && readme === "hello zip" && main.includes("zip")) {
+  zipKind = "zip";
+}
+zipKind;
+`)
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "zip" {
+		t.Fatalf("want zip, got %T %v", result, result)
 	}
 }
 
