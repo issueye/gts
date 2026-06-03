@@ -1059,6 +1059,114 @@ label("ok");
 	}
 }
 
+func TestImportPackageDependencyExports(t *testing.T) {
+	dir := t.TempDir()
+	vendorDir := filepath.Join(dir, "vendor", "tools")
+	srcDir := filepath.Join(vendorDir, "src")
+	if err := os.MkdirAll(srcDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "project.toml"), []byte(`
+[project]
+entry = "app.gs"
+
+[dependencies]
+"tools" = "file:vendor/tools"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vendorDir, "project.toml"), []byte(`
+[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+"./extra" = "src/extra.gs"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "index.gs"), []byte(`export const label = "pkg";`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "extra.gs"), []byte(`export function suffix(x) { return x + ":extra"; }`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(dir, "app.gs")
+	if err := os.WriteFile(app, []byte(`
+import { label } from "tools";
+import { suffix } from "tools/extra";
+suffix(label);
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "pkg:extra" {
+		t.Fatalf("want pkg:extra, got %T %v", result, result)
+	}
+}
+
+func TestPackageDependencyUsesModuleCache(t *testing.T) {
+	dir := t.TempDir()
+	vendorDir := filepath.Join(dir, "vendor", "tools", "src")
+	if err := os.MkdirAll(vendorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "project.toml"), []byte(`
+[project]
+entry = "app.gs"
+
+[dependencies]
+"tools" = "file:vendor/tools"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "vendor", "tools", "project.toml"), []byte(`
+[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vendorDir, "index.gs"), []byte(`
+let state = { count: 0 };
+state.count = state.count + 1;
+export { state };
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(dir, "app.gs")
+	if err := os.WriteFile(app, []byte(`
+let a = require("tools");
+a.state.count = a.state.count + 1;
+let b = require("tools");
+b.state.count;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	num, ok := result.(*object.Number)
+	if !ok || num.Value != 2 {
+		t.Fatalf("want cached package state 2, got %T %v", result, result)
+	}
+}
+
 func TestRunScriptTimeout(t *testing.T) {
 	if os.Getenv("GOSCRIPT_TIMEOUT_HELPER") == "1" {
 		os.Exit(run([]string{"--timeout", "20ms", os.Getenv("GOSCRIPT_TIMEOUT_SCRIPT")}))

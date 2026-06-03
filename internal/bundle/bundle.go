@@ -8,56 +8,78 @@ import (
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/lexer"
+	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/parser"
 )
 
+type bundledModule struct {
+	path string
+	deps []moduleDependency
+}
+
+type moduleDependency struct {
+	spec     string
+	resolved module.ResolvedModule
+}
+
 func Bundle(entry string) (string, error) {
-	seen := make(map[string]bool)
+	projectRoot := module.FindProjectRoot(filepath.Dir(entry))
+	resolver := module.NewResolver(projectRoot)
+	entryResolved, err := resolver.Resolve(entry, module.ResolveOptions{
+		ProjectRoot: projectRoot,
+		BaseDir:     filepath.Dir(entry),
+	})
+	if err != nil {
+		return "", err
+	}
+	if entryResolved.External || entryResolved.Path == "" {
+		return "", fmt.Errorf("entry %q resolved to external module", entry)
+	}
+
+	seen := make(map[string]*bundledModule)
 	order := make([]string, 0)
-	baseDir := filepath.Dir(entry)
 
 	var walk func(path string) error
 	walk = func(path string) error {
-		absPath := resolvePath(path, baseDir)
-		if seen[absPath] {
+		if _, ok := seen[path]; ok {
 			return nil
 		}
-		seen[absPath] = true
 
-		src, err := os.ReadFile(absPath)
+		src, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		deps := findRequires(string(src))
-		for _, dep := range deps {
-			depPath := resolvePath(dep, filepath.Dir(absPath))
-			if err := walk(depPath); err != nil {
+		mod := &bundledModule{path: path}
+		seen[path] = mod
+		for _, spec := range findRequires(string(src)) {
+			resolved, err := resolver.Resolve(spec, module.ResolveOptions{
+				ProjectRoot: projectRoot,
+				BaseDir:     filepath.Dir(path),
+				Referrer:    path,
+			})
+			if err != nil {
 				return err
 			}
+			mod.deps = append(mod.deps, moduleDependency{spec: spec, resolved: resolved})
+			if !resolved.External && resolved.Path != "" {
+				if err := walk(resolved.Path); err != nil {
+					return err
+				}
+			}
 		}
-		order = append(order, absPath)
+		order = append(order, path)
 		return nil
 	}
 
-	if err := walk(entry); err != nil {
+	if err := walk(entryResolved.Path); err != nil {
 		return "", err
 	}
 
 	// Build module name map
 	modNames := make(map[string]string)
-	depGraph := make(map[string][]string) // module → its dependencies
-	for _, p := range order {
-		name := "__mod_" + sanitize(filepath.Base(p))
+	for i, p := range order {
+		name := fmt.Sprintf("__mod_%d_%s", i, sanitize(filepath.Base(p)))
 		modNames[p] = name
-
-		src, _ := os.ReadFile(p)
-		deps := findRequires(string(src))
-		var depMods []string
-		for _, dep := range deps {
-			depAbs := resolvePath(dep, filepath.Dir(p))
-			depMods = append(depMods, depAbs)
-		}
-		depGraph[p] = depMods
 	}
 
 	var b strings.Builder
@@ -70,23 +92,23 @@ func Bundle(entry string) (string, error) {
 
 		// Build require() replacement for dependencies
 		rewritten := string(src)
-		for _, depPath := range depGraph[p] {
-			depName := modNames[depPath]
-			rel, _ := filepath.Rel(filepath.Dir(p), depPath)
-			rel = filepath.ToSlash(rel)
-			if !strings.HasPrefix(rel, ".") {
-				rel = "./" + rel
+		for _, dep := range seen[p].deps {
+			if dep.resolved.External {
+				continue
 			}
-			old := fmt.Sprintf("require(%q)", rel)
-			rewritten = strings.ReplaceAll(rewritten, old, depName+"_exports")
+			depName := modNames[dep.resolved.Path]
+			rewritten = strings.ReplaceAll(rewritten, fmt.Sprintf("require(%q)", dep.spec), depName+"_exports")
 		}
 
 		fmt.Fprintf(&b, "// %s\n", filepath.Base(p))
 		fmt.Fprintf(&b, "var %s_exports = {};\n", name)
 
 		// Call dependency modules
-		for _, depPath := range depGraph[p] {
-			depName := modNames[depPath]
+		for _, dep := range seen[p].deps {
+			if dep.resolved.External {
+				continue
+			}
+			depName := modNames[dep.resolved.Path]
 			fmt.Fprintf(&b, "__run_%s(%s_exports);\n", depName, depName)
 		}
 
@@ -101,7 +123,7 @@ func Bundle(entry string) (string, error) {
 	}
 
 	// Call entry
-	entryName := modNames[resolvePath(entry, baseDir)]
+	entryName := modNames[entryResolved.Path]
 	fmt.Fprintf(&b, "%s_exports;\n", entryName)
 
 	return b.String(), nil
@@ -181,17 +203,6 @@ func walkNodeForRequire(node ast.Node) []string {
 		paths = append(paths, collectRequires(n.Body.Statements)...)
 	}
 	return paths
-}
-
-func resolvePath(path, baseDir string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	resolved := filepath.Join(baseDir, path)
-	if filepath.Ext(resolved) == "" {
-		resolved += ".gs"
-	}
-	return resolved
 }
 
 func unique(strs []string) []string {

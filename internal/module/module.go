@@ -51,16 +51,23 @@ func (c *Cache) Get(absPath string) *object.Environment {
 
 // ResolvePath resolves a module path relative to the base directory.
 func ResolvePath(path, baseDir string) string {
-	if filepath.IsAbs(path) {
-		return withDefaultExt(path)
+	resolved, err := NewResolver("").Resolve(path, ResolveOptions{BaseDir: baseDir})
+	if err != nil {
+		if filepath.IsAbs(path) {
+			return withDefaultExt(path)
+		}
+		if baseDir == "" {
+			baseDir, _ = os.Getwd()
+		}
+		if strings.HasPrefix(path, "@agent/") {
+			return withDefaultExt(filepath.Join(FindProjectRoot(baseDir), "scripts", "agent", strings.TrimPrefix(path, "@agent/")))
+		}
+		return withDefaultExt(filepath.Join(baseDir, path))
 	}
-	if baseDir == "" {
-		baseDir, _ = os.Getwd()
+	if resolved.Path != "" {
+		return resolved.Path
 	}
-	if strings.HasPrefix(path, "@agent/") {
-		return withDefaultExt(filepath.Join(FindProjectRoot(baseDir), "scripts", "agent", strings.TrimPrefix(path, "@agent/")))
-	}
-	return withDefaultExt(filepath.Join(baseDir, path))
+	return path
 }
 
 func withDefaultExt(path string) string {

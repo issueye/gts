@@ -31,10 +31,12 @@ type options struct {
 }
 
 type runner struct {
-	opts  options
-	pool  *async.Pool
-	cache *module.Cache
-	vm    *object.VirtualMachine
+	opts     options
+	pool     *async.Pool
+	cache    *module.Cache
+	vm       *object.VirtualMachine
+	resolver *module.Resolver
+	rootDir  string
 }
 
 type runOptions struct {
@@ -148,6 +150,8 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 	r.pool = async.NewPool(r.opts.workers)
 	r.vm.SetSpawner(r.pool.Go)
 	r.cache = module.NewCacheWithVM(r.vm)
+	r.rootDir = module.FindProjectRoot(filepath.Dir(absPath))
+	r.resolver = module.NewResolver(r.rootDir)
 	env := r.vm.NewEnvironment()
 	module.SetupExports(env)
 	r.configureModuleLoaders(env, filepath.Dir(absPath))
@@ -219,31 +223,37 @@ func (r *runner) callMain(env *object.Environment, file string) (object.Object, 
 func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 	return func(path string) (object.Object, error) {
 		r.ensureRuntime()
-		if native, ok := module.GetNative(path); ok {
-			return native, nil
-		}
-
-		absPath := module.ResolvePath(path, baseDir)
-		if !filepath.IsAbs(absPath) {
-			var err error
-			absPath, err = filepath.Abs(absPath)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if cached := r.cache.Get(absPath); cached != nil {
-			return module.GetExports(cached), nil
-		}
-
-		env := r.cache.GetOrCreate(absPath)
-		module.SetupExports(env)
-		r.configureModuleLoaders(env, filepath.Dir(absPath))
-
-		src, err := os.ReadFile(absPath)
+		resolved, err := r.resolver.Resolve(path, module.ResolveOptions{ProjectRoot: r.rootDir, BaseDir: baseDir})
 		if err != nil {
 			return nil, err
 		}
-		if _, err := r.evalSource(string(src), absPath, env); err != nil {
+		if resolved.Kind == module.ModuleKindNative {
+			native, ok := module.GetNative(path)
+			if !ok {
+				return nil, fmt.Errorf("native module %s is not registered", path)
+			}
+			return native, nil
+		}
+		if resolved.Path == "" {
+			return nil, fmt.Errorf("module %s resolved without a source path", path)
+		}
+		cacheKey := resolved.ID
+		if cacheKey == "" {
+			cacheKey = resolved.Path
+		}
+		if cached := r.cache.Get(cacheKey); cached != nil {
+			return module.GetExports(cached), nil
+		}
+
+		env := r.cache.GetOrCreate(cacheKey)
+		module.SetupExports(env)
+		r.configureModuleLoaders(env, filepath.Dir(resolved.Path))
+
+		src, err := os.ReadFile(resolved.Path)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := r.evalSource(string(src), resolved.Path, env); err != nil {
 			return nil, err
 		}
 		return module.GetExports(env), nil
@@ -260,6 +270,12 @@ func (r *runner) ensureRuntime() {
 	}
 	if r.cache == nil {
 		r.cache = module.NewCacheWithVM(r.vm)
+	}
+	if r.resolver == nil {
+		r.resolver = module.NewResolver("")
+	}
+	if r.rootDir == "" {
+		r.rootDir = module.FindProjectRoot("")
 	}
 }
 
