@@ -1,0 +1,10 @@
+[agent]
+provider = "fake"
+system = "You are a concise coding agent. Use tools when useful."
+maxTurns = 4
+
+[llm.anthropic]
+baseUrl = "https://api.anthropic.com"
+model = "claude-3-5-sonnet-latest"
+maxTokens = 1024
+timeoutMs = 60000

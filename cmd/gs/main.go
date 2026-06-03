@@ -42,7 +42,8 @@ type runner struct {
 }
 
 type runOptions struct {
-	autoMain bool
+	autoMain   bool
+	workingDir string
 }
 
 func main() {
@@ -75,6 +76,12 @@ func run(args []string) int {
 	r := newRunner(opts)
 	rest := fs.Args()
 	if len(rest) == 0 {
+		if err := r.runEmbeddedExecutable(); err == nil {
+			return 0
+		} else if !errors.Is(err, packagefile.ErrNoAppendedPackage) {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 		printUsage(fs)
 		return 2
 	}
@@ -85,6 +92,8 @@ func run(args []string) int {
 		err = r.runProject(".")
 	case "pack":
 		err = packCommand(rest[1:])
+	case "dist":
+		err = distCommand(rest[1:])
 	case "bundle":
 		err = bundleCommand(rest[1:])
 	case "help", "-h", "--help":
@@ -114,6 +123,7 @@ func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "  gs [flags] <script.gs>\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] run\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] pack [dir] [out.gspkg]\n\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] dist [dir] [out]\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] bundle <entry.gs> [out.gs]\n\n")
 	fmt.Fprintf(fs.Output(), "Flags:\n")
 	fs.PrintDefaults()
@@ -167,6 +177,53 @@ func packCommand(args []string) error {
 	return nil
 }
 
+func distCommand(args []string) error {
+	dir := "."
+	out := ""
+	if len(args) > 0 {
+		dir = args[0]
+	}
+	if len(args) > 1 {
+		out = args[1]
+	}
+	if len(args) > 2 {
+		return fmt.Errorf("dist expects at most 2 arguments: [dir] [out]")
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if out == "" {
+		name := filepath.Base(filepath.Clean(absDir))
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		out = filepath.Join(absDir, "dist", name)
+	}
+	tmpDir, err := os.MkdirTemp("", "goscript-dist-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmpDir)
+	pkgPath := filepath.Join(tmpDir, "app"+packagefile.Extension)
+	if err := packagefile.PackDirectory(absDir, pkgPath); err != nil {
+		return err
+	}
+	stub, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := packagefile.AppendPackageToExecutable(stub, pkgPath, out); err != nil {
+		return err
+	}
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, absOut)
+	return nil
+}
+
 func (r *runner) runProject(dir string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -176,12 +233,37 @@ func (r *runner) runProject(dir string) error {
 	if err != nil {
 		return err
 	}
-	return r.runFileWithOptions(filepath.Join(absDir, cfg.Entry), runOptions{autoMain: true})
+	return r.runFileWithOptions(filepath.Join(absDir, cfg.Entry), runOptions{autoMain: true, workingDir: absDir})
 }
 
 func (r *runner) runFile(path string) error {
 	autoMain := strings.EqualFold(filepath.Base(path), "main.gs")
 	return r.runFileWithOptions(path, runOptions{autoMain: autoMain})
+}
+
+func (r *runner) runEmbeddedExecutable() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	data, err := packagefile.ReadAppendedPackage(exe)
+	if err != nil {
+		return err
+	}
+	pkg, err := packagefile.OpenBytes(exe, data)
+	if err != nil {
+		return err
+	}
+	defer pkg.Close()
+
+	entry := pkg.Manifest.Entry
+	if pkg.Manifest.Package.Main != "" {
+		entry = pkg.Manifest.Package.Main
+	}
+	if entry == "" {
+		entry = "main.gs"
+	}
+	return r.runPackageEntryFromExecutable(pkg, exe, entry)
 }
 
 func (r *runner) runFileWithOptions(path string, opts runOptions) error {
@@ -190,6 +272,12 @@ func (r *runner) runFileWithOptions(path string, opts runOptions) error {
 		return err
 	}
 	return r.withTimeout("script execution", func() error {
+		restore, err := enterWorkingDir(opts.workingDir)
+		if err != nil {
+			return err
+		}
+		defer restore()
+
 		if _, err := r.evalFile(absPath, opts); err != nil {
 			return err
 		}
@@ -198,6 +286,22 @@ func (r *runner) runFileWithOptions(path string, opts runOptions) error {
 		}
 		return r.waitGroup("worker pool", r.pool.Wait)
 	})
+}
+
+func enterWorkingDir(dir string) (func(), error) {
+	if dir == "" {
+		return func() {}, nil
+	}
+	oldWd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chdir(dir); err != nil {
+		return nil, err
+	}
+	return func() {
+		_ = os.Chdir(oldWd)
+	}, nil
 }
 
 func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error) {
@@ -222,6 +326,40 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 		return r.callMain(env, absPath)
 	}
 	return result, nil
+}
+
+func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executablePath, entry string) error {
+	entry = filepath.ToSlash(entry)
+	src, err := pkg.ReadText(entry)
+	if err != nil {
+		return err
+	}
+	return r.withTimeout("script execution", func() error {
+		absExe, err := filepath.Abs(executablePath)
+		if err != nil {
+			return err
+		}
+		archivePath := filepath.ToSlash(absExe) + "!" + entry
+		r.vm = object.NewVirtualMachine()
+		r.pool = async.NewPool(r.opts.workers)
+		r.vm.SetSpawner(r.pool.Go)
+		r.cache = module.NewCacheWithVM(r.vm)
+		r.rootDir = absExe
+		r.resolver = module.NewResolver(r.rootDir)
+		env := r.vm.NewEnvironment()
+		module.SetupExports(env)
+		r.configureModuleLoaders(env, filepath.ToSlash(absExe)+"!"+filepath.ToSlash(filepath.Dir(entry)))
+		if _, err := r.evalSource(src, archivePath, env); err != nil {
+			return err
+		}
+		if _, err := r.callMain(env, archivePath); err != nil {
+			return err
+		}
+		if err := r.waitGroup("async tasks", r.vm.WaitAsync); err != nil {
+			return err
+		}
+		return r.waitGroup("worker pool", r.pool.Wait)
+	})
 }
 
 func (r *runner) evalSource(src, file string, env *object.Environment) (object.Object, error) {

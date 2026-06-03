@@ -16,3 +16,7 @@
 # OS
 .DS_Store
 Thumbs.db
+
+# local example secrets and runtime state
+/examples/15-gs-agent/agent.local.toml
+/examples/15-gs-agent/.agent/

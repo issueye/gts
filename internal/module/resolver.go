@@ -108,7 +108,11 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 	}
 
 	if strings.HasPrefix(specifier, "@agent/") {
-		path, err := resolveSourcePath(filepath.Join(projectRoot, "scripts", "agent", strings.TrimPrefix(specifier, "@agent/")))
+		agentRoot := FindAgentRoot(baseDir)
+		if agentRoot == "" {
+			agentRoot = projectRoot
+		}
+		path, err := resolveSourcePath(filepath.Join(agentRoot, "scripts", "agent", strings.TrimPrefix(specifier, "@agent/")))
 		if err != nil {
 			return ResolvedModule{}, fmt.Errorf("module not found %q from @agent alias: %w", specifier, err)
 		}
@@ -226,6 +230,7 @@ func resolvePackageFromPackageFile(specifier, pkgPath, projectRoot string) (Reso
 			if err != nil {
 				return ResolvedModule{}, err
 			}
+			pkg.Close()
 			defer nested.Close()
 			return resolveOpenedPackageFile(specifier, nested, packageName, exportName)
 		}
@@ -336,6 +341,9 @@ func resolveOpenedPackageFile(specifier string, pkg *packagefile.Package, packag
 	pkgPath := pkg.Path
 	if !strings.Contains(pkgPath, "!") {
 		pkgPath, _ = filepath.Abs(pkgPath)
+	}
+	if pkg.Root != "" && !strings.Contains(pkgPath, "!") {
+		pkgPath = filepath.ToSlash(pkgPath) + "!" + filepath.ToSlash(pkg.Root)
 	}
 	return ResolvedModule{
 		ID:          packageFileID(name, version, exportName, pkgPath, path),
@@ -495,6 +503,29 @@ func FindPackageRoot(startDir string) string {
 	}
 	for {
 		if manifest, err := loadExistingManifest(dir); err == nil && isPackageManifest(manifest) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+// FindAgentRoot walks upward looking for the repository-level script agent
+// library. This intentionally differs from FindProjectRoot because examples and
+// package projects can have their own project.toml files below the repository.
+func FindAgentRoot(startDir string) string {
+	if startDir == "" {
+		startDir, _ = os.Getwd()
+	}
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return ""
+	}
+	for {
+		if fileExists(filepath.Join(dir, "scripts", "agent")) {
 			return dir
 		}
 		parent := filepath.Dir(dir)

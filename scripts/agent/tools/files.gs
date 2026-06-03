@@ -52,6 +52,7 @@ export function createWriteFileTool(cwd) {
     },
     function(args) {
       let target = workspacePath(cwd, args.path);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, args.content);
       return {
         path: args.path,

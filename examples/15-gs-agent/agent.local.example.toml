@@ -1,0 +1,11 @@
+[agent]
+provider = "anthropic"
+system = "You are a concise coding agent. Use tools when useful."
+maxTurns = 4
+
+[llm.anthropic]
+apiKey = "sk-ant-..."
+baseUrl = "https://api.anthropic.com"
+model = "claude-3-5-sonnet-latest"
+maxTokens = 1024
+timeoutMs = 60000

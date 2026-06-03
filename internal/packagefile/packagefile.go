@@ -3,6 +3,8 @@ package packagefile
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +16,10 @@ import (
 
 const Extension = ".gspkg"
 
+var ErrNoAppendedPackage = errors.New("no appended GoScript package")
+
+var appendedPackageMagic = []byte("GOSCRIPT-PKG-v1")
+
 type Package struct {
 	Path     string
 	Root     string
@@ -24,13 +30,20 @@ type Package struct {
 }
 
 func Open(path string) (*Package, error) {
+	if strings.Contains(path, "!") {
+		return openPackageRef(path)
+	}
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
 	reader, err := zip.OpenReader(abs)
 	if err != nil {
-		return nil, err
+		data, appendedErr := ReadAppendedPackage(abs)
+		if appendedErr != nil {
+			return nil, err
+		}
+		return OpenBytes(abs, data)
 	}
 	pkg := &Package{
 		Path:   abs,
@@ -84,7 +97,11 @@ func (p *Package) ReadText(path string) (string, error) {
 }
 
 func (p *Package) ReadBytes(path string) ([]byte, error) {
-	file, ok := p.files[cleanArchivePath(path)]
+	cleaned := cleanArchivePath(path)
+	if p.Root != "" && cleaned != p.Root && !strings.HasPrefix(cleaned, p.Root+"/") {
+		cleaned = cleanArchivePath(filepath.ToSlash(filepath.Join(p.Root, cleaned)))
+	}
+	file, ok := p.files[cleaned]
 	if !ok {
 		return nil, os.ErrNotExist
 	}
@@ -111,10 +128,11 @@ func (p *Package) Subpackage(root string) (*Package, error) {
 		return p, nil
 	}
 	pkg := &Package{
-		Path:  p.Path + "!" + root,
-		Root:  root,
-		zip:   p.zip,
-		files: p.files,
+		Path:   p.Path + "!" + root,
+		Root:   root,
+		reader: p.reader,
+		zip:    p.zip,
+		files:  p.files,
 	}
 	if err := pkg.loadManifest(); err != nil {
 		return nil, err
@@ -131,23 +149,11 @@ func (p *Package) OpenNested(path string) (*Package, error) {
 }
 
 func ReadNestedText(packagePath, archivePath string) (string, error) {
-	parts := strings.Split(packagePath, "!")
-	if len(parts) == 0 {
-		return "", os.ErrNotExist
-	}
-	pkg, err := Open(parts[0])
+	pkg, err := Open(packagePath)
 	if err != nil {
 		return "", err
 	}
 	defer pkg.Close()
-	for _, nestedPath := range parts[1:] {
-		next, err := pkg.OpenNested(nestedPath)
-		if err != nil {
-			return "", err
-		}
-		defer next.Close()
-		pkg = next
-	}
 	return pkg.ReadText(archivePath)
 }
 
@@ -236,6 +242,154 @@ func PackDirectory(root, out string) error {
 	return os.Rename(tmp, absOut)
 }
 
+func openPackageRef(path string) (*Package, error) {
+	parts := strings.Split(path, "!")
+	if len(parts) == 0 || parts[0] == "" {
+		return nil, os.ErrNotExist
+	}
+	pkg, err := Open(parts[0])
+	if err != nil {
+		return nil, err
+	}
+	for _, part := range parts[1:] {
+		part = cleanArchivePath(part)
+		if part == "" {
+			continue
+		}
+		var next *Package
+		if strings.EqualFold(filepath.Ext(part), Extension) {
+			if pkg.Root != "" && !strings.HasPrefix(part, pkg.Root+"/") {
+				part = cleanArchivePath(filepath.ToSlash(filepath.Join(pkg.Root, part)))
+			}
+			next, err = pkg.OpenNested(part)
+			_ = pkg.Close()
+		} else {
+			next, err = pkg.Subpackage(part)
+		}
+		if err != nil {
+			return nil, err
+		}
+		pkg = next
+	}
+	return pkg, nil
+}
+
+func AppendPackageToExecutable(stubPath, packagePath, out string) error {
+	if out == "" {
+		return fmt.Errorf("output executable path is required")
+	}
+	absStub, err := filepath.Abs(stubPath)
+	if err != nil {
+		return err
+	}
+	absPackage, err := filepath.Abs(packagePath)
+	if err != nil {
+		return err
+	}
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(absStub) == filepath.Clean(absOut) {
+		return fmt.Errorf("output executable must differ from the stub executable")
+	}
+	if filepath.Clean(absPackage) == filepath.Clean(absOut) {
+		return fmt.Errorf("output executable must differ from the package file")
+	}
+	if err := os.MkdirAll(filepath.Dir(absOut), 0755); err != nil {
+		return err
+	}
+
+	stub, err := os.Open(absStub)
+	if err != nil {
+		return err
+	}
+	defer stub.Close()
+	stubInfo, err := stub.Stat()
+	if err != nil {
+		return err
+	}
+	stubSize := stubInfo.Size()
+	if offset, _, err := appendedPackageOffset(stub, stubSize); err == nil {
+		stubSize = offset
+	} else if !errors.Is(err, ErrNoAppendedPackage) {
+		return err
+	}
+	if _, err := stub.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+
+	pkg, err := os.Open(absPackage)
+	if err != nil {
+		return err
+	}
+	defer pkg.Close()
+	pkgInfo, err := pkg.Stat()
+	if err != nil {
+		return err
+	}
+
+	tmp := absOut + ".tmp"
+	outFile, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	_, copyStubErr := io.CopyN(outFile, stub, stubSize)
+	_, copyPkgErr := io.Copy(outFile, pkg)
+	trailerErr := writeAppendedPackageTrailer(outFile, uint64(pkgInfo.Size()))
+	closeErr := outFile.Close()
+	if copyStubErr != nil || copyPkgErr != nil || trailerErr != nil || closeErr != nil {
+		_ = os.Remove(tmp)
+		if copyStubErr != nil {
+			return copyStubErr
+		}
+		if copyPkgErr != nil {
+			return copyPkgErr
+		}
+		if trailerErr != nil {
+			return trailerErr
+		}
+		return closeErr
+	}
+	if err := os.Chmod(tmp, stubInfo.Mode().Perm()); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Remove(absOut); err != nil && !os.IsNotExist(err) {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, absOut)
+}
+
+func ReadAppendedPackage(path string) ([]byte, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	offset, size, err := appendedPackageOffset(file, info.Size())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data := make([]byte, int(size))
+	if _, err := io.ReadFull(file, data); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 func addFile(zipper *zip.Writer, path, name string) error {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -268,4 +422,36 @@ func cleanArchivePath(path string) string {
 		return ""
 	}
 	return cleaned
+}
+
+func appendedPackageOffset(file *os.File, fileSize int64) (int64, uint64, error) {
+	trailerSize := int64(8 + len(appendedPackageMagic))
+	if fileSize < trailerSize {
+		return 0, 0, ErrNoAppendedPackage
+	}
+	trailer := make([]byte, trailerSize)
+	if _, err := file.Seek(fileSize-trailerSize, io.SeekStart); err != nil {
+		return 0, 0, err
+	}
+	if _, err := io.ReadFull(file, trailer); err != nil {
+		return 0, 0, err
+	}
+	if !bytes.Equal(trailer[8:], appendedPackageMagic) {
+		return 0, 0, ErrNoAppendedPackage
+	}
+	size := binary.LittleEndian.Uint64(trailer[:8])
+	if size > uint64(fileSize-trailerSize) {
+		return 0, 0, fmt.Errorf("invalid appended GoScript package size %d", size)
+	}
+	return fileSize - trailerSize - int64(size), size, nil
+}
+
+func writeAppendedPackageTrailer(w io.Writer, packageSize uint64) error {
+	var size [8]byte
+	binary.LittleEndian.PutUint64(size[:], packageSize)
+	if _, err := w.Write(size[:]); err != nil {
+		return err
+	}
+	_, err := w.Write(appendedPackageMagic)
+	return err
 }

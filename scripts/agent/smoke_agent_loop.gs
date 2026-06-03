@@ -39,8 +39,8 @@ if (answer.content === "read_file completed") {
 }
 
 let recordKind = "records-bad";
-if (records.length === 4) {
-  recordKind = "records-4";
+if (records.length === 8) {
+  recordKind = "records-8";
 }
 
 fs.unlinkSync(".agent-smoke/loop.txt");

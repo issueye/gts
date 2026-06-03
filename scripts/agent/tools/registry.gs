@@ -17,6 +17,13 @@ export function createRegistry() {
     return tool;
   }
 
+  function registerAll(nextTools) {
+    for (let tool of nextTools) {
+      register(tool);
+    }
+    return tools.length;
+  }
+
   function list() {
     return tools.map(function(tool) {
       return {
@@ -50,10 +57,28 @@ export function createRegistry() {
     return tool.run(args);
   }
 
+  function safeCall(name, args) {
+    try {
+      return {
+        ok: true,
+        name: name,
+        result: call(name, args),
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        name: name,
+        error: String(err),
+      };
+    }
+  }
+
   return {
     register: register,
+    registerAll: registerAll,
     list: list,
     get: get,
     call: call,
+    safeCall: safeCall,
   };
 }

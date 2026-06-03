@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/issueye/goscript/internal/object"
+	"github.com/issueye/goscript/internal/packagefile"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -119,6 +121,49 @@ func TestRunProject(t *testing.T) {
 	}
 }
 
+func TestRunProjectUsesProjectWorkingDirectory(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "project.toml"), "[project]\nentry = \"app.gs\"\n")
+	writeTestFile(t, filepath.Join(dir, "workspace", "task.txt"), "cwd ok")
+	writeTestFile(t, filepath.Join(dir, "app.gs"), `
+let fs = require("@std/fs");
+let path = require("@std/path");
+let process = require("@std/process");
+let text = fs.readFileSync(path.join(process.cwd(), "workspace", "task.txt"));
+if (text !== "cwd ok") {
+  throw new Error("bad project cwd: " + process.cwd());
+}
+`)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runWd := t.TempDir()
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWd)
+	})
+	if err := os.Chdir(runWd); err != nil {
+		t.Fatal(err)
+	}
+	runWd, err = os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	if err := r.runProject(dir); err != nil {
+		t.Fatal(err)
+	}
+	gotWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotWd != runWd {
+		t.Fatalf("runProject did not restore working directory: want %s, got %s", runWd, gotWd)
+	}
+}
+
 func TestPackCommandCreatesPackageFile(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "project.toml"), `[package]
@@ -132,6 +177,40 @@ main = "src/index.gs"
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(out); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDistCommandCreatesEmbeddedExecutable(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "project.toml"), `[project]
+entry = "main.gs"
+`)
+	writeTestFile(t, filepath.Join(root, "main.gs"), `
+let lib = require("./lib");
+function main() {
+  if (lib.value !== "embedded") {
+    throw new Error("bad embedded value");
+  }
+}
+`)
+	writeTestFile(t, filepath.Join(root, "lib.gs"), `exports.value = "embedded";`)
+	out := filepath.Join(t.TempDir(), "app.exe")
+
+	if err := distCommand([]string{root, out}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := packagefile.ReadAppendedPackage(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := packagefile.OpenBytes(out, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pkg.Close()
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	if err := r.runPackageEntryFromExecutable(pkg, out, "main.gs"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -878,6 +957,227 @@ okKind + ":" + first.data + ":" + second.type + ":" + second.data;
 	}
 }
 
+func TestAgentAnthropicProviderWithMockServer(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if r.Header.Get("x-api-key") != "test-key" {
+			t.Fatalf("missing anthropic api key header")
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			if !strings.Contains(string(body), `"tools"`) || !strings.Contains(string(body), `"read_task"`) {
+				t.Fatalf("first request missing tool schema: %s", body)
+			}
+			_, _ = w.Write([]byte(`{
+  "id": "msg_1",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_1",
+      "name": "read_task",
+      "input": { "path": "task.txt" }
+    }
+  ],
+  "stop_reason": "tool_use"
+}`))
+			return
+		}
+		if !strings.Contains(string(body), `"tool_result"`) || !strings.Contains(string(body), `"toolu_1"`) {
+			t.Fatalf("second request missing tool result: %s", body)
+		}
+		_, _ = w.Write([]byte(`{
+  "id": "msg_2",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    { "type": "text", "text": "mock anthropic completed" }
+  ],
+  "stop_reason": "end_turn"
+}`))
+	}))
+	defer server.Close()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	dir, err := os.MkdirTemp(root, ".agent-anthropic-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	script := filepath.Join(dir, "anthropic_mock.gs")
+	source := strings.ReplaceAll(`
+import { createAgent } from "@agent/core/agent";
+import { createRegistry, createTool } from "@agent/tools/registry";
+import { createAnthropicProvider } from "@agent/llm/anthropic";
+
+let registry = createRegistry();
+registry.register(createTool(
+  "read_task",
+  "Read a task by path.",
+  {
+    type: "object",
+    required: ["path"],
+    additionalProperties: false,
+    properties: {
+      path: { type: "string" },
+    },
+  },
+  function(args) {
+    return { path: args.path, content: "mock task" };
+  }
+));
+
+let provider = createAnthropicProvider({
+  apiKey: "test-key",
+  baseUrl: "__URL__",
+  model: "claude-test",
+  maxTokens: 128,
+});
+
+let agent = createAgent({
+  provider: provider,
+  registry: registry,
+  maxTurns: 4,
+});
+
+let answer = agent.run("read task");
+answer.content;
+`, "__URL__", server.URL)
+	if err := os.WriteFile(script, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	runner := newRunner(options{workers: 1, timeout: 5 * time.Second})
+	result, err := runner.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "mock anthropic completed" {
+		t.Fatalf("want mock anthropic completed, got %T %v", result, result)
+	}
+	if requests != 2 {
+		t.Fatalf("want 2 anthropic requests, got %d", requests)
+	}
+}
+
+func TestAgentExampleReadsLocalTomlProviderConfig(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if r.Header.Get("x-api-key") != "toml-key" {
+			t.Fatalf("missing toml api key header")
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requests++
+		if !strings.Contains(string(body), `"model":"toml-model"`) {
+			t.Fatalf("request did not use toml model: %s", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if requests == 1 {
+			if !strings.Contains(string(body), `"read_task"`) {
+				t.Fatalf("first request missing workspace tool: %s", body)
+			}
+			_, _ = w.Write([]byte(`{
+  "id": "msg_1",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_toml",
+      "name": "read_task",
+      "input": { "path": "task.txt" }
+    }
+  ],
+  "stop_reason": "tool_use"
+}`))
+			return
+		}
+		if !strings.Contains(string(body), `"tool_result"`) || !strings.Contains(string(body), `"toolu_toml"`) {
+			t.Fatalf("second request missing tool result: %s", body)
+		}
+		_, _ = w.Write([]byte(`{
+  "id": "msg_2",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    { "type": "text", "text": "toml provider completed" }
+  ],
+  "stop_reason": "end_turn"
+}`))
+	}))
+	defer server.Close()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	example := filepath.Join(root, "examples", "15-gs-agent")
+	localConfig := filepath.Join(example, "agent.local.toml")
+	writeTestFile(t, localConfig, strings.ReplaceAll(`
+[agent]
+provider = "anthropic"
+system = "Use the configured model."
+maxTurns = 4
+
+[llm.anthropic]
+apiKey = "toml-key"
+baseUrl = "__URL__"
+model = "toml-model"
+maxTokens = 64
+timeoutMs = 5000
+`, "__URL__", server.URL))
+	t.Cleanup(func() {
+		_ = os.Remove(localConfig)
+		_ = os.RemoveAll(filepath.Join(example, ".agent"))
+	})
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runWd := t.TempDir()
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWd)
+	})
+	if err := os.Chdir(runWd); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: 5 * time.Second})
+	if err := r.runProject(example); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("want 2 anthropic requests, got %d", requests)
+	}
+	if _, err := os.Stat(filepath.Join(example, ".agent", "session.jsonl")); err != nil {
+		t.Fatalf("expected example session file in project root: %v", err)
+	}
+}
+
 func TestStdDBSQLiteModule(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "db_sqlite.gs")
@@ -1575,6 +1875,7 @@ func TestStableExamples(t *testing.T) {
 		filepath.Join(root, "docs", "examples", "counter.gs"),
 		filepath.Join(root, "docs", "examples", "modules.gs"),
 		filepath.Join(root, "docs", "examples", "sqlite.gs"),
+		filepath.Join(root, "examples", "16-native-stdlib.gs"),
 	}
 
 	for _, example := range examples {
@@ -1597,6 +1898,13 @@ func TestStableExamples(t *testing.T) {
 	t.Run("examples/14-nested-gspkg", func(t *testing.T) {
 		r := newRunner(options{workers: 1, timeout: time.Second})
 		if err := r.runProject(filepath.Join(root, "examples", "14-nested-gspkg")); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("examples/15-gs-agent", func(t *testing.T) {
+		r := newRunner(options{workers: 1, timeout: time.Second})
+		if err := r.runProject(filepath.Join(root, "examples", "15-gs-agent")); err != nil {
 			t.Fatal(err)
 		}
 	})
