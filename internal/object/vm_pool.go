@@ -23,7 +23,6 @@ func (p *VirtualMachinePool) Get() *VirtualMachine {
 	}
 	select {
 	case vm := <-p.idle:
-		vm.Reset()
 		return vm
 	default:
 		return NewVirtualMachine()
