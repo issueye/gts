@@ -811,7 +811,7 @@ func (p *Parser) parseImport() *ast.ImportDecl {
 		decl.Namespace = p.cur.Literal
 		p.nextToken()
 	}
-	if p.curTokenIs(lexer.TOKEN_IDENT) && !p.peekTokenIs(lexer.TOKEN_FROM) && !p.peekTokenIs(lexer.TOKEN_LBRACE) {
+	if p.curTokenIs(lexer.TOKEN_IDENT) && !p.peekTokenIs(lexer.TOKEN_LBRACE) {
 		decl.Default = p.cur.Literal
 		if p.peekTokenIs(lexer.TOKEN_COMMA) {
 			p.nextToken()

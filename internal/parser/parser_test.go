@@ -530,6 +530,22 @@ func TestParse_NamespaceImport(t *testing.T) {
 	}
 }
 
+func TestParse_DefaultImport(t *testing.T) {
+	input := `import path from "@std/path";`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	imp, ok := prog.Body[0].(*ast.ImportDecl)
+	if !ok {
+		t.Fatalf("want ImportDecl, got %T", prog.Body[0])
+	}
+	if imp.Default != "path" {
+		t.Fatalf("want default path, got %q", imp.Default)
+	}
+	if imp.Source != "\"@std/path\"" {
+		t.Fatalf("want @std/path source, got %q", imp.Source)
+	}
+}
+
 func TestParse_ExportSpecifiers(t *testing.T) {
 	input := `export { value, add as sum };`
 	prog := Parse(input)

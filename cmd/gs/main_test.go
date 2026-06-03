@@ -358,6 +358,34 @@ typeof exec.run;
 	}
 }
 
+func TestImportNativeStdlibModule(t *testing.T) {
+	dir := t.TempDir()
+	app := filepath.Join(dir, "native_import.gs")
+	if err := os.WriteFile(app, []byte(`
+import path, { join, sep as separator } from "@std/path";
+let joined = join("alpha", "beta");
+let defaultJoined = path.join("gamma", "delta");
+let ok = joined === path.join("alpha", "beta") && defaultJoined === join("gamma", "delta") && separator === path.sep;
+if (ok) {
+  "ok";
+} else {
+  "bad";
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ok" {
+		t.Fatalf("want ok, got %T %v", result, result)
+	}
+}
+
 func TestStdPathModule(t *testing.T) {
 	dir := t.TempDir()
 	app := filepath.Join(dir, "path.gs")

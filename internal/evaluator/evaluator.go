@@ -516,7 +516,11 @@ func evalImport(n *ast.ImportDecl, env *object.Environment) object.Object {
 	if n.Default != "" {
 		value := getExport(exports, "default")
 		if value == object.UNDEFINED {
-			return object.NewError(n.Pos(), "ImportError: module %s has no default export", n.Source)
+			if isNativeModulePath(unquoteModulePath(n.Source)) {
+				value = exports
+			} else {
+				return object.NewError(n.Pos(), "ImportError: module %s has no default export", n.Source)
+			}
 		}
 		env.Set(n.Default, value)
 	}
@@ -617,6 +621,10 @@ func getExport(exports object.Object, name string) object.Object {
 		return pair.Value
 	}
 	return object.UNDEFINED
+}
+
+func isNativeModulePath(path string) bool {
+	return strings.HasPrefix(path, "@std/")
 }
 
 func unquoteModulePath(path string) string {
