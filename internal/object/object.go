@@ -239,12 +239,14 @@ func (e *Error) Inspect() string {
 // --- Class / Instance ---
 
 type Class struct {
-	Name    string
-	Super   *Class
-	Methods map[string]*Function
-	Fields  map[string]Object
-	Statics map[string]Object
-	Pos     ast.Position
+	Name        string
+	Super       *Class
+	Methods     map[string]*Function
+	Fields      map[string]Object
+	FieldTypes  map[string]*ast.TypeAnnotation
+	Statics     map[string]Object
+	StaticTypes map[string]*ast.TypeAnnotation
+	Pos         ast.Position
 }
 
 func (c *Class) Type() ObjectType { return CLASS_OBJ }

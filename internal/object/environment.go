@@ -6,6 +6,7 @@ import "github.com/issueye/goscript/internal/ast"
 type Environment struct {
 	store     map[string]Object
 	consts    map[string]bool
+	types     map[string]*ast.TypeAnnotation
 	parent    *Environment
 	vm        *VirtualMachine
 	Extra     Object // bound context for method dispatch (array/string instance)
@@ -55,13 +56,61 @@ func (e *Environment) Get(name string) (Object, bool) {
 func (e *Environment) Set(name string, val Object) Object {
 	e.store[name] = val
 	e.consts[name] = false
+	if e.types != nil {
+		delete(e.types, name)
+	}
 	return val
 }
 
 func (e *Environment) SetConst(name string, val Object) Object {
 	e.store[name] = val
 	e.consts[name] = true
+	if e.types != nil {
+		delete(e.types, name)
+	}
 	return val
+}
+
+func (e *Environment) SetTyped(name string, val Object, anno *ast.TypeAnnotation) Object {
+	e.store[name] = val
+	e.consts[name] = false
+	if anno == nil {
+		if e.types != nil {
+			delete(e.types, name)
+		}
+		return val
+	}
+	if e.types == nil {
+		e.types = make(map[string]*ast.TypeAnnotation)
+	}
+	e.types[name] = anno
+	return val
+}
+
+func (e *Environment) SetTypedConst(name string, val Object, anno *ast.TypeAnnotation) Object {
+	e.store[name] = val
+	e.consts[name] = true
+	if anno == nil {
+		if e.types != nil {
+			delete(e.types, name)
+		}
+		return val
+	}
+	if e.types == nil {
+		e.types = make(map[string]*ast.TypeAnnotation)
+	}
+	e.types[name] = anno
+	return val
+}
+
+func (e *Environment) TypeOf(name string) (*ast.TypeAnnotation, bool) {
+	for env := e; env != nil; env = env.parent {
+		if _, ok := env.store[name]; ok {
+			anno, typed := env.types[name]
+			return anno, typed && anno != nil
+		}
+	}
+	return nil, false
 }
 
 // SetUp sets a variable in the nearest ancestor scope where it exists,
@@ -81,6 +130,9 @@ func (e *Environment) SetUp(name string, val Object) Object {
 			}
 			env.store[name] = val
 			env.consts[name] = false
+			if env.types != nil {
+				delete(env.types, name)
+			}
 			return val
 		}
 	}
@@ -107,6 +159,9 @@ func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
 func (e *Environment) SetHere(name string, val Object) Object {
 	e.store[name] = val
 	e.consts[name] = false
+	if e.types != nil {
+		delete(e.types, name)
+	}
 	return val
 }
 

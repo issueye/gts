@@ -182,7 +182,7 @@ func evalLet(n *ast.LetStmt, env *object.Environment) object.Object {
 	if err := checkType(env, n.Pos(), n.TypeAnno, val); err != nil {
 		return err
 	}
-	env.Set(n.Name, val)
+	env.SetTyped(n.Name, val, n.TypeAnno)
 	return object.UNDEFINED
 }
 
@@ -197,7 +197,7 @@ func evalConst(n *ast.ConstStmt, env *object.Environment) object.Object {
 	if err := checkType(env, n.Pos(), n.TypeAnno, val); err != nil {
 		return err
 	}
-	env.SetConst(n.Name, val)
+	env.SetTypedConst(n.Name, val, n.TypeAnno)
 	return object.UNDEFINED
 }
 
@@ -212,7 +212,7 @@ func evalVar(n *ast.VarStmt, env *object.Environment) object.Object {
 	if err := checkType(env, n.Pos(), n.TypeAnno, val); err != nil {
 		return err
 	}
-	env.Set(n.Name, val)
+	env.SetTyped(n.Name, val, n.TypeAnno)
 	return object.UNDEFINED
 }
 
@@ -640,11 +640,13 @@ func evalFuncDecl(n *ast.FuncDecl, env *object.Environment) object.Object {
 
 func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 	cls := &object.Class{
-		Name:    n.Name,
-		Methods: make(map[string]*object.Function),
-		Fields:  make(map[string]object.Object),
-		Statics: make(map[string]object.Object),
-		Pos:     n.Pos(),
+		Name:        n.Name,
+		Methods:     make(map[string]*object.Function),
+		Fields:      make(map[string]object.Object),
+		FieldTypes:  make(map[string]*ast.TypeAnnotation),
+		Statics:     make(map[string]object.Object),
+		StaticTypes: make(map[string]*ast.TypeAnnotation),
+		Pos:         n.Pos(),
 	}
 	env.ObjectManager().Register(cls)
 	// Resolve super class
@@ -655,6 +657,12 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 			// Copy parent methods
 			for k, v := range superClass.Methods {
 				cls.Methods[k] = v
+			}
+			for k, v := range superClass.Fields {
+				cls.Fields[k] = v
+			}
+			for k, v := range superClass.FieldTypes {
+				cls.FieldTypes[k] = v
 			}
 		} else {
 			return object.NewError(n.Pos(), "TypeError: superclass must be a class")
@@ -691,11 +699,19 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 			var val object.Object = object.UNDEFINED
 			if m.DefaultVal != nil {
 				val = Eval(m.DefaultVal, env)
+				if object.IsRuntimeError(val) {
+					return val
+				}
+			}
+			if err := checkType(env, m.Pos_, m.TypeAnno, val); err != nil {
+				return err
 			}
 			if m.IsStatic {
 				cls.Statics[m.Name] = val
+				cls.StaticTypes[m.Name] = m.TypeAnno
 			} else {
 				cls.Fields[m.Name] = val
+				cls.FieldTypes[m.Name] = m.TypeAnno
 			}
 		}
 	}
@@ -1096,6 +1112,11 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 	switch left := n.Left.(type) {
 	case *ast.Ident:
 		if n.Op == "=" {
+			if anno, ok := env.TypeOf(left.TokenLit); ok {
+				if err := checkType(env, n.Pos(), anno, right); err != nil {
+					return err
+				}
+			}
 			if _, ok, isConst := env.Assign(left.TokenLit, right); !ok {
 				return object.NewError(left.Pos(), "ReferenceError: '%s' is not defined", left.TokenLit)
 			} else if isConst {
@@ -1110,6 +1131,11 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 			if object.IsRuntimeError(right) {
 				return right
 			}
+			if anno, ok := env.TypeOf(left.TokenLit); ok {
+				if err := checkType(env, n.Pos(), anno, right); err != nil {
+					return err
+				}
+			}
 			if _, ok, isConst := env.Assign(left.TokenLit, right); !ok {
 				return object.NewError(left.Pos(), "ReferenceError: '%s' is not defined", left.TokenLit)
 			} else if isConst {
@@ -1119,6 +1145,9 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 		return right
 	case *ast.MemberExpr:
 		obj := Eval(left.Object, env)
+		if object.IsRuntimeError(obj) {
+			return obj
+		}
 		if hash, ok := obj.(*object.Hash); ok {
 			name := left.Property.(*ast.Ident).TokenLit
 			if hash.Frozen {
@@ -1134,8 +1163,26 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 		}
 		if inst, ok := obj.(*object.Instance); ok {
 			name := left.Property.(*ast.Ident).TokenLit
+			if anno, ok := inst.Class.FieldTypes[name]; ok {
+				if err := checkType(env, n.Pos(), anno, right); err != nil {
+					return err
+				}
+			}
 			inst.Props[name] = right
 			return right
+		}
+		if cls, ok := obj.(*object.Class); ok {
+			name := left.Property.(*ast.Ident).TokenLit
+			if anno, ok := cls.StaticTypes[name]; ok {
+				if err := checkType(env, n.Pos(), anno, right); err != nil {
+					return err
+				}
+			}
+			if _, ok := cls.Statics[name]; ok {
+				cls.Statics[name] = right
+				return right
+			}
+			return object.NewError(left.Pos(), "TypeError: '%s' is not a static member of %s", name, cls.Name)
 		}
 		return object.NewError(left.Pos(), "TypeError: cannot assign to property of %T", obj)
 	case *ast.IndexExpr:

@@ -32,8 +32,7 @@ func TestMatchesPrimitiveTypes(t *testing.T) {
 }
 
 func TestMatchesOptionalUnionAndArray(t *testing.T) {
-	union := &ast.TypeAnnotation{Kind: ast.TK_UNION, Name: "number"}
-	union.Union = []*ast.TypeAnnotation{union, primitive("string")}
+	union := &ast.TypeAnnotation{Kind: ast.TK_UNION, Union: []*ast.TypeAnnotation{primitive("number"), primitive("string")}}
 
 	tests := []struct {
 		name string

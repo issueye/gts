@@ -42,6 +42,25 @@ func TestParse_LetWithType(t *testing.T) {
 	}
 }
 
+func TestParse_UnionTypeAnnotation(t *testing.T) {
+	input := `let value: number | string = 42;`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	stmt := prog.Body[0].(*ast.LetStmt)
+	if stmt.TypeAnno == nil || stmt.TypeAnno.Kind != ast.TK_UNION {
+		t.Fatalf("expected union type, got %+v", stmt.TypeAnno)
+	}
+	if len(stmt.TypeAnno.Union) != 2 {
+		t.Fatalf("expected 2 union members, got %+v", stmt.TypeAnno.Union)
+	}
+	if stmt.TypeAnno.Union[0] == stmt.TypeAnno {
+		t.Fatal("union type must not contain itself")
+	}
+	if got := stmt.TypeAnno.String(); got != "number | string" {
+		t.Fatalf("want union string, got %q", got)
+	}
+}
+
 func TestParse_ConstStmt(t *testing.T) {
 	input := `const PI = 3.14;`
 	prog := Parse(input)

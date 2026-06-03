@@ -40,12 +40,6 @@ func Matches(anno *ast.TypeAnnotation, value object.Object) bool {
 		return true
 	case ast.TK_UNION:
 		for _, item := range anno.Union {
-			if item == anno {
-				if matchesPrimitive(anno.Name, value) {
-					return true
-				}
-				continue
-			}
 			if Matches(item, value) {
 				return true
 			}
@@ -117,10 +111,6 @@ func typeName(anno *ast.TypeAnnotation) string {
 	if anno.Kind == ast.TK_UNION {
 		parts := make([]string, 0, len(anno.Union))
 		for _, item := range anno.Union {
-			if item == anno {
-				parts = append(parts, anno.Name)
-				continue
-			}
 			parts = append(parts, typeName(item))
 		}
 		return strings.Join(parts, " | ")

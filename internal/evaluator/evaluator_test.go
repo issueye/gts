@@ -496,6 +496,9 @@ func TestEval_TypeCheckDeclarations(t *testing.T) {
 
 	evaluated := testEvalWithTypeCheck(`let x: number = "bad";`)
 	assertTypeError(t, evaluated)
+
+	assertTypeError(t, testEvalWithTypeCheck(`let x: number = 1; x = "bad";`))
+	testNumber(t, testEvalWithTypeCheck(`let x: number = 1; x += 2; x;`), "3")
 }
 
 func TestEval_TypeCheckFunctionParamsAndReturn(t *testing.T) {
@@ -508,6 +511,31 @@ func TestEval_TypeCheckFunctionParamsAndReturn(t *testing.T) {
 func TestEval_TypeCheckArrayAndOptional(t *testing.T) {
 	testNumber(t, testEvalWithTypeCheck(`function first(v?: number): number | undefined { return v; } first(7);`), "7")
 	assertTypeError(t, testEvalWithTypeCheck(`let values: number[] = [1, "bad"];`))
+}
+
+func TestEval_TypeCheckClassFields(t *testing.T) {
+	testNumber(t, testEvalWithTypeCheck(`
+class Counter {
+  count: number = 1;
+}
+let c = new Counter();
+c.count = 2;
+c.count;
+`), "2")
+
+	assertTypeError(t, testEvalWithTypeCheck(`
+class Counter {
+  count: number = "bad";
+}
+`))
+
+	assertTypeError(t, testEvalWithTypeCheck(`
+class Counter {
+  count: number = 1;
+}
+let c = new Counter();
+c.count = "bad";
+`))
 }
 
 func TestEval_NaN(t *testing.T) {
