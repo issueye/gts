@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/os", func() (object.Object, error) {
+	module.RegisterNative("@std/os", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initOSModule(exports)
 		return exports, nil

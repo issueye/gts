@@ -370,6 +370,9 @@ err.stack;
 | `@std/toml` | `parse`, `stringify`, `readFileSync`, `writeFileSync` |
 | `@std/yaml` | `parse`, `stringify`, `readFileSync`, `writeFileSync` |
 | `@std/xml` | `parse`, `stringify`, `readFileSync`, `writeFileSync`；XML 节点为 `{ name, attributes, children, text }` |
+| `@std/encoding/base64` | `encode`, `decode`, `encodeURL`, `decodeURL`；`decode(text, { asBuffer: true })` 可返回 Buffer |
+| `@std/encoding/hex` | `encode`, `decode`；`decode(text, { asBuffer: true })` 可返回 Buffer |
+| `@std/encoding/csv` | `parse`, `stringify`, `readFileSync`, `writeFileSync`；支持 `header/comma/comment/fieldsPerRecord/trimLeadingSpace` |
 | `@std/exec` | `run`, `output`, `combinedOutput`, `start`, `command`, `spawn`；`spawn` 返回 stdin/stdout/stderr stream、`write/writeln/closeStdin/wait/kill` |
 | `@std/pty` | `spawn`, `open`；返回 PTY/ConPTY 进程对象，含 `output`, `write`, `writeln`, `readText`, `readLine`, `resize`, `wait`, `kill`, `close` |
 | `@std/terminal` | `isTTY`, `size`, `read`, `write`, `writeln`, `setRawMode`；用于宿主终端探测、读写和 raw mode 恢复 |

@@ -19,6 +19,7 @@ type VirtualMachine struct {
 	spawn           func(func())
 	importer        func(env *Environment, path string) (Object, error)
 	evaluator       func(node interface{}, env *Environment) Object
+	argv            atomic.Value // stores []string
 }
 
 func NewVirtualMachine() *VirtualMachine {
@@ -49,6 +50,7 @@ func (vm *VirtualMachine) Reset() {
 	vm.importer = nil
 	vm.evaluator = nil
 	vm.typeCheck.Store(false)
+	vm.argv.Store([]string{})
 }
 
 func (vm *VirtualMachine) SetObjectTracking(enabled bool) {
@@ -150,6 +152,23 @@ func (vm *VirtualMachine) GlobalConstants() map[string]Object {
 
 func (vm *VirtualMachine) NewEnvironment() *Environment {
 	return NewEnvironmentWithVM(vm)
+}
+
+func (vm *VirtualMachine) SetArgv(argv []string) {
+	if vm == nil {
+		return
+	}
+	vm.argv.Store(append([]string{}, argv...))
+}
+
+func (vm *VirtualMachine) Argv() []string {
+	if vm == nil {
+		return nil
+	}
+	if argv, ok := vm.argv.Load().([]string); ok {
+		return append([]string{}, argv...)
+	}
+	return nil
 }
 
 func (vm *VirtualMachine) SetSpawner(spawn func(func())) {

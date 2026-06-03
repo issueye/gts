@@ -54,6 +54,51 @@ func TestRunScript(t *testing.T) {
 	}
 }
 
+func TestRunScriptPassesArgsToProcessArgv(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "args.gs")
+	out := filepath.Join(dir, "argv.txt")
+	writeTestFile(t, script, strings.ReplaceAll(`
+let fs = require("@std/fs");
+let process = require("@std/process");
+fs.writeFileSync("__OUT__", process.argv.slice(1).join("|"));
+`, "__OUT__", strings.ReplaceAll(out, `\`, `\\`)))
+
+	if code := run([]string{script, "alpha", "--flag", "0"}); code != 0 {
+		t.Fatalf("want exit code 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := script + "|alpha|--flag|0"
+	if string(data) != want {
+		t.Fatalf("want %q, got %q", want, data)
+	}
+}
+
+func TestRunScriptPassesArgsAfterDoubleDash(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "args.gs")
+	out := filepath.Join(dir, "argv.txt")
+	writeTestFile(t, script, strings.ReplaceAll(`
+let fs = require("@std/fs");
+let process = require("@std/process");
+fs.writeFileSync("__OUT__", process.argv.slice(2).join("|"));
+`, "__OUT__", strings.ReplaceAll(out, `\`, `\\`)))
+
+	if code := run([]string{script, "--", "--flag", "value"}); code != 0 {
+		t.Fatalf("want exit code 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "--flag|value" {
+		t.Fatalf("want forwarded args, got %q", data)
+	}
+}
+
 func TestRunInlineCode(t *testing.T) {
 	if code := run([]string{`console.log("ok")`}); code != 0 {
 		t.Fatalf("want exit code 0, got %d", code)
@@ -244,6 +289,30 @@ if (text !== "cwd ok") {
 	}
 }
 
+func TestRunProjectPassesArgsToProcessArgv(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "project.toml"), "[project]\nentry = \"app.gs\"\n")
+	writeTestFile(t, filepath.Join(dir, "app.gs"), `
+let fs = require("@std/fs");
+let process = require("@std/process");
+function main() {
+  fs.writeFileSync("argv.txt", process.argv.slice(2).join("|"));
+}
+`)
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	if err := r.runProject(dir, "alpha", "beta"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "argv.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "alpha|beta" {
+		t.Fatalf("want project args, got %q", data)
+	}
+}
+
 func TestPackCommandCreatesPackageFile(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "project.toml"), `[package]
@@ -263,17 +332,21 @@ main = "src/index.gs"
 
 func TestDistCommandCreatesEmbeddedExecutable(t *testing.T) {
 	root := t.TempDir()
+	outFile := filepath.Join(root, "argv.txt")
 	writeTestFile(t, filepath.Join(root, "project.toml"), `[project]
 entry = "main.gs"
 `)
-	writeTestFile(t, filepath.Join(root, "main.gs"), `
+	writeTestFile(t, filepath.Join(root, "main.gs"), strings.ReplaceAll(`
+let fs = require("@std/fs");
 let lib = require("./lib");
+let process = require("@std/process");
 function main() {
   if (lib.value !== "embedded") {
     throw new Error("bad embedded value");
   }
+  fs.writeFileSync("__OUT__", process.argv.slice(2).join("|"));
 }
-`)
+`, "__OUT__", strings.ReplaceAll(outFile, `\`, `\\`)))
 	writeTestFile(t, filepath.Join(root, "lib.gs"), `exports.value = "embedded";`)
 	out := filepath.Join(t.TempDir(), "app.exe")
 
@@ -290,8 +363,15 @@ function main() {
 	}
 	defer pkg.Close()
 	r := newRunner(options{workers: 1, timeout: time.Second})
-	if err := r.runPackageEntryFromExecutable(pkg, out, "main.gs"); err != nil {
+	if err := r.runPackageEntryFromExecutable(pkg, out, "main.gs", "packed", "arg"); err != nil {
 		t.Fatal(err)
+	}
+	argvData, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(argvData) != "packed|arg" {
+		t.Fatalf("want embedded args, got %q", argvData)
 	}
 }
 
@@ -744,6 +824,62 @@ urlKind + ":" + bufferKind + ":" + eventsKind + ":" + timerKind;
 	want := "url:buffer:events:timers"
 	if !ok || str.Value != want {
 		t.Fatalf("want %q, got %T %v", want, result, result)
+	}
+}
+
+func TestStdEncodingModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "encoding.gs")
+	csvFile := filepath.Join(dir, "users.csv")
+	appSource := strings.ReplaceAll(`
+let base64 = require("@std/encoding/base64");
+let hex = require("@std/encoding/hex");
+let csv = require("@std/encoding/csv");
+let buffer = require("@std/buffer");
+
+let b64Kind = "base64-bad";
+let encoded = base64.encode("hello?");
+let decoded = base64.decode(encoded);
+let urlEncoded = base64.encodeURL("hello?");
+let urlDecoded = base64.decodeURL(urlEncoded);
+let decodedBuffer = base64.decode(encoded, { asBuffer: true });
+if (encoded === "aGVsbG8/" && decoded === "hello?" && urlDecoded === "hello?" && buffer.isBuffer(decodedBuffer) && decodedBuffer.toString() === "hello?") {
+  b64Kind = "base64";
+}
+
+let hexKind = "hex-bad";
+let hexed = hex.encode("hi");
+let unhexed = hex.decode(hexed);
+let hexBuffer = hex.decode(hexed, { asBuffer: true });
+if (hexed === "6869" && unhexed === "hi" && buffer.isBuffer(hexBuffer) && hexBuffer.toString() === "hi") {
+  hexKind = "hex";
+}
+
+let parsed = csv.parse("name,age\nAda,36\nLinus,55\n");
+let arrays = csv.parse("Ada;36\nLinus;55\n", { header: false, comma: ";" });
+let out = csv.stringify(parsed);
+csv.writeFileSync("__CSV__", parsed);
+let fromFile = csv.readFileSync("__CSV__");
+
+let csvKind = "csv-bad";
+if (parsed.length === 2 && parsed[0].name === "Ada" && parsed[1].age === "55" && arrays[0][1] === "36" && out.includes("Ada") && fromFile[1].name === "Linus") {
+  csvKind = "csv";
+}
+
+b64Kind + ":" + hexKind + ":" + csvKind;
+`, "__CSV__", strings.ReplaceAll(csvFile, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "base64:hex:csv" {
+		t.Fatalf("want base64:hex:csv, got %T %v", result, result)
 	}
 }
 

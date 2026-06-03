@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/net/socket/server", func() (object.Object, error) {
+	module.RegisterNative("@std/net/socket/server", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initSocketServerModule(exports)
 		return exports, nil

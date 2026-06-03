@@ -17,7 +17,7 @@ type readableStream struct {
 }
 
 func init() {
-	module.RegisterNative("@std/stream", func() (object.Object, error) {
+	module.RegisterNative("@std/stream", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initStreamModule(exports)
 		return exports, nil

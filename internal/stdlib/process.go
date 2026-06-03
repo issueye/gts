@@ -14,17 +14,18 @@ import (
 var processStartedAt = time.Now()
 
 func init() {
-	module.RegisterNative("@std/process", func() (object.Object, error) {
+	module.RegisterNative("@std/process", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
-		initProcessModule(exports)
+		initProcessModule(exports, env)
 		return exports, nil
 	})
 }
 
-func initProcessModule(exports *object.Hash) {
-	setHashMember(exports, "argv", strSliceToArray(os.Args))
-	if len(os.Args) > 0 {
-		setHashMember(exports, "argv0", &object.String{Value: os.Args[0]})
+func initProcessModule(exports *object.Hash, env *object.Environment) {
+	argv := runtimeArgv(env)
+	setHashMember(exports, "argv", strSliceToArray(argv))
+	if len(argv) > 0 {
+		setHashMember(exports, "argv0", &object.String{Value: argv[0]})
 	} else {
 		setHashMember(exports, "argv0", &object.String{Value: ""})
 	}
@@ -41,6 +42,15 @@ func initProcessModule(exports *object.Hash) {
 	setHashMember(exports, "unsetenv", &object.Builtin{Name: "process.unsetenv", Fn: processUnsetenv})
 	setHashMember(exports, "exit", &object.Builtin{Name: "process.exit", Fn: processExit})
 	setHashMember(exports, "version", &object.String{Value: "0.1.0-dev"})
+}
+
+func runtimeArgv(env *object.Environment) []string {
+	if env != nil {
+		if argv := env.VM().Argv(); len(argv) > 0 {
+			return argv
+		}
+	}
+	return append([]string{}, os.Args...)
 }
 
 func processCwd(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

@@ -6,12 +6,12 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/web", func() (object.Object, error) {
+	module.RegisterNative("@std/web", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initWebModule(exports)
 		return exports, nil
 	})
-	module.RegisterNative("@std/express", func() (object.Object, error) {
+	module.RegisterNative("@std/express", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initWebModule(exports)
 		return exports, nil

@@ -46,6 +46,7 @@ type runner struct {
 type runOptions struct {
 	autoMain   bool
 	workingDir string
+	argv       []string
 }
 
 func main() {
@@ -88,7 +89,7 @@ func run(args []string) int {
 	case "init":
 		err = initCommand(rest[1:])
 	case "run":
-		err = r.runProject(".")
+		err = r.runProject(".", scriptArgs(rest[1:])...)
 	case "pack":
 		err = packCommand(rest[1:])
 	case "dist":
@@ -276,7 +277,7 @@ func distCommand(args []string) error {
 	return nil
 }
 
-func (r *runner) runProject(dir string) error {
+func (r *runner) runProject(dir string, args ...string) error {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
@@ -285,12 +286,13 @@ func (r *runner) runProject(dir string) error {
 	if err != nil {
 		return err
 	}
-	return r.runFileWithOptions(filepath.Join(absDir, cfg.Entry), runOptions{autoMain: true, workingDir: absDir})
+	entry := filepath.Join(absDir, cfg.Entry)
+	return r.runFileWithOptions(entry, runOptions{autoMain: true, workingDir: absDir, argv: scriptArgv(entry, args)})
 }
 
-func (r *runner) runFile(path string) error {
+func (r *runner) runFile(path string, args []string) error {
 	autoMain := strings.EqualFold(filepath.Base(path), "main.gs")
-	return r.runFileWithOptions(path, runOptions{autoMain: autoMain})
+	return r.runFileWithOptions(path, runOptions{autoMain: autoMain, argv: scriptArgv(path, args)})
 }
 
 func (r *runner) runArg(args []string) error {
@@ -298,11 +300,18 @@ func (r *runner) runArg(args []string) error {
 		return nil
 	}
 	if _, err := os.Stat(args[0]); err == nil {
-		return r.runFile(args[0])
+		return r.runFile(args[0], scriptArgs(args[1:]))
 	} else if !os.IsNotExist(err) && !isInvalidPathError(err) {
 		return err
 	}
 	return r.runInline(strings.Join(args, " "))
+}
+
+func scriptArgs(args []string) []string {
+	if len(args) > 0 && args[0] == "--" {
+		return args[1:]
+	}
+	return args
 }
 
 func isInvalidPathError(err error) bool {
@@ -368,13 +377,16 @@ func (r *runner) runEmbeddedExecutable() error {
 	if entry == "" {
 		entry = "main.gs"
 	}
-	return r.runPackageEntryFromExecutable(pkg, exe, entry)
+	return r.runPackageEntryFromExecutable(pkg, exe, entry, os.Args[1:]...)
 }
 
 func (r *runner) runFileWithOptions(path string, opts runOptions) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return err
+	}
+	if len(opts.argv) == 0 {
+		opts.argv = scriptArgv(absPath, nil)
 	}
 	return r.withTimeout("script execution", func() error {
 		restore, err := enterWorkingDir(opts.workingDir)
@@ -402,6 +414,23 @@ func (r *runner) runFileWithOptions(path string, opts runOptions) error {
 	})
 }
 
+func scriptArgv(path string, args []string) []string {
+	argv := []string{executableArgv0(), path}
+	argv = append(argv, args...)
+	return argv
+}
+
+func executableArgv0() string {
+	exe, err := os.Executable()
+	if err == nil && exe != "" {
+		return exe
+	}
+	if len(os.Args) > 0 {
+		return os.Args[0]
+	}
+	return ""
+}
+
 func enterWorkingDir(dir string) (func(), error) {
 	if dir == "" {
 		return func() {}, nil
@@ -424,6 +453,7 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 		return nil, err
 	}
 	r.checkoutVM()
+	r.vm.SetArgv(opts.argv)
 	r.pool = async.NewPool(r.opts.workers)
 	r.vm.SetSpawner(r.pool.Go)
 	r.cache = module.NewCacheWithVM(r.vm)
@@ -442,7 +472,7 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 	return result, nil
 }
 
-func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executablePath, entry string) error {
+func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executablePath, entry string, args ...string) error {
 	entry = filepath.ToSlash(entry)
 	src, err := pkg.ReadText(entry)
 	if err != nil {
@@ -455,6 +485,7 @@ func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executa
 		}
 		archivePath := filepath.ToSlash(absExe) + "!" + entry
 		r.checkoutVM()
+		r.vm.SetArgv(append([]string{absExe, entry}, args...))
 		r.pool = async.NewPool(r.opts.workers)
 		r.vm.SetSpawner(r.pool.Go)
 		r.cache = module.NewCacheWithVM(r.vm)
@@ -546,13 +577,6 @@ func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 		resolved, err := r.resolver.Resolve(path, module.ResolveOptions{ProjectRoot: r.rootDir, BaseDir: baseDir})
 		if err != nil {
 			return nil, err
-		}
-		if resolved.Kind == module.ModuleKindNative {
-			native, ok := module.GetNative(path)
-			if !ok {
-				return nil, fmt.Errorf("native module %s is not registered", path)
-			}
-			return native, nil
 		}
 		if resolved.Path == "" {
 			return nil, fmt.Errorf("module %s resolved without a source path", path)
@@ -654,6 +678,17 @@ func (r *runner) requireFrom(env *object.Environment, path string) (object.Objec
 	baseDir := env.ModuleDir
 	if baseDir == "" {
 		baseDir = r.rootDir
+	}
+	resolved, err := r.resolver.Resolve(path, module.ResolveOptions{ProjectRoot: r.rootDir, BaseDir: baseDir})
+	if err != nil {
+		return nil, err
+	}
+	if resolved.Kind == module.ModuleKindNative {
+		native, ok := module.GetNative(path, env)
+		if !ok {
+			return nil, fmt.Errorf("native module %s is not registered", path)
+		}
+		return native, nil
 	}
 	return r.requireFunc(baseDir)(path)
 }

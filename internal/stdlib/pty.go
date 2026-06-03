@@ -24,7 +24,7 @@ type ptyProcess struct {
 }
 
 func init() {
-	module.RegisterNative("@std/pty", func() (object.Object, error) {
+	module.RegisterNative("@std/pty", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initPTYModule(exports)
 		return exports, nil

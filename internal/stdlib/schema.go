@@ -9,7 +9,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/schema", func() (object.Object, error) {
+	module.RegisterNative("@std/schema", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initSchemaModule(exports)
 		return exports, nil

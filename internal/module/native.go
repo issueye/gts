@@ -7,7 +7,7 @@ import (
 )
 
 // NativeModuleFactory creates a new module instance.
-type NativeModuleFactory func() (object.Object, error)
+type NativeModuleFactory func(env *object.Environment) (object.Object, error)
 
 var (
 	nativeMu      sync.RWMutex
@@ -24,14 +24,14 @@ func RegisterNative(path string, factory NativeModuleFactory) {
 
 // GetNative returns a native module by its import path.
 // Returns nil, false if no native module is registered for the path.
-func GetNative(path string) (object.Object, bool) {
+func GetNative(path string, env *object.Environment) (object.Object, bool) {
 	nativeMu.RLock()
 	factory, ok := nativeModules[path]
 	nativeMu.RUnlock()
 	if !ok {
 		return nil, false
 	}
-	obj, err := factory()
+	obj, err := factory(env)
 	if err != nil {
 		return nil, false
 	}

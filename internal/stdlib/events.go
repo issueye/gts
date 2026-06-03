@@ -22,7 +22,7 @@ type eventEmitter struct {
 }
 
 func init() {
-	module.RegisterNative("@std/events", func() (object.Object, error) {
+	module.RegisterNative("@std/events", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initEventsModule(exports)
 		return exports, nil

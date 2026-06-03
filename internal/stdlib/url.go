@@ -17,7 +17,7 @@ type urlSearchParamsState struct {
 }
 
 func init() {
-	module.RegisterNative("@std/url", func() (object.Object, error) {
+	module.RegisterNative("@std/url", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initURLModule(exports)
 		return exports, nil

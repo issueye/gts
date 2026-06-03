@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/path", func() (object.Object, error) {
+	module.RegisterNative("@std/path", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initPathModule(exports)
 		return exports, nil

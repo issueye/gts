@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/net/ws/client", func() (object.Object, error) {
+	module.RegisterNative("@std/net/ws/client", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initWSClientModule(exports)
 		return exports, nil

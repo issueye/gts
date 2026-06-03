@@ -15,7 +15,7 @@ type terminalRawMode struct {
 }
 
 func init() {
-	module.RegisterNative("@std/terminal", func() (object.Object, error) {
+	module.RegisterNative("@std/terminal", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initTerminalModule(exports)
 		return exports, nil

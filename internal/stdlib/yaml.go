@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/yaml", func() (object.Object, error) {
+	module.RegisterNative("@std/yaml", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initYAMLModule(exports)
 		return exports, nil

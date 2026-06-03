@@ -12,7 +12,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/crypto", func() (object.Object, error) {
+	module.RegisterNative("@std/crypto", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initCryptoModule(exports)
 		return exports, nil

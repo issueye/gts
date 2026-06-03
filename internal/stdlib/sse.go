@@ -15,7 +15,7 @@ type sseReader struct {
 }
 
 func init() {
-	module.RegisterNative("@std/sse", func() (object.Object, error) {
+	module.RegisterNative("@std/sse", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initSSEModule(exports)
 		return exports, nil

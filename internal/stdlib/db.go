@@ -36,7 +36,7 @@ type dbExecutor interface {
 }
 
 func init() {
-	module.RegisterNative("@std/db", func() (object.Object, error) {
+	module.RegisterNative("@std/db", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initDBModule(exports)
 		return exports, nil

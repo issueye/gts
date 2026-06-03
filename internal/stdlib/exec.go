@@ -25,7 +25,7 @@ type spawnedProcess struct {
 }
 
 func init() {
-	module.RegisterNative("@std/exec", func() (object.Object, error) {
+	module.RegisterNative("@std/exec", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initExecModule(exports)
 		return exports, nil

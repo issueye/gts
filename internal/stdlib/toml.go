@@ -10,7 +10,7 @@ import (
 )
 
 func init() {
-	module.RegisterNative("@std/toml", func() (object.Object, error) {
+	module.RegisterNative("@std/toml", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initTOMLModule(exports)
 		return exports, nil

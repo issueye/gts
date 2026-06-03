@@ -14,7 +14,7 @@ import (
 const bufferDataKey = "__buffer"
 
 func init() {
-	module.RegisterNative("@std/buffer", func() (object.Object, error) {
+	module.RegisterNative("@std/buffer", func(env *object.Environment) (object.Object, error) {
 		exports := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		initBufferModule(exports)
 		return exports, nil
