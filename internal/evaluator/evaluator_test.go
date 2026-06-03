@@ -577,6 +577,130 @@ d.greet() + " " + d.bark();
 	testString(t, evaluated, "Rex Rex barks")
 }
 
+func TestEval_ClassSuperConstructor(t *testing.T) {
+	input := `
+class Point {
+  constructor(x, y) { this.x = x; this.y = y; }
+}
+class Point3D extends Point {
+  constructor(x, y, z) {
+    super(x, y);
+    this.z = z;
+  }
+  label() { return String(this.x) + "," + String(this.y) + "," + String(this.z); }
+}
+let p = new Point3D(3, 4, 12);
+p.label();
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "3,4,12")
+}
+
+func TestEval_ClassExplicitSuperDoesNotAutoCallParentConstructor(t *testing.T) {
+	input := `
+let calls = 0;
+class Parent {
+  constructor(value) { this.value = value; calls = calls + 1; }
+}
+class Child extends Parent {
+  constructor(value) {
+    super(value);
+  }
+}
+let child = new Child("ok");
+calls;
+`
+	evaluated := testEval(input)
+	testNumber(t, evaluated, "1")
+}
+
+func TestEval_ClassInstanceOf(t *testing.T) {
+	input := `
+class Animal {}
+class Dog extends Animal {}
+class Cat extends Animal {}
+let dog = new Dog();
+[dog instanceof Dog, dog instanceof Animal, dog instanceof Cat];
+`
+	evaluated := testEval(input)
+	arr, ok := evaluated.(*object.Array)
+	if !ok {
+		t.Fatalf("want Array, got %T (%s)", evaluated, evaluated.Inspect())
+	}
+	if len(arr.Elements) != 3 {
+		t.Fatalf("want 3 elements, got %d", len(arr.Elements))
+	}
+	testBoolean(t, arr.Elements[0], true)
+	testBoolean(t, arr.Elements[1], true)
+	testBoolean(t, arr.Elements[2], false)
+}
+
+func TestEval_ClassSuperMethod(t *testing.T) {
+	input := `
+class Parent {
+  label() { return "parent"; }
+}
+class Child extends Parent {
+  label() { return super.label() + ":child"; }
+}
+new Child().label();
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "parent:child")
+}
+
+func TestEval_ClassExtendsError(t *testing.T) {
+	input := `
+class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+try {
+  throw new ValidationError("bad age");
+} catch (e) {
+  [e instanceof ValidationError, e instanceof Error, e.name, e.message];
+}
+`
+	evaluated := testEval(input)
+	arr, ok := evaluated.(*object.Array)
+	if !ok {
+		t.Fatalf("want Array, got %T (%s)", evaluated, evaluated.Inspect())
+	}
+	if len(arr.Elements) != 4 {
+		t.Fatalf("want 4 elements, got %d", len(arr.Elements))
+	}
+	testBoolean(t, arr.Elements[0], true)
+	testBoolean(t, arr.Elements[1], true)
+	testString(t, arr.Elements[2], "ValidationError")
+	testString(t, arr.Elements[3], "bad age")
+}
+
+func TestEval_ClassExpression(t *testing.T) {
+	input := `
+class Animal {
+  speak() { return "sound"; }
+}
+let Dog = class extends Animal {
+  speak() { return super.speak() + ":woof"; }
+};
+let dog = new Dog();
+[dog.speak(), dog instanceof Dog, dog instanceof Animal];
+`
+	evaluated := testEval(input)
+	arr, ok := evaluated.(*object.Array)
+	if !ok {
+		t.Fatalf("want Array, got %T (%s)", evaluated, evaluated.Inspect())
+	}
+	if len(arr.Elements) != 3 {
+		t.Fatalf("want 3 elements, got %d", len(arr.Elements))
+	}
+	testString(t, arr.Elements[0], "sound:woof")
+	testBoolean(t, arr.Elements[1], true)
+	testBoolean(t, arr.Elements[2], true)
+}
+
 func TestEval_ClassThisBinding(t *testing.T) {
 	input := `
 class Counter {

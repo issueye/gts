@@ -54,6 +54,9 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		if object.IsRuntimeError(val) {
 			return val
 		}
+		if inst, ok := val.(*object.Instance); ok && isErrorInstance(inst) {
+			return runtimeErrorFromInstance(n.Pos(), inst)
+		}
 		if err, ok := val.(*object.Error); ok {
 			err.Runtime = true
 			if err.Pos.IsZero() {
@@ -471,6 +474,14 @@ func evalTry(n *ast.TryStmt, env *object.Environment) object.Object {
 		scope := env.NewScope()
 		if n.Catch.Name != "" {
 			if err, ok := result.(*object.Error); ok {
+				if err.Thrown != nil {
+					scope.Set(n.Catch.Name, err.Thrown)
+					result = Eval(n.Catch.Body, scope)
+					if n.Finalizer != nil {
+						Eval(n.Finalizer, env.NewScope())
+					}
+					return result
+				}
 				caught := *err
 				caught.Runtime = false
 				scope.Set(n.Catch.Name, &caught)
@@ -639,6 +650,17 @@ func evalFuncDecl(n *ast.FuncDecl, env *object.Environment) object.Object {
 }
 
 func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
+	cls := evalClass(n, env)
+	if object.IsRuntimeError(cls) {
+		return cls
+	}
+	if n.Name != "" {
+		env.Set(n.Name, cls)
+	}
+	return cls
+}
+
+func evalClass(n *ast.ClassDecl, env *object.Environment) object.Object {
 	cls := &object.Class{
 		Name:        n.Name,
 		Methods:     make(map[string]*object.Function),
@@ -656,6 +678,9 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 			cls.Super = superClass
 			// Copy parent methods
 			for k, v := range superClass.Methods {
+				if k == "constructor" {
+					continue
+				}
 				cls.Methods[k] = v
 			}
 			for k, v := range superClass.Fields {
@@ -664,6 +689,8 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 			for k, v := range superClass.FieldTypes {
 				cls.FieldTypes[k] = v
 			}
+		} else if builtin, ok := superVal.(*object.Builtin); ok && isErrorClassName(builtin.Name) {
+			cls.Super = nativeErrorClass(env, builtin.Name, n.Pos())
 		} else {
 			return object.NewError(n.Pos(), "TypeError: superclass must be a class")
 		}
@@ -715,8 +742,41 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 			}
 		}
 	}
-	env.Set(n.Name, cls)
 	return cls
+}
+
+func nativeErrorClass(env *object.Environment, name string, pos ast.Position) *object.Class {
+	cls := &object.Class{
+		Name:        name,
+		Methods:     make(map[string]*object.Function),
+		Fields:      make(map[string]object.Object),
+		FieldTypes:  make(map[string]*ast.TypeAnnotation),
+		Statics:     make(map[string]object.Object),
+		StaticTypes: make(map[string]*ast.TypeAnnotation),
+		Pos:         pos,
+	}
+	cls.NativeConstructor = func(env *object.Environment, inst *object.Instance, pos ast.Position, args []object.Object) object.Object {
+		message := ""
+		if len(args) > 0 {
+			message = args[0].Inspect()
+		}
+		err := object.NewNamedError(pos, name, message)
+		inst.Props["name"] = &object.String{Value: err.Name}
+		inst.Props["message"] = &object.String{Value: err.Message}
+		inst.Props["stack"] = &object.String{Value: err.Stack}
+		return object.UNDEFINED
+	}
+	env.ObjectManager().Register(cls)
+	return cls
+}
+
+func isErrorClassName(name string) bool {
+	switch name {
+	case "Error", "TypeError", "RangeError", "ReferenceError", "SyntaxError":
+		return true
+	default:
+		return false
+	}
 }
 
 // ============================================================================
@@ -987,6 +1047,8 @@ func evalInfix(n *ast.InfixExpr, env *object.Environment) object.Object {
 		return evalCompare(left, right, ">", n.Pos())
 	case ">=":
 		return evalCompare(left, right, ">=", n.Pos())
+	case "instanceof":
+		return evalInstanceOf(left, right)
 	case "&&":
 		if !object.IsTruthy(left) {
 			return left
@@ -1087,6 +1149,62 @@ func evalCompare(left, right object.Object, op string, pos ast.Position) object.
 		}
 	}
 	return object.NewError(pos, "TypeError: cannot compare %s and %s — types must match", left.Type(), right.Type())
+}
+
+func evalInstanceOf(left, right object.Object) object.Object {
+	if err, ok := left.(*object.Error); ok {
+		if builtin, ok := right.(*object.Builtin); ok && isErrorClassName(builtin.Name) {
+			return object.NativeBool(err.Name == builtin.Name || builtin.Name == "Error")
+		}
+	}
+	inst, ok := left.(*object.Instance)
+	if !ok {
+		return object.FALSE
+	}
+	if builtin, ok := right.(*object.Builtin); ok && isErrorClassName(builtin.Name) {
+		return object.NativeBool(instanceExtendsNativeError(inst, builtin.Name))
+	}
+	cls, ok := right.(*object.Class)
+	if !ok {
+		return object.FALSE
+	}
+	for current := inst.Class; current != nil; current = current.Super {
+		if current == cls {
+			return object.TRUE
+		}
+	}
+	return object.FALSE
+}
+
+func isErrorInstance(inst *object.Instance) bool {
+	return instanceExtendsNativeError(inst, "Error")
+}
+
+func instanceExtendsNativeError(inst *object.Instance, name string) bool {
+	for current := inst.Class; current != nil; current = current.Super {
+		if current.NativeConstructor != nil && isErrorClassName(current.Name) {
+			return name == "Error" || current.Name == name
+		}
+	}
+	return false
+}
+
+func runtimeErrorFromInstance(pos ast.Position, inst *object.Instance) *object.Error {
+	name := inst.Class.Name
+	if prop, ok := inst.Props["name"].(*object.String); ok && prop.Value != "" {
+		name = prop.Value
+	}
+	message := ""
+	if prop, ok := inst.Props["message"].(*object.String); ok {
+		message = prop.Value
+	}
+	err := object.NewNamedError(pos, name, message)
+	if prop, ok := inst.Props["stack"].(*object.String); ok && prop.Value != "" {
+		err.Stack = prop.Value
+	}
+	err.Runtime = true
+	err.Thrown = inst
+	return err
 }
 
 // ============================================================================
@@ -1251,6 +1369,16 @@ func evalCompoundAssign(left, right object.Object, op string, pos ast.Position) 
 // ============================================================================
 
 func evalCall(n *ast.CallExpr, env *object.Environment) object.Object {
+	if _, ok := n.Callee.(*ast.SuperExpr); ok {
+		args := make([]object.Object, len(n.Args))
+		for i, a := range n.Args {
+			args[i] = Eval(a, env)
+			if object.IsRuntimeError(args[i]) {
+				return args[i]
+			}
+		}
+		return callSuperConstructor(n.Pos(), env, args)
+	}
 	callee := Eval(n.Callee, env)
 	if object.IsRuntimeError(callee) {
 		return callee
@@ -1330,23 +1458,20 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 		for k, v := range f.Fields {
 			inst.Props[k] = v
 		}
-		// Call super constructor first if there's a parent class
-		if f.Super != nil {
-			if superCon, ok := f.Super.Methods["constructor"]; ok {
-				scope := superCon.Env.NewScope()
-				scope.Set("this", inst)
-				if err := bindFunctionParams(scope, env, superCon.Parameters, args, pos); err != nil {
-					return err
-				}
-				result := Eval(superCon.Body, scope)
-				if object.IsRuntimeError(result) {
-					return result
-				}
+		superCalled := false
+		con, hasConstructor := f.Methods["constructor"]
+		if f.Super != nil && (!hasConstructor || !constructorCallsSuper(con.Body)) {
+			result := callClassConstructor(f.Super, inst, env, args, pos)
+			if object.IsRuntimeError(result) {
+				return result
 			}
+			superCalled = true
 		}
-		if con, ok := f.Methods["constructor"]; ok {
+		if hasConstructor {
 			scope := con.Env.NewScope()
 			scope.Set("this", inst)
+			scope.ConstructorClass = f
+			scope.SuperCalled = &superCalled
 			if err := bindFunctionParams(scope, env, con.Parameters, args, pos); err != nil {
 				return err
 			}
@@ -1395,6 +1520,104 @@ func bindFunctionParams(scope, caller *object.Environment, params []*ast.Param, 
 	return nil
 }
 
+func callClassConstructor(cls *object.Class, inst *object.Instance, env *object.Environment, args []object.Object, pos ast.Position) object.Object {
+	if cls.NativeConstructor != nil {
+		return cls.NativeConstructor(env, inst, pos, args)
+	}
+	con, ok := cls.Methods["constructor"]
+	if !ok {
+		return object.UNDEFINED
+	}
+	scope := con.Env.NewScope()
+	scope.Set("this", inst)
+	scope.ConstructorClass = cls
+	if err := bindFunctionParams(scope, env, con.Parameters, args, pos); err != nil {
+		return err
+	}
+	result := Eval(con.Body, scope)
+	if rv, ok := result.(*object.ReturnValue); ok {
+		return rv.Value
+	}
+	return result
+}
+
+func constructorCallsSuper(block *ast.BlockStmt) bool {
+	if block == nil {
+		return false
+	}
+	for _, stmt := range block.Statements {
+		if nodeCallsSuper(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func nodeCallsSuper(node ast.Node) bool {
+	switch n := node.(type) {
+	case *ast.ExprStmt:
+		return nodeCallsSuper(n.Expr)
+	case *ast.CallExpr:
+		if _, ok := n.Callee.(*ast.SuperExpr); ok {
+			return true
+		}
+		if nodeCallsSuper(n.Callee) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if nodeCallsSuper(arg) {
+				return true
+			}
+		}
+	case *ast.BlockStmt:
+		for _, stmt := range n.Statements {
+			if nodeCallsSuper(stmt) {
+				return true
+			}
+		}
+	case *ast.IfStmt:
+		return nodeCallsSuper(n.Cond) || nodeCallsSuper(n.Consequence) || nodeCallsSuper(n.Alternative)
+	case *ast.ReturnStmt:
+		return nodeCallsSuper(n.Value)
+	case *ast.AssignExpr:
+		return nodeCallsSuper(n.Left) || nodeCallsSuper(n.Right)
+	case *ast.MemberExpr:
+		return nodeCallsSuper(n.Object) || nodeCallsSuper(n.Property)
+	case *ast.IndexExpr:
+		return nodeCallsSuper(n.Left) || nodeCallsSuper(n.Index)
+	case *ast.ArrayLit:
+		for _, elem := range n.Elements {
+			if nodeCallsSuper(elem) {
+				return true
+			}
+		}
+	case *ast.ObjectLit:
+		for _, prop := range n.Properties {
+			if nodeCallsSuper(prop.Key) || nodeCallsSuper(prop.Value) {
+				return true
+			}
+		}
+	case *ast.InfixExpr:
+		return nodeCallsSuper(n.Left) || nodeCallsSuper(n.Right)
+	case *ast.PrefixExpr:
+		return nodeCallsSuper(n.Right)
+	case *ast.TernaryExpr:
+		return nodeCallsSuper(n.Cond) || nodeCallsSuper(n.Consequent) || nodeCallsSuper(n.Alternate)
+	case *ast.NewExpr:
+		if nodeCallsSuper(n.Callee) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if nodeCallsSuper(arg) {
+				return true
+			}
+		}
+	case *ast.AwaitExpr:
+		return nodeCallsSuper(n.Value)
+	}
+	return false
+}
+
 func normalizeReturn(value object.Object) object.Object {
 	if value == nil {
 		return object.UNDEFINED
@@ -1403,6 +1626,11 @@ func normalizeReturn(value object.Object) object.Object {
 }
 
 func evalMember(n *ast.MemberExpr, env *object.Environment) object.Object {
+	if super, ok := n.Object.(*ast.SuperExpr); ok {
+		if prop, ok := n.Property.(*ast.Ident); ok {
+			return evalSuper(&ast.SuperExpr{Pos_: super.Pos_, TokenLit: super.TokenLit, Method: prop.TokenLit}, env)
+		}
+	}
 	obj := Eval(n.Object, env)
 	if object.IsRuntimeError(obj) {
 		return obj
@@ -1803,4 +2031,26 @@ func evalSuper(n *ast.SuperExpr, env *object.Environment) object.Object {
 		}
 	}
 	return object.UNDEFINED
+}
+
+func callSuperConstructor(pos ast.Position, env *object.Environment, args []object.Object) object.Object {
+	this, _ := env.Get("this")
+	inst, ok := this.(*object.Instance)
+	if !ok {
+		return object.NewError(pos, "ReferenceError: super is not available")
+	}
+	current := env.ConstructorClass
+	if current == nil {
+		current = inst.Class
+	}
+	if current.Super == nil {
+		return object.NewError(pos, "ReferenceError: super is not available")
+	}
+	if env.SuperCalled != nil && *env.SuperCalled {
+		return object.NewError(pos, "ReferenceError: super constructor already called")
+	}
+	if env.SuperCalled != nil {
+		*env.SuperCalled = true
+	}
+	return callClassConstructor(current.Super, inst, env, args, pos)
 }

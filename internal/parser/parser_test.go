@@ -470,6 +470,23 @@ func TestParse_ClassDecl(t *testing.T) {
 	}
 }
 
+func TestParse_ClassExpression(t *testing.T) {
+	input := `let Dog = class extends Animal { bark() { return "woof"; } };`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	stmt := prog.Body[0].(*ast.LetStmt)
+	c, ok := stmt.Value.(*ast.ClassDecl)
+	if !ok {
+		t.Fatalf("want ClassDecl expression, got %T", stmt.Value)
+	}
+	if c.Name != "" {
+		t.Fatalf("anonymous class expression should not have a name, got %q", c.Name)
+	}
+	if c.Super == nil {
+		t.Fatal("expected super class")
+	}
+}
+
 func TestParse_ImportExport(t *testing.T) {
 	input := `import { add } from "./math.gs"; export function main() {}`
 	prog := Parse(input)

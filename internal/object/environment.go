@@ -4,14 +4,16 @@ import "github.com/issueye/goscript/internal/ast"
 
 // Environment is a scope for variable bindings.
 type Environment struct {
-	store     map[string]Object
-	consts    map[string]bool
-	types     map[string]*ast.TypeAnnotation
-	parent    *Environment
-	vm        *VirtualMachine
-	Extra     Object // bound context for method dispatch (array/string instance)
-	ModuleDir string
-	Pos       ast.Position
+	store            map[string]Object
+	consts           map[string]bool
+	types            map[string]*ast.TypeAnnotation
+	parent           *Environment
+	vm               *VirtualMachine
+	Extra            Object // bound context for method dispatch (array/string instance)
+	ConstructorClass *Class
+	SuperCalled      *bool
+	ModuleDir        string
+	Pos              ast.Position
 }
 
 func NewEnvironment() *Environment {
@@ -23,9 +25,7 @@ func NewEnvironmentWithVM(vm *VirtualMachine) *Environment {
 		vm = NewVirtualMachine()
 	}
 	return &Environment{
-		store:  make(map[string]Object),
-		consts: make(map[string]bool),
-		vm:     vm,
+		vm: vm,
 	}
 }
 
@@ -54,6 +54,12 @@ func (e *Environment) Get(name string) (Object, bool) {
 }
 
 func (e *Environment) Set(name string, val Object) Object {
+	if e.store == nil {
+		e.store = make(map[string]Object)
+	}
+	if e.consts == nil {
+		e.consts = make(map[string]bool)
+	}
 	e.store[name] = val
 	e.consts[name] = false
 	if e.types != nil {
@@ -63,6 +69,12 @@ func (e *Environment) Set(name string, val Object) Object {
 }
 
 func (e *Environment) SetConst(name string, val Object) Object {
+	if e.store == nil {
+		e.store = make(map[string]Object)
+	}
+	if e.consts == nil {
+		e.consts = make(map[string]bool)
+	}
 	e.store[name] = val
 	e.consts[name] = true
 	if e.types != nil {
@@ -72,6 +84,12 @@ func (e *Environment) SetConst(name string, val Object) Object {
 }
 
 func (e *Environment) SetTyped(name string, val Object, anno *ast.TypeAnnotation) Object {
+	if e.store == nil {
+		e.store = make(map[string]Object)
+	}
+	if e.consts == nil {
+		e.consts = make(map[string]bool)
+	}
 	e.store[name] = val
 	e.consts[name] = false
 	if anno == nil {
@@ -88,6 +106,12 @@ func (e *Environment) SetTyped(name string, val Object, anno *ast.TypeAnnotation
 }
 
 func (e *Environment) SetTypedConst(name string, val Object, anno *ast.TypeAnnotation) Object {
+	if e.store == nil {
+		e.store = make(map[string]Object)
+	}
+	if e.consts == nil {
+		e.consts = make(map[string]bool)
+	}
 	e.store[name] = val
 	e.consts[name] = true
 	if anno == nil {
@@ -128,6 +152,12 @@ func (e *Environment) SetUp(name string, val Object) Object {
 			if env.VM().HasGlobalConst(name) {
 				return nil
 			}
+			if env.store == nil {
+				env.store = make(map[string]Object)
+			}
+			if env.consts == nil {
+				env.consts = make(map[string]bool)
+			}
 			env.store[name] = val
 			env.consts[name] = false
 			if env.types != nil {
@@ -157,6 +187,12 @@ func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
 
 // SetHere sets only in this environment (not parent).
 func (e *Environment) SetHere(name string, val Object) Object {
+	if e.store == nil {
+		e.store = make(map[string]Object)
+	}
+	if e.consts == nil {
+		e.consts = make(map[string]bool)
+	}
 	e.store[name] = val
 	e.consts[name] = false
 	if e.types != nil {
@@ -179,6 +215,8 @@ func (e *Environment) Has(name string) bool {
 func (e *Environment) NewScope() *Environment {
 	env := NewEnvironmentWithVM(e.VM())
 	env.parent = e
+	env.ConstructorClass = e.ConstructorClass
+	env.SuperCalled = e.SuperCalled
 	env.ModuleDir = e.ModuleDir
 	return env
 }

@@ -71,6 +71,22 @@ func TestEnvironmentScopesShareObjectManager(t *testing.T) {
 	}
 }
 
+func TestEnvironmentUsesLazyMaps(t *testing.T) {
+	vm := NewVirtualMachine()
+	env := NewEnvironmentWithVM(vm)
+	if env.store != nil || env.consts != nil || env.types != nil {
+		t.Fatalf("new environment should start without allocated maps, got %+v", env)
+	}
+
+	env.Set("value", &String{Value: "ok"})
+	if env.store == nil || env.consts == nil {
+		t.Fatal("setting a value should allocate backing maps")
+	}
+	if got, ok := env.Get("value"); !ok || got.Inspect() != "ok" {
+		t.Fatalf("lazy maps should still preserve reads, got %v ok=%v", got, ok)
+	}
+}
+
 func TestNewEnvironmentsCreateIndependentVirtualMachines(t *testing.T) {
 	envA := NewEnvironment()
 	envB := NewEnvironment()

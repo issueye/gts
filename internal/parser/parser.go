@@ -704,6 +704,24 @@ func (p *Parser) parseClassDecl() *ast.ClassDecl {
 	return &ast.ClassDecl{Pos_: p.pos(), TokenLit: tokLit, Name: name, Super: super, Body: body}
 }
 
+func (p *Parser) parseClassExprDecl() *ast.ClassDecl {
+	tokLit := p.cur.Literal
+	p.nextToken() // class
+	name := ""
+	if p.curTokenIs(lexer.TOKEN_IDENT) {
+		name = p.cur.Literal
+		p.nextToken()
+	}
+
+	var super ast.Expression
+	if p.curTokenIs(lexer.TOKEN_EXTENDS) {
+		p.nextToken() // extends
+		super = p.parseExpression(PREC_COMMA)
+	}
+	body := p.parseClassBody()
+	return &ast.ClassDecl{Pos_: p.pos(), TokenLit: tokLit, Name: name, Super: super, Body: body}
+}
+
 func (p *Parser) parseClassBody() *ast.ClassBody {
 	if !p.curTokenIs(lexer.TOKEN_LBRACE) {
 		p.addError("expected {")
@@ -1223,7 +1241,10 @@ func (p *Parser) parseAsyncFunc() ast.Expression {
 }
 
 func (p *Parser) parseClassExpr() ast.Expression {
-	decl := p.parseClassDecl()
+	decl := p.parseClassExprDecl()
+	if decl == nil {
+		return nil
+	}
 	return &ast.ClassDecl{Pos_: p.pos(), TokenLit: decl.TokenLit, Name: decl.Name, Super: decl.Super, Body: decl.Body}
 }
 

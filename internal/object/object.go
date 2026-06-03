@@ -222,6 +222,7 @@ type Error struct {
 	Stack   string
 	Runtime bool
 	Pos     ast.Position
+	Thrown  Object
 }
 
 func (e *Error) Type() ObjectType { return ERROR_OBJ }
@@ -238,15 +239,18 @@ func (e *Error) Inspect() string {
 
 // --- Class / Instance ---
 
+type NativeClassConstructor func(env *Environment, inst *Instance, pos ast.Position, args []Object) Object
+
 type Class struct {
-	Name        string
-	Super       *Class
-	Methods     map[string]*Function
-	Fields      map[string]Object
-	FieldTypes  map[string]*ast.TypeAnnotation
-	Statics     map[string]Object
-	StaticTypes map[string]*ast.TypeAnnotation
-	Pos         ast.Position
+	Name              string
+	Super             *Class
+	Methods           map[string]*Function
+	Fields            map[string]Object
+	FieldTypes        map[string]*ast.TypeAnnotation
+	Statics           map[string]Object
+	StaticTypes       map[string]*ast.TypeAnnotation
+	NativeConstructor NativeClassConstructor
+	Pos               ast.Position
 }
 
 func (c *Class) Type() ObjectType { return CLASS_OBJ }
