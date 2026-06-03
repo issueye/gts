@@ -177,6 +177,7 @@ type Function struct {
 	Body       *ast.BlockStmt
 	Env        *Environment
 	IsAsync    bool
+	ReturnT    *ast.TypeAnnotation
 	Pos        ast.Position
 }
 

@@ -21,6 +21,20 @@ func testEval(input string) object.Object {
 	return Eval(prog, env)
 }
 
+func testEvalWithTypeCheck(input string) object.Object {
+	l := lexer.New(input)
+	p := parser.New(l, "<test>")
+	prog := p.ParseProgram()
+	if len(prog.Errors) > 0 {
+		return &object.Error{Message: strings.Join(prog.Errors, "\n")}
+	}
+	vm := object.NewVirtualMachine()
+	vm.SetTypeCheck(true)
+	env := vm.NewEnvironment()
+	RegisterBuiltins(env)
+	return Eval(prog, env)
+}
+
 func TestEval_Integer(t *testing.T) {
 	tests := []struct{ input, expected string }{
 		{"5;", "5"},
@@ -474,6 +488,26 @@ func TestEval_TypeError_CompareMixed(t *testing.T) {
 	if _, ok := evaluated.(*object.Error); !ok {
 		t.Fatalf("want TypeError, got %T", evaluated)
 	}
+}
+
+func TestEval_TypeCheckDeclarations(t *testing.T) {
+	testNumber(t, testEvalWithTypeCheck(`let x: number = 42; x;`), "42")
+	testString(t, testEval(`let x: number = "still allowed"; x;`), "still allowed")
+
+	evaluated := testEvalWithTypeCheck(`let x: number = "bad";`)
+	assertTypeError(t, evaluated)
+}
+
+func TestEval_TypeCheckFunctionParamsAndReturn(t *testing.T) {
+	testNumber(t, testEvalWithTypeCheck(`function add(a: number, b: number): number { return a + b; } add(1, 2);`), "3")
+
+	assertTypeError(t, testEvalWithTypeCheck(`function echo(v: string): string { return v; } echo(1);`))
+	assertTypeError(t, testEvalWithTypeCheck(`function bad(): number { return "no"; } bad();`))
+}
+
+func TestEval_TypeCheckArrayAndOptional(t *testing.T) {
+	testNumber(t, testEvalWithTypeCheck(`function first(v?: number): number | undefined { return v; } first(7);`), "7")
+	assertTypeError(t, testEvalWithTypeCheck(`let values: number[] = [1, "bad"];`))
 }
 
 func TestEval_NaN(t *testing.T) {
@@ -1226,6 +1260,17 @@ func testNumber(t *testing.T, obj object.Object, expected string) {
 	}
 	if num.Inspect() != expected {
 		t.Fatalf("want %q, got %q", expected, num.Inspect())
+	}
+}
+
+func assertTypeError(t *testing.T, obj object.Object) {
+	t.Helper()
+	err, ok := obj.(*object.Error)
+	if !ok {
+		t.Fatalf("want TypeError, got %T (%s)", obj, obj.Inspect())
+	}
+	if err.Name != "TypeError" {
+		t.Fatalf("want TypeError, got %s: %s", err.Name, err.Message)
 	}
 }
 

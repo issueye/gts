@@ -9,6 +9,7 @@ import (
 	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/object"
 	"github.com/issueye/goscript/internal/parser"
+	"github.com/issueye/goscript/internal/typechecker"
 )
 
 const (
@@ -178,6 +179,9 @@ func evalLet(n *ast.LetStmt, env *object.Environment) object.Object {
 			return val
 		}
 	}
+	if err := checkType(env, n.Pos(), n.TypeAnno, val); err != nil {
+		return err
+	}
 	env.Set(n.Name, val)
 	return object.UNDEFINED
 }
@@ -189,6 +193,9 @@ func evalConst(n *ast.ConstStmt, env *object.Environment) object.Object {
 		if object.IsRuntimeError(val) {
 			return val
 		}
+	}
+	if err := checkType(env, n.Pos(), n.TypeAnno, val); err != nil {
+		return err
 	}
 	env.SetConst(n.Name, val)
 	return object.UNDEFINED
@@ -202,8 +209,18 @@ func evalVar(n *ast.VarStmt, env *object.Environment) object.Object {
 			return val
 		}
 	}
+	if err := checkType(env, n.Pos(), n.TypeAnno, val); err != nil {
+		return err
+	}
 	env.Set(n.Name, val)
 	return object.UNDEFINED
+}
+
+func checkType(env *object.Environment, pos ast.Position, anno *ast.TypeAnnotation, value object.Object) *object.Error {
+	if env == nil || !env.VM().TypeCheck() || anno == nil {
+		return nil
+	}
+	return typechecker.Check(pos, anno, value)
 }
 
 // ============================================================================
@@ -613,6 +630,7 @@ func evalFuncDecl(n *ast.FuncDecl, env *object.Environment) object.Object {
 		Body:       n.Body,
 		Env:        env,
 		IsAsync:    n.IsAsync,
+		ReturnT:    n.ReturnT,
 		Pos:        n.Pos(),
 	}
 	env.ObjectManager().Register(fn)
@@ -652,6 +670,7 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 					Parameters: m.Params,
 					Body:       m.Body,
 					Env:        env,
+					IsAsync:    m.IsAsync,
 					Pos:        m.Pos_,
 				}
 				env.ObjectManager().Register(fn)
@@ -663,6 +682,7 @@ func evalClassDecl(n *ast.ClassDecl, env *object.Environment) object.Object {
 				Parameters: m.Params,
 				Body:       m.Body,
 				Env:        env,
+				IsAsync:    m.IsAsync,
 				Pos:        m.Pos_,
 			}
 			env.ObjectManager().Register(fn)
@@ -1202,20 +1222,8 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 	switch f := fn.(type) {
 	case *object.Function:
 		scope := f.Env.NewScope()
-		for i, p := range f.Parameters {
-			if i < len(args) {
-				if p.Spread {
-					rest := make([]object.Object, len(args)-i)
-					copy(rest, args[i:])
-					scope.Set(p.Name, env.ObjectManager().NewArray(rest))
-					break
-				}
-				scope.Set(p.Name, args[i])
-			} else if p.Default != nil {
-				scope.Set(p.Name, Eval(p.Default, f.Env))
-			} else {
-				scope.Set(p.Name, object.UNDEFINED)
-			}
+		if err := bindFunctionParams(scope, env, f.Parameters, args, pos); err != nil {
+			return err
 		}
 		if f.IsAsync {
 			promise := env.ObjectManager().NewPromise()
@@ -1225,18 +1233,35 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 				defer vm.AsyncDone()
 				result := Eval(f.Body, scope)
 				if rv, ok := result.(*object.ReturnValue); ok {
-					promise.Resolve(rv.Value)
+					if err := checkType(env, pos, f.ReturnT, rv.Value); err != nil {
+						promise.Reject(err)
+					} else {
+						promise.Resolve(rv.Value)
+					}
 				} else if object.IsRuntimeError(result) {
 					promise.Reject(result)
 				} else {
-					promise.Resolve(result)
+					if err := checkType(env, pos, f.ReturnT, normalizeReturn(result)); err != nil {
+						promise.Reject(err)
+					} else {
+						promise.Resolve(result)
+					}
 				}
 			})
 			return promise
 		}
 		result := Eval(f.Body, scope)
 		if rv, ok := result.(*object.ReturnValue); ok {
+			if err := checkType(env, pos, f.ReturnT, rv.Value); err != nil {
+				return err
+			}
 			return rv.Value
+		}
+		if object.IsRuntimeError(result) {
+			return result
+		}
+		if err := checkType(env, pos, f.ReturnT, normalizeReturn(result)); err != nil {
+			return err
 		}
 		return result
 	case *object.Builtin:
@@ -1263,27 +1288,71 @@ func applyFunction(fn object.Object, env *object.Environment, args []object.Obje
 			if superCon, ok := f.Super.Methods["constructor"]; ok {
 				scope := superCon.Env.NewScope()
 				scope.Set("this", inst)
-				Eval(superCon.Body, scope)
+				if err := bindFunctionParams(scope, env, superCon.Parameters, args, pos); err != nil {
+					return err
+				}
+				result := Eval(superCon.Body, scope)
+				if object.IsRuntimeError(result) {
+					return result
+				}
 			}
 		}
 		if con, ok := f.Methods["constructor"]; ok {
 			scope := con.Env.NewScope()
 			scope.Set("this", inst)
-			for i, p := range con.Parameters {
-				if i < len(args) {
-					scope.Set(p.Name, args[i])
-				} else if p.Default != nil {
-					scope.Set(p.Name, Eval(p.Default, con.Env))
-				} else {
-					scope.Set(p.Name, object.UNDEFINED)
-				}
+			if err := bindFunctionParams(scope, env, con.Parameters, args, pos); err != nil {
+				return err
 			}
-			Eval(con.Body, scope)
+			result := Eval(con.Body, scope)
+			if object.IsRuntimeError(result) {
+				return result
+			}
 		}
 		return inst
 	default:
 		return object.NewError(pos, "TypeError: %s is not a function", fn.Type())
 	}
+}
+
+func bindFunctionParams(scope, caller *object.Environment, params []*ast.Param, args []object.Object, pos ast.Position) *object.Error {
+	for i, p := range params {
+		var value object.Object
+		if i < len(args) {
+			if p.Spread {
+				rest := make([]object.Object, len(args)-i)
+				copy(rest, args[i:])
+				value = caller.ObjectManager().NewArray(rest)
+				if err := checkType(caller, pos, p.TypeAnno, value); err != nil {
+					return err
+				}
+				scope.Set(p.Name, value)
+				break
+			}
+			value = args[i]
+		} else if p.Default != nil {
+			value = Eval(p.Default, scope)
+			if object.IsRuntimeError(value) {
+				if err, ok := value.(*object.Error); ok {
+					return err
+				}
+				return object.NewError(pos, "%s", value.Inspect())
+			}
+		} else {
+			value = object.UNDEFINED
+		}
+		if err := checkType(caller, pos, p.TypeAnno, value); err != nil {
+			return err
+		}
+		scope.Set(p.Name, value)
+	}
+	return nil
+}
+
+func normalizeReturn(value object.Object) object.Object {
+	if value == nil {
+		return object.UNDEFINED
+	}
+	return value
 }
 
 func evalMember(n *ast.MemberExpr, env *object.Environment) object.Object {
@@ -1519,6 +1588,7 @@ func evalFuncExpr(n *ast.FuncExpr, env *object.Environment) object.Object {
 		Body:       n.Body,
 		Env:        env,
 		IsAsync:    n.IsAsync,
+		ReturnT:    n.ReturnT,
 		Pos:        n.Pos(),
 	}
 	env.ObjectManager().Register(fn)
@@ -1537,6 +1607,8 @@ func evalArrowFunc(n *ast.ArrowFuncExpr, env *object.Environment) object.Object 
 		Parameters: n.Params,
 		Body:       block,
 		Env:        env,
+		IsAsync:    n.IsAsync,
+		ReturnT:    n.ReturnT,
 		Pos:        n.Pos(),
 	}
 	env.ObjectManager().Register(fn)

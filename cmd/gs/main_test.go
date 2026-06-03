@@ -28,9 +28,18 @@ func TestRunWithoutArgs(t *testing.T) {
 	}
 }
 
-func TestRunCheckTypesNotImplemented(t *testing.T) {
-	if code := run([]string{"--check-types", "main.gs"}); code != 2 {
-		t.Fatalf("want exit code 2, got %d", code)
+func TestRunCheckTypes(t *testing.T) {
+	dir := t.TempDir()
+	okScript := filepath.Join(dir, "ok.gs")
+	writeTestFile(t, okScript, `let value: number = 42;`)
+	if code := run([]string{"--check-types", okScript}); code != 0 {
+		t.Fatalf("want exit code 0, got %d", code)
+	}
+
+	badScript := filepath.Join(dir, "bad.gs")
+	writeTestFile(t, badScript, `let value: number = "bad";`)
+	if code := run([]string{"--check-types", badScript}); code != 1 {
+		t.Fatalf("want exit code 1, got %d", code)
 	}
 }
 

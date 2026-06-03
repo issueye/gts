@@ -68,11 +68,6 @@ func run(args []string) int {
 		fmt.Fprintln(os.Stdout, "GoScript", version)
 		return 0
 	}
-	if opts.checkTypes {
-		fmt.Fprintln(os.Stderr, "type checking is not implemented yet; run without --check-types")
-		return 2
-	}
-
 	r := newRunner(opts)
 	rest := fs.Args()
 	if len(rest) == 0 {
@@ -364,6 +359,7 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 		return nil, err
 	}
 	r.vm = object.NewVirtualMachine()
+	r.vm.SetTypeCheck(r.opts.checkTypes)
 	r.pool = async.NewPool(r.opts.workers)
 	r.vm.SetSpawner(r.pool.Go)
 	r.cache = module.NewCacheWithVM(r.vm)
@@ -395,6 +391,7 @@ func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executa
 		}
 		archivePath := filepath.ToSlash(absExe) + "!" + entry
 		r.vm = object.NewVirtualMachine()
+		r.vm.SetTypeCheck(r.opts.checkTypes)
 		r.pool = async.NewPool(r.opts.workers)
 		r.vm.SetSpawner(r.pool.Go)
 		r.cache = module.NewCacheWithVM(r.vm)
@@ -515,6 +512,7 @@ func (r *runner) ensureRuntime() {
 	if r.vm == nil {
 		r.vm = object.NewVirtualMachine()
 	}
+	r.vm.SetTypeCheck(r.opts.checkTypes)
 	if r.pool == nil {
 		r.pool = async.NewPool(r.opts.workers)
 		r.vm.SetSpawner(r.pool.Go)

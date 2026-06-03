@@ -15,6 +15,7 @@ type VirtualMachine struct {
 	nextTimer       int64
 	globalConstants atomic.Value // stores map[string]Object
 	globalMu        sync.Mutex
+	typeCheck       atomic.Bool
 	spawn           func(func())
 	importer        func(env *Environment, path string) (Object, error)
 	evaluator       func(node interface{}, env *Environment) Object
@@ -31,6 +32,17 @@ func (vm *VirtualMachine) ObjectManager() *ObjectManager {
 		vm.manager = NewObjectManager()
 	}
 	return vm.manager
+}
+
+func (vm *VirtualMachine) SetTypeCheck(enabled bool) {
+	if vm == nil {
+		return
+	}
+	vm.typeCheck.Store(enabled)
+}
+
+func (vm *VirtualMachine) TypeCheck() bool {
+	return vm != nil && vm.typeCheck.Load()
 }
 
 func (vm *VirtualMachine) globalConstantMap() map[string]Object {
