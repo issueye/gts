@@ -1146,6 +1146,49 @@ kind;
 	}
 }
 
+func TestStdLogModuleRotatesFiles(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "log_rotate.gs")
+	logFile := filepath.Join(dir, "rotate.log")
+	appSource := strings.ReplaceAll(`
+let fs = require("@std/fs");
+let log = require("@std/log");
+
+let logger = log.createFileLogger("__LOG__", {
+  append: false,
+  timestamp: false,
+  maxSizeBytes: 40,
+  maxBackups: 2,
+});
+
+logger.info("first-line-aaaa");
+logger.info("second-line-bbbb");
+logger.info("third-line-cccc");
+logger.close();
+
+let current = fs.readFileSync("__LOG__");
+let firstBackup = fs.readFileSync("__LOG__.1");
+let kind = "rotate-bad";
+if (current.includes("third-line-cccc") && firstBackup.includes("second-line-bbbb") && !current.includes("first-line-aaaa")) {
+  kind = "rotate";
+}
+kind;
+`, "__LOG__", strings.ReplaceAll(logFile, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "rotate" {
+		t.Fatalf("want rotate, got %T %v", result, result)
+	}
+}
+
 func TestStdConfigCodecModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "config_codecs.gs")

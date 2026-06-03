@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,10 +17,13 @@ import (
 type stdLogger struct {
 	mu        sync.Mutex
 	file      *os.File
+	path      string
 	level     int
 	timestamp bool
 	json      bool
 	closed    bool
+	maxSize   int64
+	backups   int
 }
 
 func init() {
@@ -55,9 +59,12 @@ func logCreateFileLogger(env *object.Environment, pos ast.Position, args ...obje
 	}
 	logger := &stdLogger{
 		file:      file,
+		path:      path,
 		level:     opts.level,
 		timestamp: opts.timestamp,
 		json:      opts.json,
+		maxSize:   opts.maxSize,
+		backups:   opts.backups,
 	}
 	return loggerObject(logger)
 }
@@ -67,6 +74,8 @@ type logModuleOptions struct {
 	level     int
 	timestamp bool
 	json      bool
+	maxSize   int64
+	backups   int
 }
 
 func logOptions(pos ast.Position, name string, args []object.Object, index int) (logModuleOptions, *object.Error) {
@@ -109,6 +118,26 @@ func logOptions(pos ast.Position, name string, args []object.Object, index int) 
 			return opts, object.NewError(pos, "%s: unsupported level %q", name, text.Value)
 		}
 		opts.level = level
+	}
+	if value, ok := hashValue(hash, "maxSizeBytes"); ok {
+		n, ok := value.(*object.Number)
+		if !ok {
+			return opts, object.NewError(pos, "%s: options.maxSizeBytes must be a number", name)
+		}
+		if n.Value < 0 {
+			return opts, object.NewError(pos, "%s: options.maxSizeBytes must be non-negative", name)
+		}
+		opts.maxSize = int64(n.Value)
+	}
+	if value, ok := hashValue(hash, "maxBackups"); ok {
+		n, ok := value.(*object.Number)
+		if !ok {
+			return opts, object.NewError(pos, "%s: options.maxBackups must be a number", name)
+		}
+		if n.Value < 0 {
+			return opts, object.NewError(pos, "%s: options.maxBackups must be non-negative", name)
+		}
+		opts.backups = int(n.Value)
 	}
 	return opts, nil
 }
@@ -215,8 +244,63 @@ func (l *stdLogger) write(line string) error {
 	if l.closed {
 		return os.ErrClosed
 	}
+	if err := l.rotateIfNeeded(int64(len(line))); err != nil {
+		return err
+	}
 	_, err := l.file.WriteString(line)
 	return err
+}
+
+func (l *stdLogger) rotateIfNeeded(incoming int64) error {
+	if l.maxSize <= 0 {
+		return nil
+	}
+	info, err := l.file.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Size() == 0 || info.Size()+incoming <= l.maxSize {
+		return nil
+	}
+	if err := l.file.Close(); err != nil {
+		return err
+	}
+	if l.backups > 0 {
+		if err := rotateLogFiles(l.path, l.backups); err != nil {
+			return err
+		}
+	} else {
+		if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	file, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	l.file = file
+	return nil
+}
+
+func rotateLogFiles(path string, backups int) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	last := fmt.Sprintf("%s.%d", path, backups)
+	if err := os.Remove(last); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for i := backups - 1; i >= 1; i-- {
+		src := fmt.Sprintf("%s.%d", path, i)
+		dst := fmt.Sprintf("%s.%d", path, i+1)
+		if err := os.Rename(src, dst); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := os.Rename(path, path+".1"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func logJoin(args []object.Object) string {
