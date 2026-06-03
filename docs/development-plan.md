@@ -1,15 +1,15 @@
 # GoScript Development Plan
 
-> Updated from the current repository state on 2026-06-02.
+> Updated from the current repository state on 2026-06-03.
 > This document turns the original roadmap into an executable plan based on what is already implemented.
 
 ---
 
 ## 1. Current State Summary
 
-The project is no longer at the original M0 design stage. The core interpreter has working lexer, parser, AST, evaluator, runtime objects, builtins, async primitives, standard-library module registration, examples, documentation, a VS Code syntax extension, and a basic CLI under `cmd/gs`.
+The project is no longer at the original M0 design stage. The core interpreter has working lexer, parser, AST, evaluator, runtime objects, builtins, async primitives, standard-library module registration, examples, documentation, a VS Code syntax extension, package distribution support, and a CLI under `cmd/gs`.
 
-The main remaining gap is language/runtime completion: `import/export`, resolver, type checking, richer errors, and the full documented standard library are still incomplete.
+The main remaining gap is language/runtime completion: full module semantics, static scope resolution, type checking, richer errors, async/event-loop hardening, and alignment between the documented standard library and the implemented one.
 
 ### Implemented or Mostly Implemented
 
@@ -24,10 +24,11 @@ The main remaining gap is language/runtime completion: `import/export`, resolver
 | Classes / inheritance | Mostly done | class evaluator tests |
 | Exceptions | Partially done | `try/catch/finally` exists, rich Error objects/stack traces still incomplete |
 | Async / Promise | Partially done | `Promise`, `async/await`, timers exist, but event-loop semantics need hardening |
-| Native stdlib modules | Partially done | `@std/exec`, HTTP, socket, WebSocket modules register through `internal/module` |
-| CLI | Basic done | `cmd/gs` supports file execution, project `run`, timeout protection, and workers |
-| `require` integration | Basic done | CLI wires `require(path)` with file cache and native modules |
-| Example verification | Basic done | `cmd/gs` tests run a small stable example list |
+| Native stdlib modules | Partially done | multiple `@std/*` modules register through `internal/module`, including fs/path/os/process/exec/db/http/socket/ws/crypto/buffer/timers |
+| CLI | Mostly done | `cmd/gs` supports file execution, project `run`, `init`, `pack`, `dist`, `bundle`, timeout protection, and workers |
+| `require` integration | Mostly done | CLI wires `require(path)` with source/package/native resolution and module cache |
+| Package distribution | Mostly done | `.gspkg` packing, nested package reads, and executable embedding exist |
+| Example verification | Basic done | `cmd/gs` tests run a stable example list |
 | VS Code extension | Basic done | `vscode-extension` syntax package exists |
 
 ### Missing or Incomplete
@@ -37,11 +38,11 @@ The main remaining gap is language/runtime completion: `import/export`, resolver
 | REPL | No interactive shell |
 | Module runtime | Basic `import/export` works; full semantics are incomplete |
 | Type checker | Type annotations parse, but `internal/typechecker` is missing |
-| Resolver | `internal/resolver` is missing |
+| Static resolver | `internal/module.Resolver` exists for module paths; a separate static scope resolver for declarations, `this`, and `super` is still missing |
 | Error model | Dedicated Error subclasses and stack traces are not complete |
 | C-style `for` edge cases | Some `for (let i = ...; ...)` forms still need parser/evaluator hardening |
 | Docs alignment | Several deeper spec docs still describe target behavior rather than current behavior |
-| Example verification | Only a small stable set is currently automated |
+| Example verification | Stable coverage exists, but examples still need clearer stable/pending/manual grouping as capabilities grow |
 | Embedding API | No stable public facade for Go hosts |
 
 ---
@@ -81,9 +82,9 @@ The main remaining gap is language/runtime completion: `import/export`, resolver
 
 ### P1: CLI Runner
 
-**Goal:** Add the missing `gs` command so scripts can be executed from the repository.
+**Goal:** Provide the `gs` command so scripts can be executed from the repository.
 
-**Current status:** Basic CLI is implemented.
+**Current status:** Mostly implemented.
 
 **Scope:**
 
@@ -127,7 +128,7 @@ go run ./cmd/gs run
 
 **Goal:** Convert examples and docs examples into a repeatable quality gate.
 
-**Current status:** Basic stable example suite exists in `cmd/gs` tests.
+**Current status:** Stable example suite exists in `cmd/gs` tests and `examples/README.md` lists verified examples.
 
 **Scope:**
 
@@ -222,13 +223,15 @@ go run ./cmd/gs run
 
 ---
 
-### P5: Resolver
+### P5: Static Scope Resolver
 
 **Goal:** Add a static analysis pass for scope and `this` correctness.
 
+This is separate from `internal/module.Resolver`, which already resolves module specifiers and package paths.
+
 **Scope:**
 
-- Create `internal/resolver`.
+- Create `internal/resolver` or an equivalent static-analysis package.
 - Track lexical scopes and declarations.
 - Reject duplicate declarations where the language requires it.
 - Reject undefined variable reads/writes before evaluation when possible.
@@ -388,7 +391,7 @@ result, err := engine.EvalString(ctx, source)
 4. P4 Runtime Semantics Hardening
 5. P8 Standard Library Completion
 6. P7 Async and Event Loop Completion
-7. P5 Resolver
+7. P5 Static Scope Resolver
 8. P6 Optional Type Checker
 9. P9 REPL
 10. P10 Embedding API
@@ -409,6 +412,8 @@ The ordering favors fast feedback. Once the CLI and example suite exist, every l
 - Builtin registration
 - Basic error printing
 
+**Current status:** Done at baseline level.
+
 **Validation:**
 
 ```bash
@@ -426,6 +431,8 @@ go run ./cmd/gs examples/01-basics.gs
 - Example runner test/script
 - README updates for actual supported commands
 
+**Current status:** Done at baseline level; continue expanding coverage when features stabilize.
+
 **Validation:**
 
 ```bash
@@ -442,6 +449,8 @@ go test ./cmd/gs
 - Native module resolution
 - Initial `import/export` evaluation
 
+**Current status:** Mostly done for basic source/package/native modules; full semantics and edge cases remain.
+
 **Validation:**
 
 ```bash
@@ -455,8 +464,8 @@ go run ./cmd/gs examples/module-app.gs
 
 | File | Update |
 |------|--------|
-| `README.md` | Replace aspirational CLI instructions after P1 lands |
-| `docs/roadmap.md` | Mark original roadmap as historical or rewrite against this plan |
+| `README.md` | Keep quick-start and feature status aligned with current CLI |
+| `docs/roadmap.md` | Historical document; keep clearly marked as outdated |
 | `docs/builtins.md` | Separate implemented from planned builtins |
 | `docs/language-spec.md` | Make compatibility matrix reflect actual implementation |
 | `examples/README.md` | Add stable/pending/manual example status |

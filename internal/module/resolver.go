@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/issueye/goscript/internal/packagefile"
 	"github.com/issueye/goscript/internal/proj"
@@ -45,11 +46,34 @@ type ResolveOptions struct {
 // Resolver resolves GoScript module specifiers.
 type Resolver struct {
 	ProjectRoot string
+	mu          sync.RWMutex
+	projectRoot map[string]string
+	packageRoot map[string]string
+	manifests   map[string]*proj.Config
+	resolutions map[resolveCacheKey]resolveCacheEntry
+}
+
+type resolveCacheKey struct {
+	Specifier   string
+	ProjectRoot string
+	BaseDir     string
+	Referrer    string
+}
+
+type resolveCacheEntry struct {
+	Resolved ResolvedModule
+	Err      error
 }
 
 // NewResolver creates a resolver with default options.
 func NewResolver(projectRoot string) *Resolver {
-	return &Resolver{ProjectRoot: projectRoot}
+	return &Resolver{
+		ProjectRoot: projectRoot,
+		projectRoot: make(map[string]string),
+		packageRoot: make(map[string]string),
+		manifests:   make(map[string]*proj.Config),
+		resolutions: make(map[resolveCacheKey]resolveCacheEntry),
+	}
 }
 
 // Resolve resolves a module specifier from a referrer or base directory.
@@ -65,15 +89,35 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 			return ResolvedModule{}, err
 		}
 	}
+	baseDir = filepath.Clean(baseDir)
 
 	projectRoot := opts.ProjectRoot
 	if projectRoot == "" {
 		projectRoot = r.ProjectRoot
 	}
 	if projectRoot == "" {
-		projectRoot = FindProjectRoot(baseDir)
+		projectRoot = r.findProjectRoot(baseDir)
+	}
+	if projectRoot != "" {
+		projectRoot = filepath.Clean(projectRoot)
 	}
 
+	key := resolveCacheKey{
+		Specifier:   specifier,
+		ProjectRoot: projectRoot,
+		BaseDir:     baseDir,
+		Referrer:    opts.Referrer,
+	}
+	if resolved, ok, err := r.cachedResolution(key); ok {
+		return resolved, err
+	}
+
+	resolved, err := r.resolveUncached(specifier, baseDir, projectRoot)
+	r.storeResolution(key, resolved, err)
+	return resolved, err
+}
+
+func (r *Resolver) resolveUncached(specifier, baseDir, projectRoot string) (ResolvedModule, error) {
 	if pkgPath, archiveBase, ok := splitArchiveBaseDir(baseDir); ok {
 		if isPathSpecifier(specifier) {
 			return resolvePackageFileRelative(specifier, pkgPath, archiveBase)
@@ -82,7 +126,7 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 			return resolved, err
 		}
 		if !strings.HasPrefix(specifier, "@std/") && !strings.HasPrefix(specifier, "@agent/") {
-			return resolvePackageFromPackageFile(specifier, pkgPath, projectRoot)
+			return r.resolvePackageFromPackageFile(specifier, pkgPath, projectRoot)
 		}
 	}
 
@@ -100,7 +144,7 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 		if !filepath.IsAbs(base) {
 			base = filepath.Join(baseDir, base)
 		}
-		path, err := resolveSourcePath(base)
+		path, err := r.resolveSourcePath(base)
 		if err != nil {
 			return ResolvedModule{}, fmt.Errorf("module not found %q from %q: %w", specifier, baseDir, err)
 		}
@@ -108,11 +152,11 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 	}
 
 	if strings.HasPrefix(specifier, "@agent/") {
-		agentRoot := FindAgentRoot(baseDir)
+		agentRoot := r.findAgentRoot(baseDir)
 		if agentRoot == "" {
 			agentRoot = projectRoot
 		}
-		path, err := resolveSourcePath(filepath.Join(agentRoot, "scripts", "agent", strings.TrimPrefix(specifier, "@agent/")))
+		path, err := r.resolveSourcePath(filepath.Join(agentRoot, "scripts", "agent", strings.TrimPrefix(specifier, "@agent/")))
 		if err != nil {
 			return ResolvedModule{}, fmt.Errorf("module not found %q from @agent alias: %w", specifier, err)
 		}
@@ -124,6 +168,22 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 	}
 
 	return r.resolvePackage(specifier, baseDir, projectRoot)
+}
+
+func (r *Resolver) cachedResolution(key resolveCacheKey) (ResolvedModule, bool, error) {
+	r.mu.RLock()
+	entry, ok := r.resolutions[key]
+	r.mu.RUnlock()
+	if !ok {
+		return ResolvedModule{}, false, nil
+	}
+	return entry.Resolved, true, entry.Err
+}
+
+func (r *Resolver) storeResolution(key resolveCacheKey, resolved ResolvedModule, err error) {
+	r.mu.Lock()
+	r.resolutions[key] = resolveCacheEntry{Resolved: resolved, Err: err}
+	r.mu.Unlock()
 }
 
 func resolvePackageFileRelative(specifier, pkgPath, archiveBase string) (ResolvedModule, error) {
@@ -208,7 +268,7 @@ func openPackageFileRef(pkgPath string) (*packagefile.Package, error) {
 	return pkg, nil
 }
 
-func resolvePackageFromPackageFile(specifier, pkgPath, projectRoot string) (ResolvedModule, error) {
+func (r *Resolver) resolvePackageFromPackageFile(specifier, pkgPath, projectRoot string) (ResolvedModule, error) {
 	pkg, err := packagefile.Open(pkgPath)
 	if err != nil {
 		return ResolvedModule{}, err
@@ -275,14 +335,14 @@ func (r *Resolver) baseDirFromReferrer(referrer string) string {
 }
 
 func (r *Resolver) resolvePackage(specifier, baseDir, projectRoot string) (ResolvedModule, error) {
-	currentRoot := FindPackageRoot(baseDir)
+	currentRoot := r.findPackageRoot(baseDir)
 	if currentRoot == "" {
 		currentRoot = projectRoot
 	}
 	if currentRoot == "" {
-		currentRoot = FindProjectRoot(baseDir)
+		currentRoot = r.findProjectRoot(baseDir)
 	}
-	manifest, err := loadManifest(currentRoot)
+	manifest, err := r.loadManifest(currentRoot)
 	if err != nil {
 		return ResolvedModule{}, err
 	}
@@ -300,7 +360,7 @@ func (r *Resolver) resolvePackage(specifier, baseDir, projectRoot string) (Resol
 		return resolvePackageFile(specifier, depRoot, packageName, exportName)
 	}
 
-	depManifest, err := loadManifest(depRoot)
+	depManifest, err := r.loadManifest(depRoot)
 	if err != nil {
 		return ResolvedModule{}, err
 	}
@@ -308,7 +368,7 @@ func (r *Resolver) resolvePackage(specifier, baseDir, projectRoot string) (Resol
 	if !ok {
 		return ResolvedModule{}, fmt.Errorf("package %q has no export %q", packageName, exportName)
 	}
-	path, err := resolveSourcePath(filepath.Join(depRoot, target))
+	path, err := r.resolveSourcePath(filepath.Join(depRoot, target))
 	if err != nil {
 		return ResolvedModule{}, fmt.Errorf("package %q export %q not found: %w", packageName, exportName, err)
 	}
@@ -358,14 +418,14 @@ func resolveOpenedPackageFile(specifier string, pkg *packagefile.Package, packag
 }
 
 func (r *Resolver) tryResolveImportAlias(specifier, baseDir, projectRoot string) (ResolvedModule, bool, error) {
-	currentRoot := FindPackageRoot(baseDir)
+	currentRoot := r.findPackageRoot(baseDir)
 	if currentRoot == "" {
 		currentRoot = projectRoot
 	}
 	if currentRoot == "" {
-		currentRoot = FindProjectRoot(baseDir)
+		currentRoot = r.findProjectRoot(baseDir)
 	}
-	manifest, err := loadManifest(currentRoot)
+	manifest, err := r.loadManifest(currentRoot)
 	if err != nil {
 		return ResolvedModule{}, false, err
 	}
@@ -373,7 +433,7 @@ func (r *Resolver) tryResolveImportAlias(specifier, baseDir, projectRoot string)
 	if !ok {
 		return ResolvedModule{}, false, nil
 	}
-	path, err := resolveSourcePath(filepath.Join(currentRoot, target))
+	path, err := r.resolveSourcePath(filepath.Join(currentRoot, target))
 	if err != nil {
 		return ResolvedModule{}, true, fmt.Errorf("package import %q not found: %w", specifier, err)
 	}
@@ -391,7 +451,7 @@ func isPathSpecifier(specifier string) bool {
 		(runtime.GOOS != "windows" && len(specifier) >= 3 && specifier[1] == ':' && (specifier[2] == '\\' || specifier[2] == '/'))
 }
 
-func resolveSourcePath(path string) (string, error) {
+func (r *Resolver) resolveSourcePath(path string) (string, error) {
 	path = filepath.Clean(path)
 	candidates := []string{path}
 	if filepath.Ext(path) == "" {
@@ -403,19 +463,23 @@ func resolveSourcePath(path string) (string, error) {
 		}
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		manifest, err := loadManifest(path)
+		manifest, err := r.loadManifest(path)
 		if err == nil {
 			if main := packageMainFromManifest(manifest); main != "" {
-				if resolved, err := resolveSourcePath(filepath.Join(path, main)); err == nil {
+				if resolved, err := r.resolveSourcePath(filepath.Join(path, main)); err == nil {
 					return resolved, nil
 				}
 			}
 		}
-		if resolved, err := resolveSourcePath(filepath.Join(path, "index.gs")); err == nil {
+		if resolved, err := r.resolveSourcePath(filepath.Join(path, "index.gs")); err == nil {
 			return resolved, nil
 		}
 	}
 	return "", os.ErrNotExist
+}
+
+func resolveSourcePath(path string) (string, error) {
+	return NewResolver("").resolveSourcePath(path)
 }
 
 func sourceModule(specifier, path string, kind ModuleKind, packageRoot, packageName string) ResolvedModule {
@@ -600,6 +664,73 @@ func cleanArchiveSpecifier(path string) string {
 		return ""
 	}
 	return cleaned
+}
+
+func (r *Resolver) findProjectRoot(startDir string) string {
+	key := filepath.Clean(startDir)
+	r.mu.RLock()
+	root, ok := r.projectRoot[key]
+	r.mu.RUnlock()
+	if ok {
+		return root
+	}
+
+	root = FindProjectRoot(startDir)
+	r.mu.Lock()
+	r.projectRoot[key] = root
+	r.mu.Unlock()
+	return root
+}
+
+func (r *Resolver) findPackageRoot(startDir string) string {
+	key := filepath.Clean(startDir)
+	r.mu.RLock()
+	root, ok := r.packageRoot[key]
+	r.mu.RUnlock()
+	if ok {
+		return root
+	}
+
+	root = FindPackageRoot(startDir)
+	r.mu.Lock()
+	r.packageRoot[key] = root
+	r.mu.Unlock()
+	return root
+}
+
+func (r *Resolver) findAgentRoot(startDir string) string {
+	key := "agent:" + filepath.Clean(startDir)
+	r.mu.RLock()
+	root, ok := r.projectRoot[key]
+	r.mu.RUnlock()
+	if ok {
+		return root
+	}
+
+	root = FindAgentRoot(startDir)
+	r.mu.Lock()
+	r.projectRoot[key] = root
+	r.mu.Unlock()
+	return root
+}
+
+func (r *Resolver) loadManifest(root string) (*proj.Config, error) {
+	root = filepath.Clean(root)
+	r.mu.RLock()
+	manifest, ok := r.manifests[root]
+	r.mu.RUnlock()
+	if ok {
+		return manifest, nil
+	}
+
+	manifest, err := loadManifest(root)
+	if err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	r.manifests[root] = manifest
+	r.mu.Unlock()
+	return manifest, nil
 }
 
 func splitArchiveBaseDir(baseDir string) (pkgPath, archiveDir string, ok bool) {

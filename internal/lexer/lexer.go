@@ -7,14 +7,14 @@ import (
 )
 
 type Lexer struct {
-	input    string
-	offset   int // current byte offset in input
-	readOff  int // reading offset (after current char)
-	ch       rune
-	line     int
-	col      int
-	prevCol  int // column before current ch
-	errors   []string
+	input   string
+	offset  int // current byte offset in input
+	readOff int // reading offset (after current char)
+	ch      rune
+	line    int
+	col     int
+	prevCol int // column before current ch
+	errors  []string
 }
 
 func New(input string) *Lexer {
@@ -466,23 +466,52 @@ func (l *Lexer) readTemplate() Token {
 	startLine := l.line
 	startCol := l.col
 	l.readChar() // consume opening backtick
-	depth := 1
-	for depth > 0 && l.ch != 0 {
-		if l.ch == '`' {
-			depth--
-			if depth == 0 {
+	exprDepth := 0
+	var quote rune
+	escape := false
+	for l.ch != 0 {
+		if quote != 0 {
+			if escape {
+				escape = false
+			} else if l.ch == '\\' {
+				escape = true
+			} else if l.ch == quote {
+				quote = 0
+			}
+			l.readChar()
+			continue
+		}
+
+		if exprDepth == 0 {
+			if l.ch == '`' {
 				break
 			}
-		} else if l.ch == '$' && l.peekChar() == '{' {
-			depth++
+			if l.ch == '$' && l.peekChar() == '{' {
+				l.readChar() // consume {
+				exprDepth = 1
+			}
 			l.readChar()
+			continue
+		}
+
+		switch l.ch {
+		case '\'', '"':
+			quote = l.ch
+		case '{':
+			exprDepth++
+		case '}':
+			exprDepth--
 		}
 		l.readChar()
 	}
-	if depth > 0 {
+	if l.ch != '`' || exprDepth > 0 {
 		l.addError("unterminated template literal")
 	}
-	lit := l.input[start:l.readOff] // includes both backticks
+	end := l.offset
+	if l.ch == '`' {
+		end = l.readOff
+	}
+	lit := l.input[start:end] // includes both backticks
 	// do NOT readChar here — outer NextToken does it
 	return Token{Type: TOKEN_TEMPLATE, Literal: lit, Line: startLine, Column: startCol, Offset: start}
 }

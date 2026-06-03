@@ -1,7 +1,9 @@
 # GoScript 架构与详细设计
 
-> 版本：v0.1（设计阶段）  
+> 版本：v0.1 设计文档。  
 > 目标：解释器可工作的最小可行实现（MVP），覆盖 JS 核心 + `async/await` + 可选类型注解。
+>
+> 注意：本文保留了部分目标架构描述，例如 Resolver、TypeChecker 和公开嵌入 API。当前实现状态请先看 [`project-analysis.md`](project-analysis.md)，开发计划请看 [`development-plan.md`](development-plan.md)。
 
 ---
 

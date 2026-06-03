@@ -375,6 +375,7 @@ err.stack;
 | `@std/terminal` | `isTTY`, `size`, `read`, `write`, `writeln`, `setRawMode`；用于宿主终端探测、读写和 raw mode 恢复 |
 | `@std/net/http/client` | `request`, `fetch`, `get`, `post`, `stream`；`request/fetch({ stream: true })` 或 `responseType: "stream"` 返回带 `body` readable stream 的响应对象 |
 | `@std/net/http/server` | `createServer` |
+| `@std/web` | `createApp`, `json`, `text`, `static`；Express 风格轻量 Web 框架，支持 `use/get/post/put/patch/delete/all/listen`、多 handler 串联、`:param` 路由参数、`req.params/query/body/rawBody/headers`、`res.status/setHeader/send/json/end/redirect` |
 | `@std/net/socket/client`、`@std/net/socket/server` | TCP socket client/server |
 | `@std/net/ws/client`、`@std/net/ws/server` | WebSocket client/server |
 | `@std/url` | `parse`, `format`, `resolve`, `pathToFileURL`, `fileURLToPath`, `URL`, `URLSearchParams` |

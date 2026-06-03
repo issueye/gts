@@ -162,6 +162,19 @@ func TestLexer_Template(t *testing.T) {
 	}
 }
 
+func TestLexer_TemplateExpressionDoesNotConsumeFollowingToken(t *testing.T) {
+	input := "`value ${{ value: 1 }.value}`;"
+	tests := []struct {
+		Type TokenType
+		Lit  string
+	}{
+		{TOKEN_TEMPLATE, "`value ${{ value: 1 }.value}`"},
+		{TOKEN_SEMI, ";"},
+		{TOKEN_EOF, ""},
+	}
+	tokenEq(t, input, tests)
+}
+
 func TestLexer_Comments(t *testing.T) {
 	input := `let x /* block */ = // line
 5`

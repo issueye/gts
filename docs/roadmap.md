@@ -1,9 +1,9 @@
-# 实施路线图
+# 实施路线图（历史文档）
 
-> 状态：v0.1 设计阶段 ✅  
-> 当前阶段目标：在 `cmd/gs/main.go` 中跑通一个最小可用的解释器（同步子集 + 闭包 + 类型注解可选检查）。
+> 状态：早期设计阶段路线图，保留作历史参考。  
+> 当前代码已经具备 CLI、词法/语法/AST、求值器、运行时对象、模块加载、包文件、部分标准库和示例回归。本文中的“当前阶段 M0”和部分里程碑状态已经过时。
 >
-> 注意：本文件保留了早期设计阶段的原始路线图。当前代码进度已经超过这里描述的 M0/M1 阶段，但 CLI、模块运行时、Resolver、TypeChecker 等仍未完成。后续执行请优先参考 [`development-plan.md`](development-plan.md)。
+> 当前执行请优先参考 [`project-analysis.md`](project-analysis.md) 和 [`development-plan.md`](development-plan.md)。
 
 ---
 
@@ -30,9 +30,11 @@
 
 ---
 
-## 当前阶段：M0
+## 原始当前阶段：M0（已过时）
 
 **目标**：建立可被 Go 构建的空壳 CLI。
+
+> 说明：该小节是原始路线图内容。当前仓库已经超过 M0/M1/M2/M3 等早期阶段，真实状态见 [`project-analysis.md`](project-analysis.md)。
 
 **已完成**：
 - 项目结构与目录划分

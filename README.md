@@ -102,6 +102,7 @@ function main() {
 | 文档 | 作用 |
 |------|------|
 | [`docs/development-plan.md`](docs/development-plan.md) | 当前开发计划和真实缺口 |
+| [`docs/project-analysis.md`](docs/project-analysis.md) | 项目分析：当前状态、运行链路、模块职责和接手建议 |
 | [`docs/design.md`](docs/design.md) | 架构总览、模块划分、关键算法与权衡 |
 | [`docs/language-spec.md`](docs/language-spec.md) | 语言规范：词法、类型、表达式、语句、对象模型 |
 | [`docs/grammar.ebnf`](docs/grammar.ebnf) | 形式化 EBNF 语法 |

@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"github.com/issueye/goscript/internal/ast"
+	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/object"
+	"github.com/issueye/goscript/internal/parser"
 )
 
 const (
@@ -742,23 +744,94 @@ func evalTemplate(n *ast.TemplateLit, env *object.Environment) object.Object {
 	if len(lit) < 2 || lit[0] != '`' {
 		return &object.String{Value: lit}
 	}
-	inner := lit[1 : len(lit)-1]
+	inner := lit[1:]
+	if strings.HasSuffix(inner, "`") {
+		inner = inner[:len(inner)-1]
+	}
 	var result strings.Builder
 	i := 0
 	for i < len(inner) {
 		if i+1 < len(inner) && inner[i] == '$' && inner[i+1] == '{' {
-			end := strings.IndexByte(inner[i+2:], '}')
-			if end >= 0 {
-				exprStr := inner[i+2 : i+2+end]
-				_ = exprStr // Template expression evaluation skipped for v0.1
-				i += 2 + end + 1
-				continue
+			end := findTemplateExprEnd(inner, i+2)
+			if end < 0 {
+				return object.NewError(n.Pos(), "SyntaxError: unterminated template expression")
 			}
+			exprStr := strings.TrimSpace(inner[i+2 : end])
+			if exprStr != "" {
+				val := evalTemplateExpression(exprStr, env, n.Pos())
+				if object.IsRuntimeError(val) {
+					return val
+				}
+				result.WriteString(val.Inspect())
+			}
+			i = end + 1
+			continue
 		}
 		result.WriteByte(inner[i])
 		i++
 	}
 	return &object.String{Value: result.String()}
+}
+
+func findTemplateExprEnd(input string, start int) int {
+	depth := 0
+	quote := byte(0)
+	escape := false
+	for i := start; i < len(input); i++ {
+		ch := input[i]
+		if quote != 0 {
+			if escape {
+				escape = false
+				continue
+			}
+			if ch == '\\' {
+				escape = true
+				continue
+			}
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch ch {
+		case '"', '\'':
+			quote = ch
+		case '{':
+			depth++
+		case '}':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		}
+	}
+	return -1
+}
+
+func evalTemplateExpression(expr string, env *object.Environment, pos ast.Position) object.Object {
+	if strings.HasSuffix(expr, "`") {
+		expr = strings.TrimSuffix(expr, "`")
+	}
+	const resultName = "__gts_template_expr"
+	l := lexer.New("let " + resultName + " = " + expr + ";")
+	p := parser.New(l, pos.File)
+	prog := p.ParseProgram()
+	if len(l.Errors()) > 0 {
+		return object.NewError(pos, "SyntaxError: %s", strings.Join(l.Errors(), "\n"))
+	}
+	if len(prog.Errors) > 0 {
+		return object.NewError(pos, "SyntaxError: %s", strings.Join(prog.Errors, "\n"))
+	}
+	scope := env.NewScope()
+	result := Eval(prog, scope)
+	if object.IsRuntimeError(result) {
+		return result
+	}
+	value, ok := scope.Get(resultName)
+	if !ok {
+		return object.UNDEFINED
+	}
+	return value
 }
 
 func evalArray(n *ast.ArrayLit, env *object.Environment) object.Object {

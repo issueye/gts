@@ -33,6 +33,41 @@ func TestResolverRelativeDefaultExtension(t *testing.T) {
 	}
 }
 
+func TestResolverCachesSuccessfulResolution(t *testing.T) {
+	dir := t.TempDir()
+	lib := filepath.Join(dir, "lib.gs")
+	writeFile(t, lib, "")
+
+	resolver := NewResolver("")
+	first, err := resolver.Resolve("./lib", ResolveOptions{BaseDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(lib); err != nil {
+		t.Fatal(err)
+	}
+	second, err := resolver.Resolve("./lib", ResolveOptions{BaseDir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Path != second.Path || first.ID != second.ID {
+		t.Fatalf("cached resolution changed: first=%#v second=%#v", first, second)
+	}
+}
+
+func TestResolverCachesFailedResolution(t *testing.T) {
+	dir := t.TempDir()
+	resolver := NewResolver("")
+
+	if _, err := resolver.Resolve("./missing", ResolveOptions{BaseDir: dir}); err == nil {
+		t.Fatal("expected initial missing module error")
+	}
+	writeFile(t, filepath.Join(dir, "missing.gs"), "")
+	if _, err := resolver.Resolve("./missing", ResolveOptions{BaseDir: dir}); err == nil {
+		t.Fatal("expected cached missing module error")
+	}
+}
+
 func TestResolverAgentAlias(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "examples", "nested")

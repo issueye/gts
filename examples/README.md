@@ -22,6 +22,7 @@
 | 14 | `14-nested-gspkg/` | 单文件包 `.gspkg` 与多层级包依赖 |
 | 15 | `15-gs-agent/` | AI Agent：provider、工具注册表、session 与 Anthropic 接入 |
 | 16 | `16-native-stdlib.gs` | 原生标准库：文件、路径、系统信息与加密 |
+| 17 | `17-native-stdlib-cookbook.gs` | 原生标准库 Cookbook：编码、配置、事件、流、URL 与校验 |
 
 ## 运行方式
 
@@ -38,6 +39,9 @@ go run ./cmd/gs examples/01-basics.gs
 # 运行原生标准库示例
 go run ./cmd/gs examples/16-native-stdlib.gs
 
+# 运行原生标准库 Cookbook
+go run ./cmd/gs examples/17-native-stdlib-cookbook.gs
+
 # 运行带 project.toml 的包模块示例
 cd examples/13-package-modules
 go run ../../cmd/gs run
@@ -51,7 +55,7 @@ cd ../15-gs-agent
 go run ../../cmd/gs run
 ```
 
-编号 01-12 和 16 的 `.gs` 文件都是独立可执行的脚本；第 13-15 个示例是小项目，需要在示例目录内运行 `gs run`。
+编号 01-12、16 和 17 的 `.gs` 文件都是独立可执行的脚本；第 13-15 个示例是小项目，需要在示例目录内运行 `gs run`。
 
 ## 当前自动验证状态
 
@@ -66,6 +70,7 @@ go run ../../cmd/gs run
 | 稳定回归 | `docs/examples/modules.gs` |
 | 稳定回归 | `docs/examples/sqlite.gs` |
 | 稳定回归 | `examples/16-native-stdlib.gs` |
+| 稳定回归 | `examples/17-native-stdlib-cookbook.gs` |
 | 稳定回归 | `examples/13-package-modules` |
 | 稳定回归 | `examples/14-nested-gspkg` |
 | 稳定回归 | `examples/15-gs-agent` |

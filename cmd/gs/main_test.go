@@ -1037,6 +1037,220 @@ okKind + ":" + first + ":" + second;
 	}
 }
 
+func TestStdWebFrameworkRoutes(t *testing.T) {
+	dir := t.TempDir()
+	portFile := filepath.Join(dir, "port.txt")
+	script := filepath.Join(dir, "web_app.gs")
+	source := strings.ReplaceAll(`
+let web = require("@std/web");
+let fs = require("@std/fs");
+
+let app = web.createApp();
+
+app.use(function(req, res, next) {
+  res.setHeader("X-Web-Test", "yes");
+  next();
+});
+
+app.get("/users/:id", function(req, res) {
+  res.status(201).json({
+    id: req.params.id,
+    q: req.query.q,
+    method: req.method,
+  });
+});
+
+app.post("/echo", function(req, res) {
+  res.send("echo:" + req.body);
+});
+
+let server = app.listen(0);
+fs.writeTextSync("__PORT_FILE__", server.port.toString());
+"ready";
+`, "__PORT_FILE__", strings.ReplaceAll(portFile, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ready" {
+		t.Fatalf("want ready, got %T %v", result, result)
+	}
+
+	portBytes, err := os.ReadFile(portFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := "http://127.0.0.1:" + strings.TrimSpace(string(portBytes))
+	var getResp *http.Response
+	for i := 0; i < 20; i++ {
+		getResp, err = http.Get(baseURL + "/users/42?q=ok")
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusCreated {
+		t.Fatalf("want 201, got %d", getResp.StatusCode)
+	}
+	if getResp.Header.Get("X-Web-Test") != "yes" {
+		t.Fatalf("middleware header missing")
+	}
+	body, err := io.ReadAll(getResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"id":"42"`) || !strings.Contains(string(body), `"q":"ok"`) || !strings.Contains(string(body), `"method":"GET"`) {
+		t.Fatalf("unexpected json body: %s", body)
+	}
+
+	postResp, err := http.Post(baseURL+"/echo", "text/plain", strings.NewReader("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postResp.Body.Close()
+	postBody, err := io.ReadAll(postResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(postBody) != "echo:hello" {
+		t.Fatalf("want echo:hello, got %q", postBody)
+	}
+}
+
+func TestStdWebFrameworkMiddlewareHelpers(t *testing.T) {
+	dir := t.TempDir()
+	portFile := filepath.Join(dir, "port.txt")
+	publicDir := filepath.Join(dir, "public")
+	if err := os.MkdirAll(publicDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(publicDir, "hello.txt"), []byte("static hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "web_helpers.gs")
+	source := strings.NewReplacer(
+		"__PORT_FILE__", strings.ReplaceAll(portFile, `\`, `\\`),
+		"__PUBLIC_DIR__", strings.ReplaceAll(publicDir, `\`, `\\`),
+	).Replace(`
+let web = require("@std/web");
+let fs = require("@std/fs");
+
+let app = web.createApp();
+
+app.use("/assets", web.static("__PUBLIC_DIR__"));
+app.use(web.json());
+
+app.post("/json",
+  function(req, res, next) {
+    req.seen = "first";
+    next();
+  },
+  function(req, res) {
+    res.json({
+      seen: req.seen,
+      name: req.body.name,
+      count: req.body.count,
+      raw: req.rawBody.includes("ada"),
+    });
+  }
+);
+
+app.get("/chain",
+  function(req, res, next) {
+    req.mark = "one";
+    next();
+  },
+  function(req, res) {
+    res.send(req.mark + ":two");
+  }
+);
+
+let server = app.listen(0);
+fs.writeTextSync("__PORT_FILE__", server.port.toString());
+"ready";
+`)
+	if err := os.WriteFile(script, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ready" {
+		t.Fatalf("want ready, got %T %v", result, result)
+	}
+
+	portBytes, err := os.ReadFile(portFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := "http://127.0.0.1:" + strings.TrimSpace(string(portBytes))
+	client := &http.Client{}
+	var jsonResp *http.Response
+	for i := 0; i < 20; i++ {
+		req, reqErr := http.NewRequest("POST", baseURL+"/json", strings.NewReader(`{"name":"ada","count":2}`))
+		if reqErr != nil {
+			t.Fatal(reqErr)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		jsonResp, err = client.Do(req)
+		if err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer jsonResp.Body.Close()
+	jsonBody, err := io.ReadAll(jsonResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(jsonBody), `"seen":"first"`) || !strings.Contains(string(jsonBody), `"name":"ada"`) || !strings.Contains(string(jsonBody), `"count":2`) || !strings.Contains(string(jsonBody), `"raw":true`) {
+		t.Fatalf("unexpected json middleware body: %s", jsonBody)
+	}
+
+	chainResp, err := http.Get(baseURL + "/chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer chainResp.Body.Close()
+	chainBody, err := io.ReadAll(chainResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(chainBody) != "one:two" {
+		t.Fatalf("want one:two, got %q", chainBody)
+	}
+
+	staticResp, err := http.Get(baseURL + "/assets/hello.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer staticResp.Body.Close()
+	staticBody, err := io.ReadAll(staticResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(staticBody) != "static hello" {
+		t.Fatalf("want static hello, got %q", staticBody)
+	}
+}
+
 func TestAgentAnthropicProviderWithMockServer(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1956,6 +2170,7 @@ func TestStableExamples(t *testing.T) {
 		filepath.Join(root, "docs", "examples", "modules.gs"),
 		filepath.Join(root, "docs", "examples", "sqlite.gs"),
 		filepath.Join(root, "examples", "16-native-stdlib.gs"),
+		filepath.Join(root, "examples", "17-native-stdlib-cookbook.gs"),
 	}
 
 	for _, example := range examples {

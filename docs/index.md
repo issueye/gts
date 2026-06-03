@@ -1,13 +1,14 @@
 # 文档索引
 
-> 本目录包含 GoScript v0.1 的设计与规范文档。  
-> 阅读顺序建议：**`design.md` → `language-spec.md` → `async-model.md` → `builtins.md` → `grammar.ebnf`**。
+> 本目录包含 GoScript v0.1 的设计、规范、实现状态和开发计划文档。  
+> 新接手建议先读：**`project-analysis.md` → `development-plan.md` → `design.md` → `language-spec.md` → `builtins.md`**。
 
 ## 文档清单
 
 | 文档 | 内容 | 适用读者 |
 |------|------|---------|
 | [`README.md`](../README.md) | 项目总览、快速开始 | 所有人 |
+| [`project-analysis.md`](project-analysis.md) | 当前项目状态、运行链路、模块职责、风险与接手建议 | 新接手维护者、贡献者 |
 | [`design.md`](design.md) | 架构总览、模块划分、关键算法、权衡 | 贡献者、架构师 |
 | [`language-spec.md`](language-spec.md) | 语言规范：词法、类型、表达式、语句、对象 | 脚本作者 |
 | [`grammar.ebnf`](grammar.ebnf) | 形式化 EBNF 语法 | 工具链作者、Parser 维护者 |
@@ -20,9 +21,9 @@
 
 ## 文档状态
 
-- ✅ 设计与规范：**已完成**
-- ⏳ 实施：尚未开始，按 [`roadmap.md`](roadmap.md) 推进
-- ⏳ 用户教程：实施时同步撰写
+- ✅ 基础解释器、CLI、模块加载、部分标准库和示例回归：**已实现**
+- ⏳ 类型检查、REPL、公开嵌入 API 和完整模块语义：**仍待补齐**
+- ⏳ 深层规范文档：部分仍描述目标形态，当前状态以 [`project-analysis.md`](project-analysis.md) 和 [`development-plan.md`](development-plan.md) 为准
 
 ## 反馈与贡献
 

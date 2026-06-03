@@ -42,10 +42,24 @@ func TestEval_String(t *testing.T) {
 	tests := []struct{ input, expected string }{
 		{`"hello";`, "hello"},
 		{`"hello" + " world";`, "hello world"},
+		{"let name = \"Ada\"; `hello ${name}`;", "hello Ada"},
+		{"let value = 2; `sum ${value + 3}`;", "sum 5"},
+		{"`object ${{ value: 7 }.value}`;", "object 7"},
 	}
 	for _, tt := range tests {
 		evaluated := testEval(tt.input)
 		testString(t, evaluated, tt.expected)
+	}
+}
+
+func TestEval_TemplateExpressionSyntaxError(t *testing.T) {
+	evaluated := testEval("`hello ${name`;")
+	err, ok := evaluated.(*object.Error)
+	if !ok {
+		t.Fatalf("want error, got %T", evaluated)
+	}
+	if err.Name != "SyntaxError" {
+		t.Fatalf("want SyntaxError, got %s", err.Name)
 	}
 }
 
