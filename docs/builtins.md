@@ -384,6 +384,7 @@ err.stack;
 | `@std/web` | `createApp`, `json`, `text`, `static`；Express 风格轻量 Web 框架，支持 `use/get/post/put/patch/delete/all/listen`、多 handler 串联、`:param` 路由参数、`req.params/query/body/rawBody/headers`、`res.status/setHeader/send/json/end/redirect` |
 | `@std/net/socket/client`、`@std/net/socket/server` | TCP socket client/server |
 | `@std/net/ws/client`、`@std/net/ws/server` | WebSocket client/server |
+| `@std/net/ip` | `parseIP`, `parseCIDR`, `contains`, `splitHostPort`, `joinHostPort`, `lookupHost` |
 | `@std/url` | `parse`, `format`, `resolve`, `pathToFileURL`, `fileURLToPath`, `URL`, `URLSearchParams` |
 | `@std/crypto` | `randomUUID`, `randomBytes`, `sha1`, `sha256`, `sha512`, `hmac`, `pbkdf2`, `timingSafeEqual` |
 | `@std/events` | `EventEmitter` 基础版：`on`, `once`, `off`, `emit`, `listeners`, `listenerCount`, `removeAllListeners` |

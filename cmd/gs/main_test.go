@@ -1009,6 +1009,51 @@ zipKind;
 	}
 }
 
+func TestStdNetIPModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "net_ip.gs")
+	if err := os.WriteFile(script, []byte(`
+let ip = require("@std/net/ip");
+
+let parsed = ip.parseIP("127.0.0.1");
+let cidr = ip.parseCIDR("127.0.0.0/8");
+let split = ip.splitHostPort("127.0.0.1:8080");
+let joined = ip.joinHostPort("::1", "443");
+let hosts = ip.lookupHost("localhost");
+
+let kind = "netip-bad";
+if (
+  parsed.value === "127.0.0.1" &&
+  parsed.is4 &&
+  parsed.isLoopback &&
+  cidr.addr === "127.0.0.0" &&
+  cidr.bits === 8 &&
+  ip.contains("127.0.0.0/8", "127.0.0.1") &&
+  !ip.contains("127.0.0.0/8", "192.168.0.1") &&
+  split.host === "127.0.0.1" &&
+  split.port === "8080" &&
+  joined === "[::1]:443" &&
+  hosts.length > 0 &&
+  ip.parseIP("not-ip") === undefined
+) {
+  kind = "netip";
+}
+kind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "netip" {
+		t.Fatalf("want netip, got %T %v", result, result)
+	}
+}
+
 func TestStdConfigCodecModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "config_codecs.gs")
