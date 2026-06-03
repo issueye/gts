@@ -54,6 +54,17 @@ func goValueToObject(value interface{}) object.Object {
 			setHashMember(out, key, goValueToObject(v[key]))
 		}
 		return out
+	case map[string]string:
+		out := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			setHashMember(out, key, &object.String{Value: v[key]})
+		}
+		return out
 	case map[interface{}]interface{}:
 		out := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		for key, item := range v {

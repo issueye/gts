@@ -386,6 +386,8 @@ err.stack;
 | `@std/net/ws/client`、`@std/net/ws/server` | WebSocket client/server |
 | `@std/net/ip` | `parseIP`, `parseCIDR`, `contains`, `splitHostPort`, `joinHostPort`, `lookupHost` |
 | `@std/url` | `parse`, `format`, `resolve`, `pathToFileURL`, `fileURLToPath`, `URL`, `URLSearchParams` |
+| `@std/mime` | `typeByExtension`, `extensionByType`, `parseMediaType`, `formatMediaType` |
+| `@std/mail` | `parseAddress`, `parseAddressList`, `parseMessage` |
 | `@std/crypto` | `randomUUID`, `randomBytes`, `sha1`, `sha256`, `sha512`, `hmac`, `pbkdf2`, `timingSafeEqual` |
 | `@std/events` | `EventEmitter` 基础版：`on`, `once`, `off`, `emit`, `listeners`, `listenerCount`, `removeAllListeners` |
 | `@std/timers` | `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `queueMicrotask`, `sleep` 的模块化别名 |

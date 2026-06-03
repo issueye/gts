@@ -1054,6 +1054,47 @@ kind;
 	}
 }
 
+func TestStdMimeAndMailModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "mime_mail.gs")
+	if err := os.WriteFile(script, []byte(`
+let mime = require("@std/mime");
+let mail = require("@std/mail");
+
+let media = mime.parseMediaType("Text/HTML; Charset=UTF-8");
+let formatted = mime.formatMediaType("text/plain", { charset: "utf-8" });
+let ext = mime.extensionByType("text/html; charset=utf-8");
+
+let mimeKind = "mime-bad";
+if (mime.typeByExtension(".html").includes("text/html") && media.type === "text/html" && media.params.charset === "UTF-8" && formatted === "text/plain; charset=utf-8" && (ext === ".html" || ext === ".htm")) {
+  mimeKind = "mime";
+}
+
+let addr = mail.parseAddress("Ada Lovelace <ada@example.com>");
+let list = mail.parseAddressList("Ada <ada@example.com>, linus@example.com");
+let msg = mail.parseMessage("From: Ada <ada@example.com>\r\nTo: Linus <linus@example.com>\r\nSubject: Hello\r\n\r\nBody text");
+
+let mailKind = "mail-bad";
+if (addr.name === "Ada Lovelace" && addr.address === "ada@example.com" && list.length === 2 && list[1].address === "linus@example.com" && msg.headers.Subject[0] === "Hello" && msg.body === "Body text") {
+  mailKind = "mail";
+}
+
+mimeKind + ":" + mailKind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "mime:mail" {
+		t.Fatalf("want mime:mail, got %T %v", result, result)
+	}
+}
+
 func TestStdConfigCodecModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "config_codecs.gs")
