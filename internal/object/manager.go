@@ -2,6 +2,7 @@ package object
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/issueye/goscript/internal/ast"
@@ -33,6 +34,7 @@ type ObjectStats struct {
 // concerns such as handles, roots, tracing, or custom memory policies.
 type ObjectManager struct {
 	mu             sync.RWMutex
+	tracking       atomic.Bool
 	nextID         ObjectID
 	totalAllocated uint64
 	records        map[ObjectID]ObjectRecord
@@ -41,16 +43,33 @@ type ObjectManager struct {
 
 // NewObjectManager creates an empty runtime object manager.
 func NewObjectManager() *ObjectManager {
-	return &ObjectManager{
+	return newObjectManager(true)
+}
+
+func newObjectManager(track bool) *ObjectManager {
+	manager := &ObjectManager{
 		records: make(map[ObjectID]ObjectRecord),
 		ids:     make(map[Object]ObjectID),
 	}
+	manager.tracking.Store(track)
+	return manager
+}
+
+func (m *ObjectManager) SetTracking(enabled bool) {
+	if m == nil {
+		return
+	}
+	m.tracking.Store(enabled)
+}
+
+func (m *ObjectManager) Tracking() bool {
+	return m != nil && m.tracking.Load()
 }
 
 // Register records an object that was created outside the manager factory
 // helpers. Registering the same object twice returns the original id.
 func (m *ObjectManager) Register(obj Object) ObjectID {
-	if obj == nil {
+	if obj == nil || !m.Tracking() {
 		return 0
 	}
 	m.mu.Lock()

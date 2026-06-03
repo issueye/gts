@@ -22,7 +22,7 @@ type VirtualMachine struct {
 }
 
 func NewVirtualMachine() *VirtualMachine {
-	vm := &VirtualMachine{manager: NewObjectManager()}
+	vm := &VirtualMachine{manager: newObjectManager(false)}
 	vm.globalConstants.Store(map[string]Object{})
 	return vm
 }
@@ -32,6 +32,17 @@ func (vm *VirtualMachine) ObjectManager() *ObjectManager {
 		vm.manager = NewObjectManager()
 	}
 	return vm.manager
+}
+
+func (vm *VirtualMachine) SetObjectTracking(enabled bool) {
+	if vm == nil {
+		return
+	}
+	vm.ObjectManager().SetTracking(enabled)
+}
+
+func (vm *VirtualMachine) ObjectTracking() bool {
+	return vm != nil && vm.ObjectManager().Tracking()
 }
 
 func (vm *VirtualMachine) SetTypeCheck(enabled bool) {

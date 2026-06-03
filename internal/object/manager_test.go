@@ -58,6 +58,7 @@ func TestObjectManagerUnregister(t *testing.T) {
 
 func TestEnvironmentScopesShareObjectManager(t *testing.T) {
 	env := NewEnvironment()
+	env.VM().SetObjectTracking(true)
 	child := env.NewScope()
 
 	if env.ObjectManager() != child.ObjectManager() {
@@ -73,6 +74,8 @@ func TestEnvironmentScopesShareObjectManager(t *testing.T) {
 func TestNewEnvironmentsCreateIndependentVirtualMachines(t *testing.T) {
 	envA := NewEnvironment()
 	envB := NewEnvironment()
+	envA.VM().SetObjectTracking(true)
+	envB.VM().SetObjectTracking(true)
 
 	if envA.VM() == envB.VM() {
 		t.Fatal("separate root environments should not share a vm")
@@ -90,6 +93,8 @@ func TestNewEnvironmentsCreateIndependentVirtualMachines(t *testing.T) {
 func TestVirtualMachinesHaveIndependentObjectManagers(t *testing.T) {
 	vmA := NewVirtualMachine()
 	vmB := NewVirtualMachine()
+	vmA.SetObjectTracking(true)
+	vmB.SetObjectTracking(true)
 
 	if vmA.ObjectManager() == vmB.ObjectManager() {
 		t.Fatal("different virtual machines should not share object managers")
@@ -108,6 +113,23 @@ func TestVirtualMachinesHaveIndependentObjectManagers(t *testing.T) {
 	}
 	if idA != 1 || idB != 1 {
 		t.Fatalf("each vm should start object ids independently, got %d and %d", idA, idB)
+	}
+}
+
+func TestVirtualMachineObjectTrackingDefaultsToDisabled(t *testing.T) {
+	vm := NewVirtualMachine()
+	arr := vm.ObjectManager().NewArray(nil)
+	if _, ok := vm.ObjectManager().IDOf(arr); ok {
+		t.Fatal("vm object tracking should default to disabled")
+	}
+	if stats := vm.ObjectManager().Stats(); stats.TotalAllocated != 0 || stats.Active != 0 {
+		t.Fatalf("disabled tracking should not record stats, got %+v", stats)
+	}
+
+	vm.SetObjectTracking(true)
+	hash := vm.ObjectManager().NewHash()
+	if _, ok := vm.ObjectManager().IDOf(hash); !ok {
+		t.Fatal("enabled vm object tracking should assign ids")
 	}
 }
 
