@@ -19,9 +19,6 @@ try {
 
     Write-Host "Packaging GoScript VSCode extension..."
     $args = @("package", "--allow-missing-repository")
-    if ($Clean) {
-        $args += "--skip-version-check"
-    }
 
     npx --yes @vscode/vsce @args
     if ($LASTEXITCODE -ne 0) {

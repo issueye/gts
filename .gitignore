@@ -6,6 +6,7 @@
 # build output
 /gts
 /bin/
+/dist/
 
 # IDE
 .idea/
