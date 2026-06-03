@@ -22,16 +22,33 @@ type VirtualMachine struct {
 }
 
 func NewVirtualMachine() *VirtualMachine {
-	vm := &VirtualMachine{manager: newObjectManager(false)}
-	vm.globalConstants.Store(map[string]Object{})
+	vm := &VirtualMachine{}
+	vm.Reset()
 	return vm
 }
 
 func (vm *VirtualMachine) ObjectManager() *ObjectManager {
 	if vm.manager == nil {
-		vm.manager = NewObjectManager()
+		vm.manager = newObjectManager(false)
 	}
 	return vm.manager
+}
+
+func (vm *VirtualMachine) Reset() {
+	if vm == nil {
+		return
+	}
+	vm.WaitAsync()
+	tracking := vm.ObjectTracking()
+	vm.manager = newObjectManager(tracking)
+	atomic.StoreInt64(&vm.nextTimer, 0)
+	vm.globalMu.Lock()
+	vm.globalConstants.Store(map[string]Object{})
+	vm.globalMu.Unlock()
+	vm.spawn = nil
+	vm.importer = nil
+	vm.evaluator = nil
+	vm.typeCheck.Store(false)
 }
 
 func (vm *VirtualMachine) SetObjectTracking(enabled bool) {
@@ -176,6 +193,10 @@ func (vm *VirtualMachine) Import(env *Environment, path string) (Object, error) 
 
 func (vm *VirtualMachine) SetEvaluator(fn func(node interface{}, env *Environment) Object) {
 	vm.evaluator = fn
+}
+
+func (vm *VirtualMachine) HasEvaluator() bool {
+	return vm != nil && vm.evaluator != nil
 }
 
 func (vm *VirtualMachine) EvalNode(node interface{}, env *Environment) Object {

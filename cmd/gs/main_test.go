@@ -54,6 +54,23 @@ func TestRunScript(t *testing.T) {
 	}
 }
 
+func TestRunScriptReusesResetVirtualMachine(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.gs")
+	second := filepath.Join(dir, "second.gs")
+	writeTestFile(t, first, `let leaked = 1;`)
+	writeTestFile(t, second, `leaked;`)
+
+	if code := run([]string{first}); code != 0 {
+		t.Fatalf("first run want exit code 0, got %d", code)
+	}
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	err := r.runFileWithOptions(second, runOptions{})
+	if err == nil || !strings.Contains(err.Error(), "ReferenceError") {
+		t.Fatalf("second run should not see prior VM bindings, got %v", err)
+	}
+}
+
 func TestRunMissingScript(t *testing.T) {
 	r := newRunner(options{workers: 1, timeout: time.Second})
 	err := r.runFileWithOptions(filepath.Join(t.TempDir(), "missing.gs"), runOptions{})

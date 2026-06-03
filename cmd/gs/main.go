@@ -26,6 +26,8 @@ import (
 const version = "0.1.0-dev"
 const defaultTimeout = 10 * time.Second
 
+var sharedVMPool = object.NewVirtualMachinePool(runtime.NumCPU())
+
 type options struct {
 	checkTypes bool
 	workers    int
@@ -327,13 +329,22 @@ func (r *runner) runFileWithOptions(path string, opts runOptions) error {
 		}
 		defer restore()
 
+		reuseVM := false
+		defer func() {
+			if reuseVM {
+				r.releaseVM()
+			} else {
+				r.discardVM()
+			}
+		}()
 		if _, err := r.evalFile(absPath, opts); err != nil {
 			return err
 		}
-		if err := r.waitGroup("async tasks", r.vm.WaitAsync); err != nil {
+		if err := r.drainRuntime(); err != nil {
 			return err
 		}
-		return r.waitGroup("worker pool", r.pool.Wait)
+		reuseVM = true
+		return nil
 	})
 }
 
@@ -358,8 +369,7 @@ func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error
 	if err != nil {
 		return nil, err
 	}
-	r.vm = object.NewVirtualMachine()
-	r.vm.SetTypeCheck(r.opts.checkTypes)
+	r.checkoutVM()
 	r.pool = async.NewPool(r.opts.workers)
 	r.vm.SetSpawner(r.pool.Go)
 	r.cache = module.NewCacheWithVM(r.vm)
@@ -390,8 +400,7 @@ func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executa
 			return err
 		}
 		archivePath := filepath.ToSlash(absExe) + "!" + entry
-		r.vm = object.NewVirtualMachine()
-		r.vm.SetTypeCheck(r.opts.checkTypes)
+		r.checkoutVM()
 		r.pool = async.NewPool(r.opts.workers)
 		r.vm.SetSpawner(r.pool.Go)
 		r.cache = module.NewCacheWithVM(r.vm)
@@ -400,16 +409,25 @@ func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executa
 		env := r.vm.NewEnvironment()
 		module.SetupExports(env)
 		r.configureModuleLoaders(env, filepath.ToSlash(absExe)+"!"+filepath.ToSlash(filepath.Dir(entry)))
+		reuseVM := false
+		defer func() {
+			if reuseVM {
+				r.releaseVM()
+			} else {
+				r.discardVM()
+			}
+		}()
 		if _, err := r.evalSource(src, archivePath, env); err != nil {
 			return err
 		}
 		if _, err := r.callMain(env, archivePath); err != nil {
 			return err
 		}
-		if err := r.waitGroup("async tasks", r.vm.WaitAsync); err != nil {
+		if err := r.drainRuntime(); err != nil {
 			return err
 		}
-		return r.waitGroup("worker pool", r.pool.Wait)
+		reuseVM = true
+		return nil
 	})
 }
 
@@ -510,7 +528,7 @@ func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 
 func (r *runner) ensureRuntime() {
 	if r.vm == nil {
-		r.vm = object.NewVirtualMachine()
+		r.checkoutVM()
 	}
 	r.vm.SetTypeCheck(r.opts.checkTypes)
 	if r.pool == nil {
@@ -526,6 +544,44 @@ func (r *runner) ensureRuntime() {
 	if r.rootDir == "" {
 		r.rootDir = module.FindProjectRoot("")
 	}
+}
+
+func (r *runner) checkoutVM() {
+	r.vm = sharedVMPool.Get()
+	r.vm.SetTypeCheck(r.opts.checkTypes)
+}
+
+func (r *runner) releaseVM() {
+	if r.vm == nil {
+		return
+	}
+	sharedVMPool.Put(r.vm)
+	r.discardVM()
+}
+
+func (r *runner) discardVM() {
+	r.vm = nil
+	r.cache = nil
+	r.resolver = nil
+	r.rootDir = ""
+	r.pool = nil
+}
+
+func (r *runner) drainRuntime() error {
+	if r.vm != nil {
+		if err := r.waitGroup("async tasks", r.vm.WaitAsync); err != nil {
+			r.vm = nil
+			return err
+		}
+	}
+	if r.pool != nil {
+		if err := r.waitGroup("worker pool", r.pool.Wait); err != nil {
+			r.vm = nil
+			r.pool = nil
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *runner) configureModuleLoaders(env *object.Environment, baseDir string) {

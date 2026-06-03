@@ -21,9 +21,11 @@ type RequireFn func(path string) (object.Object, error)
 func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 	registerStandardGlobalConstants(env)
 
-	env.VM().SetEvaluator(func(node interface{}, env *object.Environment) object.Object {
-		return Eval(node.(ast.Node), env)
-	})
+	if !env.VM().HasEvaluator() {
+		env.VM().SetEvaluator(func(node interface{}, env *object.Environment) object.Object {
+			return Eval(node.(ast.Node), env)
+		})
+	}
 
 	if require != nil {
 		env.Set("require", &object.Builtin{Name: "require", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
