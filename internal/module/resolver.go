@@ -7,7 +7,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/pelletier/go-toml/v2"
+	"github.com/issueye/goscript/internal/packagefile"
+	"github.com/issueye/goscript/internal/proj"
 )
 
 // ModuleKind classifies how a module specifier was resolved.
@@ -28,6 +29,8 @@ type ResolvedModule struct {
 	Specifier   string
 	Path        string
 	PackageRoot string
+	PackageFile string
+	ArchivePath string
 	PackageName string
 	External    bool
 }
@@ -71,6 +74,18 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 		projectRoot = FindProjectRoot(baseDir)
 	}
 
+	if pkgPath, archiveBase, ok := splitArchiveBaseDir(baseDir); ok {
+		if isPathSpecifier(specifier) {
+			return resolvePackageFileRelative(specifier, pkgPath, archiveBase)
+		}
+		if strings.HasPrefix(specifier, "#") {
+			return resolvePackageFileImportAlias(specifier, pkgPath)
+		}
+		if !strings.HasPrefix(specifier, "@std/") && !strings.HasPrefix(specifier, "@agent/") {
+			return resolvePackageFromPackageFile(specifier, pkgPath, projectRoot)
+		}
+	}
+
 	if strings.HasPrefix(specifier, "@std/") {
 		return ResolvedModule{
 			ID:        "native:" + specifier,
@@ -100,7 +115,124 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 		return sourceModule(specifier, path, ModuleKindSource, "", ""), nil
 	}
 
+	if strings.HasPrefix(specifier, "#") {
+		return r.resolveImportAlias(specifier, baseDir, projectRoot)
+	}
+
 	return r.resolvePackage(specifier, baseDir, projectRoot)
+}
+
+func resolvePackageFileRelative(specifier, pkgPath, archiveBase string) (ResolvedModule, error) {
+	pkg, err := packagefile.Open(pkgPath)
+	if err != nil {
+		return ResolvedModule{}, err
+	}
+	defer pkg.Close()
+	base := specifier
+	if !strings.HasPrefix(base, "/") {
+		base = filepath.ToSlash(filepath.Join(archiveBase, base))
+	}
+	path, err := resolveArchiveSourcePath(pkg, base)
+	if err != nil {
+		return ResolvedModule{}, fmt.Errorf("module not found %q from %q: %w", specifier, archiveBase, err)
+	}
+	name := packageNameFromManifest(pkg.Manifest, "")
+	version := pkg.Manifest.Package.Version
+	absPkg, _ := filepath.Abs(pkgPath)
+	return ResolvedModule{
+		ID:          packageFileID(name, version, "./"+path, absPkg, path),
+		Kind:        ModuleKindPackage,
+		Specifier:   specifier,
+		Path:        archiveModulePath(absPkg, path),
+		PackageRoot: absPkg,
+		PackageFile: absPkg,
+		ArchivePath: path,
+		PackageName: name,
+	}, nil
+}
+
+func resolvePackageFileImportAlias(specifier, pkgPath string) (ResolvedModule, error) {
+	pkg, err := packagefile.Open(pkgPath)
+	if err != nil {
+		return ResolvedModule{}, err
+	}
+	defer pkg.Close()
+	target, ok := matchPatternMap(pkg.Manifest.Imports, specifier)
+	if !ok {
+		return ResolvedModule{}, fmt.Errorf("package import %q is not defined", specifier)
+	}
+	path, err := resolveArchiveSourcePath(pkg, target)
+	if err != nil {
+		return ResolvedModule{}, fmt.Errorf("package import %q not found: %w", specifier, err)
+	}
+	name := packageNameFromManifest(pkg.Manifest, "")
+	version := pkg.Manifest.Package.Version
+	absPkg, _ := filepath.Abs(pkgPath)
+	return ResolvedModule{
+		ID:          packageFileID(name, version, specifier, absPkg, path),
+		Kind:        ModuleKindPackage,
+		Specifier:   specifier,
+		Path:        archiveModulePath(absPkg, path),
+		PackageRoot: absPkg,
+		PackageFile: absPkg,
+		ArchivePath: path,
+		PackageName: name,
+	}, nil
+}
+
+func resolvePackageFromPackageFile(specifier, pkgPath, projectRoot string) (ResolvedModule, error) {
+	pkg, err := packagefile.Open(pkgPath)
+	if err != nil {
+		return ResolvedModule{}, err
+	}
+	defer pkg.Close()
+
+	packageName, exportName := splitPackageSpecifier(specifier)
+	source, ok := pkg.Manifest.Dependencies[packageName]
+	if !ok {
+		return ResolvedModule{}, fmt.Errorf("package %q is not listed in dependencies", packageName)
+	}
+	depPath, depArchivePath, depInArchive, err := packageFileDependencyPath(pkgPath, source)
+	if err != nil {
+		return ResolvedModule{}, err
+	}
+	if depInArchive {
+		if isPackageFile(depArchivePath) {
+			nested, err := pkg.OpenNested(depArchivePath)
+			if err != nil {
+				return ResolvedModule{}, err
+			}
+			defer nested.Close()
+			return resolveOpenedPackageFile(specifier, nested, packageName, exportName)
+		}
+		subpkg, err := pkg.Subpackage(depArchivePath)
+		if err != nil {
+			return ResolvedModule{}, err
+		}
+		return resolveOpenedPackageFile(specifier, subpkg, packageName, exportName)
+	}
+	if isPackageFile(depPath) {
+		return resolvePackageFile(specifier, depPath, packageName, exportName)
+	}
+	depManifest, err := loadManifest(depPath)
+	if err != nil && projectRoot != "" {
+		depPath = filepath.Clean(filepath.Join(projectRoot, filepath.FromSlash(strings.TrimPrefix(strings.TrimPrefix(source, "file:"), "workspace:"))))
+		depManifest, err = loadManifest(depPath)
+	}
+	if err != nil {
+		return ResolvedModule{}, err
+	}
+	target, ok := exportTarget(depManifest, exportName)
+	if !ok {
+		return ResolvedModule{}, fmt.Errorf("package %q has no export %q", packageName, exportName)
+	}
+	path, err := resolveSourcePath(filepath.Join(depPath, target))
+	if err != nil {
+		return ResolvedModule{}, fmt.Errorf("package %q export %q not found: %w", packageName, exportName, err)
+	}
+	resolved := sourceModule(specifier, path, ModuleKindPackage, depPath, packageNameFromManifest(depManifest, packageName))
+	resolved.ID = packageID(resolved.PackageName, depManifest.Package.Version, exportName, path)
+	return resolved, nil
 }
 
 func (r *Resolver) baseDirFromReferrer(referrer string) string {
@@ -114,11 +246,14 @@ func (r *Resolver) baseDirFromReferrer(referrer string) string {
 }
 
 func (r *Resolver) resolvePackage(specifier, baseDir, projectRoot string) (ResolvedModule, error) {
-	currentRoot := projectRoot
+	currentRoot := FindPackageRoot(baseDir)
+	if currentRoot == "" {
+		currentRoot = projectRoot
+	}
 	if currentRoot == "" {
 		currentRoot = FindProjectRoot(baseDir)
 	}
-	manifest, err := loadManifest(filepath.Join(currentRoot, "project.toml"))
+	manifest, err := loadManifest(currentRoot)
 	if err != nil {
 		return ResolvedModule{}, err
 	}
@@ -132,12 +267,15 @@ func (r *Resolver) resolvePackage(specifier, baseDir, projectRoot string) (Resol
 	if err != nil {
 		return ResolvedModule{}, err
 	}
+	if isPackageFile(depRoot) {
+		return resolvePackageFile(specifier, depRoot, packageName, exportName)
+	}
 
-	depManifest, err := loadManifest(filepath.Join(depRoot, "project.toml"))
+	depManifest, err := loadManifest(depRoot)
 	if err != nil {
 		return ResolvedModule{}, err
 	}
-	target, ok := depManifest.exportTarget(exportName)
+	target, ok := exportTarget(depManifest, exportName)
 	if !ok {
 		return ResolvedModule{}, fmt.Errorf("package %q has no export %q", packageName, exportName)
 	}
@@ -146,9 +284,68 @@ func (r *Resolver) resolvePackage(specifier, baseDir, projectRoot string) (Resol
 		return ResolvedModule{}, fmt.Errorf("package %q export %q not found: %w", packageName, exportName, err)
 	}
 
-	resolved := sourceModule(specifier, path, ModuleKindPackage, depRoot, depManifest.packageName(packageName))
+	resolved := sourceModule(specifier, path, ModuleKindPackage, depRoot, packageNameFromManifest(depManifest, packageName))
 	resolved.ID = packageID(resolved.PackageName, depManifest.Package.Version, exportName, path)
 	return resolved, nil
+}
+
+func resolvePackageFile(specifier, pkgPath, packageName, exportName string) (ResolvedModule, error) {
+	pkg, err := packagefile.Open(pkgPath)
+	if err != nil {
+		return ResolvedModule{}, err
+	}
+	defer pkg.Close()
+	return resolveOpenedPackageFile(specifier, pkg, packageName, exportName)
+}
+
+func resolveOpenedPackageFile(specifier string, pkg *packagefile.Package, packageName, exportName string) (ResolvedModule, error) {
+	target, ok := exportTarget(pkg.Manifest, exportName)
+	if !ok {
+		return ResolvedModule{}, fmt.Errorf("package %q has no export %q", packageName, exportName)
+	}
+	path, err := resolveArchiveSourcePath(pkg, filepath.ToSlash(filepath.Join(pkg.Root, target)))
+	if err != nil {
+		return ResolvedModule{}, fmt.Errorf("package %q export %q not found: %w", packageName, exportName, err)
+	}
+	name := packageNameFromManifest(pkg.Manifest, packageName)
+	version := pkg.Manifest.Package.Version
+	pkgPath := pkg.Path
+	if !strings.Contains(pkgPath, "!") {
+		pkgPath, _ = filepath.Abs(pkgPath)
+	}
+	return ResolvedModule{
+		ID:          packageFileID(name, version, exportName, pkgPath, path),
+		Kind:        ModuleKindPackage,
+		Specifier:   specifier,
+		Path:        archiveModulePath(pkgPath, path),
+		PackageRoot: pkgPath,
+		PackageFile: pkgPath,
+		ArchivePath: path,
+		PackageName: name,
+	}, nil
+}
+
+func (r *Resolver) resolveImportAlias(specifier, baseDir, projectRoot string) (ResolvedModule, error) {
+	currentRoot := FindPackageRoot(baseDir)
+	if currentRoot == "" {
+		currentRoot = projectRoot
+	}
+	if currentRoot == "" {
+		currentRoot = FindProjectRoot(baseDir)
+	}
+	manifest, err := loadManifest(currentRoot)
+	if err != nil {
+		return ResolvedModule{}, err
+	}
+	target, ok := matchPatternMap(manifest.Imports, specifier)
+	if !ok {
+		return ResolvedModule{}, fmt.Errorf("package import %q is not defined", specifier)
+	}
+	path, err := resolveSourcePath(filepath.Join(currentRoot, target))
+	if err != nil {
+		return ResolvedModule{}, fmt.Errorf("package import %q not found: %w", specifier, err)
+	}
+	return sourceModule(specifier, path, ModuleKindSource, currentRoot, packageNameFromManifest(manifest, "")), nil
 }
 
 func isPathSpecifier(specifier string) bool {
@@ -174,9 +371,9 @@ func resolveSourcePath(path string) (string, error) {
 		}
 	}
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		manifest, err := loadManifest(filepath.Join(path, "project.toml"))
+		manifest, err := loadManifest(path)
 		if err == nil {
-			if main := manifest.packageMain(); main != "" {
+			if main := packageMainFromManifest(manifest); main != "" {
 				if resolved, err := resolveSourcePath(filepath.Join(path, main)); err == nil {
 					return resolved, nil
 				}
@@ -237,6 +434,61 @@ func dependencyRoot(projectRoot, source string) (string, error) {
 	return filepath.Clean(filepath.Join(projectRoot, filepath.FromSlash(rel))), nil
 }
 
+func packageFileDependencyPath(pkgPath, source string) (path, archivePath string, inArchive bool, err error) {
+	var rel string
+	switch {
+	case strings.HasPrefix(source, "file:"):
+		rel = strings.TrimPrefix(source, "file:")
+	case strings.HasPrefix(source, "workspace:"):
+		rel = strings.TrimPrefix(source, "workspace:")
+	default:
+		return "", "", false, fmt.Errorf("unsupported dependency source %q", source)
+	}
+	if filepath.IsAbs(rel) {
+		return filepath.Clean(rel), "", false, nil
+	}
+	if strings.Contains(pkgPath, "!") {
+		rootPkg, rootArchive, _ := strings.Cut(pkgPath, "!")
+		archiveRel := cleanArchiveSpecifier(filepath.ToSlash(filepath.Join(filepath.Dir(rootArchive), rel)))
+		return filepath.Clean(filepath.FromSlash(rootPkg)), archiveRel, true, nil
+	}
+	archiveRel := cleanArchiveSpecifier(rel)
+	return filepath.Clean(filepath.Join(filepath.Dir(pkgPath), filepath.FromSlash(rel))), archiveRel, true, nil
+}
+
+func isPackageFile(path string) bool {
+	return strings.EqualFold(filepath.Ext(path), packagefile.Extension)
+}
+
+// FindPackageRoot walks upward looking for the nearest package manifest.
+func FindPackageRoot(startDir string) string {
+	if startDir == "" {
+		startDir, _ = os.Getwd()
+	}
+	dir, err := filepath.Abs(startDir)
+	if err != nil {
+		return ""
+	}
+	for {
+		if manifest, err := loadExistingManifest(dir); err == nil && isPackageManifest(manifest) {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
+func loadExistingManifest(root string) (*proj.Config, error) {
+	path := filepath.Join(root, "project.toml")
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	return loadManifest(root)
+}
+
 func packageID(name, version, exportName, path string) string {
 	if name == "" {
 		return "file:" + filepath.ToSlash(path)
@@ -247,80 +499,131 @@ func packageID(name, version, exportName, path string) string {
 	return "pkg:" + name + "@" + version + ":" + exportName
 }
 
-type manifestFile struct {
-	Project      projectSection    `toml:"project"`
-	Package      packageSection    `toml:"package"`
-	Exports      map[string]string `toml:"exports"`
-	Dependencies map[string]string `toml:"dependencies"`
-}
-
-type projectSection struct {
-	Name    string `toml:"name"`
-	Version string `toml:"version"`
-	Entry   string `toml:"entry"`
-}
-
-type packageSection struct {
-	Name    string `toml:"name"`
-	Version string `toml:"version"`
-	Main    string `toml:"main"`
-}
-
-func loadManifest(path string) (manifestFile, error) {
-	var manifest manifestFile
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return manifest, err
+func packageFileID(name, version, exportName, pkgPath, archivePath string) string {
+	prefix := "pkgfile:" + filepath.ToSlash(pkgPath)
+	if name != "" {
+		prefix = "pkg:" + name
+		if version != "" {
+			prefix += "@" + version
+		}
 	}
-	if err := toml.Unmarshal(data, &manifest); err != nil {
-		return manifest, fmt.Errorf("invalid manifest %q: %w", path, err)
+	return prefix + ":" + exportName + ":" + filepath.ToSlash(archivePath)
+}
+
+func archiveModulePath(pkgPath, archivePath string) string {
+	return filepath.ToSlash(pkgPath) + "!" + filepath.ToSlash(archivePath)
+}
+
+func resolveArchiveSourcePath(pkg *packagefile.Package, path string) (string, error) {
+	path = cleanArchiveSpecifier(path)
+	candidates := []string{path}
+	if filepath.Ext(path) == "" {
+		candidates = append(candidates, path+".gs")
+	}
+	for _, candidate := range candidates {
+		if pkg.HasFile(candidate) {
+			return cleanArchiveSpecifier(candidate), nil
+		}
+	}
+	if pkg.HasFile(cleanArchiveSpecifier(filepath.ToSlash(filepath.Join(path, "project.toml")))) {
+		// Nested package manifests inside .gspkg are intentionally not followed in
+		// the MVP; package archives expose one package root.
+		return "", os.ErrNotExist
+	}
+	index := cleanArchiveSpecifier(filepath.ToSlash(filepath.Join(path, "index.gs")))
+	if pkg.HasFile(index) {
+		return index, nil
+	}
+	return "", os.ErrNotExist
+}
+
+func cleanArchiveSpecifier(path string) string {
+	path = filepath.ToSlash(path)
+	path = strings.TrimPrefix(path, "/")
+	cleaned := filepath.ToSlash(filepath.Clean(path))
+	if cleaned == "." {
+		return ""
+	}
+	return cleaned
+}
+
+func splitArchiveBaseDir(baseDir string) (pkgPath, archiveDir string, ok bool) {
+	idx := strings.LastIndex(baseDir, "!")
+	if idx < 0 {
+		return "", "", false
+	}
+	pkgPath = filepath.FromSlash(baseDir[:idx])
+	archiveDir = cleanArchiveSpecifier(baseDir[idx+1:])
+	return pkgPath, archiveDir, pkgPath != ""
+}
+
+func loadManifest(root string) (*proj.Config, error) {
+	manifest, err := proj.LoadStrict(filepath.Join(root, "project.toml"))
+	if err != nil {
+		return nil, err
 	}
 	if manifest.Dependencies == nil {
 		manifest.Dependencies = make(map[string]string)
 	}
+	if manifest.Imports == nil {
+		manifest.Imports = make(map[string]string)
+	}
 	return manifest, nil
 }
 
-func (m manifestFile) packageMain() string {
+func isPackageManifest(m *proj.Config) bool {
+	return m.Package.Name != "" ||
+		m.Package.Main != "" ||
+		len(m.Exports) > 0 ||
+		len(m.Imports) > 0 ||
+		len(m.Dependencies) > 0 ||
+		m.Entry != ""
+}
+
+func packageMainFromManifest(m *proj.Config) string {
 	if m.Package.Main != "" {
 		return m.Package.Main
 	}
-	if m.Project.Entry != "" {
-		return m.Project.Entry
+	if m.Entry != "" {
+		return m.Entry
 	}
 	return ""
 }
 
-func (m manifestFile) packageName(fallback string) string {
+func packageNameFromManifest(m *proj.Config, fallback string) string {
 	if m.Package.Name != "" {
 		return m.Package.Name
 	}
-	if m.Project.Name != "" {
-		return m.Project.Name
+	if m.Name != "" {
+		return m.Name
 	}
 	return fallback
 }
 
-func (m manifestFile) exportTarget(exportName string) (string, bool) {
+func exportTarget(m *proj.Config, exportName string) (string, bool) {
 	if len(m.Exports) == 0 {
-		main := m.packageMain()
+		main := packageMainFromManifest(m)
 		if main == "" {
 			main = "index.gs"
 		}
 		return main, exportName == "."
 	}
-	if target, ok := m.Exports[exportName]; ok {
+	return matchPatternMap(m.Exports, exportName)
+}
+
+func matchPatternMap(mapping map[string]string, name string) (string, bool) {
+	if target, ok := mapping[name]; ok {
 		return target, true
 	}
-	for pattern, target := range m.Exports {
+	for pattern, target := range mapping {
 		if !strings.Contains(pattern, "*") {
 			continue
 		}
 		prefix, suffix, _ := strings.Cut(pattern, "*")
-		if !strings.HasPrefix(exportName, prefix) || !strings.HasSuffix(exportName, suffix) {
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
 			continue
 		}
-		matched := strings.TrimSuffix(strings.TrimPrefix(exportName, prefix), suffix)
+		matched := strings.TrimSuffix(strings.TrimPrefix(name, prefix), suffix)
 		return strings.Replace(target, "*", matched, 1), true
 	}
 	return "", false

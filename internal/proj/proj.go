@@ -1,10 +1,10 @@
 package proj
 
 import (
-	"bufio"
+	"fmt"
 	"os"
-	"strconv"
-	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Config holds project configuration from project.toml.
@@ -38,148 +38,94 @@ type BundleConfig struct {
 // Load reads a project.toml file and returns parsed config.
 // Returns defaults if the file doesn't exist.
 func Load(path string) *Config {
+	cfg, _ := LoadStrict(path)
+	return cfg
+}
+
+// LoadStrict reads a project.toml file and reports invalid TOML. Missing files
+// still return the default config so single-file projects can run without a
+// manifest.
+func LoadStrict(path string) (*Config, error) {
 	cfg := &Config{
 		Name:  "project",
 		Entry: "main.gs",
 	}
 
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return cfg
+		if os.IsNotExist(err) {
+			return cfg, nil
+		}
+		return cfg, err
 	}
-	defer f.Close()
-
-	var section string
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if line == "[project]" {
-			section = "project"
-			continue
-		}
-		if strings.HasPrefix(line, "[") {
-			section = strings.TrimSpace(strings.Trim(line, "[]"))
-			continue
-		}
-		k, v, ok := parseKV(line)
-		if !ok {
-			continue
-		}
-		switch section {
-		case "project":
-			switch k {
-			case "name":
-				cfg.Name = parseString(v)
-			case "version":
-				cfg.Version = parseString(v)
-			case "entry":
-				cfg.Entry = parseString(v)
-			}
-		case "package":
-			switch k {
-			case "name":
-				cfg.Package.Name = parseString(v)
-			case "version":
-				cfg.Package.Version = parseString(v)
-			case "type":
-				cfg.Package.Type = parseString(v)
-			case "main":
-				cfg.Package.Main = parseString(v)
-			}
-		case "exports":
-			if cfg.Exports == nil {
-				cfg.Exports = make(map[string]string)
-			}
-			cfg.Exports[parseString(k)] = parseString(v)
-		case "imports":
-			if cfg.Imports == nil {
-				cfg.Imports = make(map[string]string)
-			}
-			cfg.Imports[parseString(k)] = parseString(v)
-		case "dependencies":
-			if cfg.Dependencies == nil {
-				cfg.Dependencies = make(map[string]string)
-			}
-			cfg.Dependencies[parseString(k)] = parseString(v)
-		case "bundle":
-			switch k {
-			case "target":
-				cfg.Bundle.Target = parseString(v)
-			case "format":
-				cfg.Bundle.Format = parseString(v)
-			case "includeStd":
-				cfg.Bundle.IncludeStd = parseBool(v)
-			case "external":
-				cfg.Bundle.External = parseStringArray(v)
-			}
-		}
-	}
-	return cfg
+	return Parse(string(data), path)
 }
 
-func parseKV(line string) (k, v string, ok bool) {
-	line = stripInlineComment(line)
-	idx := strings.IndexByte(line, '=')
-	if idx < 0 {
-		return "", "", false
+func Parse(src, name string) (*Config, error) {
+	cfg := &Config{
+		Name:  "project",
+		Entry: "main.gs",
 	}
-	k = strings.TrimSpace(line[:idx])
-	v = strings.TrimSpace(line[idx+1:])
-	return k, v, true
+	var manifest manifestFile
+	if err := toml.Unmarshal([]byte(src), &manifest); err != nil {
+		return cfg, fmt.Errorf("invalid project manifest %q: %w", name, err)
+	}
+	cfg.applyManifest(manifest)
+	return cfg, nil
 }
 
-func stripInlineComment(line string) string {
-	inString := false
-	for i := 0; i < len(line); i++ {
-		switch line[i] {
-		case '"':
-			if i == 0 || line[i-1] != '\\' {
-				inString = !inString
-			}
-		case '#':
-			if !inString {
-				return strings.TrimSpace(line[:i])
-			}
-		}
-	}
-	return line
+type manifestFile struct {
+	Project      projectSection    `toml:"project"`
+	Package      packageSection    `toml:"package"`
+	Exports      map[string]string `toml:"exports"`
+	Imports      map[string]string `toml:"imports"`
+	Dependencies map[string]string `toml:"dependencies"`
+	Bundle       bundleSection     `toml:"bundle"`
 }
 
-func parseString(s string) string {
-	return unquote(s)
+type projectSection struct {
+	Name    string `toml:"name"`
+	Version string `toml:"version"`
+	Entry   string `toml:"entry"`
 }
 
-func parseBool(s string) bool {
-	v, err := strconv.ParseBool(strings.ToLower(strings.TrimSpace(s)))
-	return err == nil && v
+type packageSection struct {
+	Name    string `toml:"name"`
+	Version string `toml:"version"`
+	Type    string `toml:"type"`
+	Main    string `toml:"main"`
 }
 
-func parseStringArray(s string) []string {
-	s = strings.TrimSpace(s)
-	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
-		return nil
-	}
-	s = strings.TrimSpace(s[1 : len(s)-1])
-	if s == "" {
-		return []string{}
-	}
-	parts := strings.Split(s, ",")
-	values := make([]string, 0, len(parts))
-	for _, part := range parts {
-		value := parseString(strings.TrimSpace(part))
-		if value != "" {
-			values = append(values, value)
-		}
-	}
-	return values
+type bundleSection struct {
+	Target     string   `toml:"target"`
+	Format     string   `toml:"format"`
+	IncludeStd bool     `toml:"includeStd"`
+	External   []string `toml:"external"`
 }
 
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
+func (cfg *Config) applyManifest(m manifestFile) {
+	if m.Project.Name != "" {
+		cfg.Name = m.Project.Name
 	}
-	return s
+	if m.Project.Version != "" {
+		cfg.Version = m.Project.Version
+	}
+	if m.Project.Entry != "" {
+		cfg.Entry = m.Project.Entry
+	}
+	cfg.Package = PackageConfig{
+		Name:    m.Package.Name,
+		Version: m.Package.Version,
+		Type:    m.Package.Type,
+		Main:    m.Package.Main,
+	}
+	cfg.Exports = m.Exports
+	cfg.Imports = m.Imports
+	cfg.Dependencies = m.Dependencies
+	cfg.Bundle = BundleConfig{
+		Target:     m.Bundle.Target,
+		Format:     m.Bundle.Format,
+		IncludeStd: m.Bundle.IncludeStd,
+		External:   m.Bundle.External,
+	}
 }

@@ -9,12 +9,14 @@ import (
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/module"
+	"github.com/issueye/goscript/internal/packagefile"
 	"github.com/issueye/goscript/internal/parser"
 )
 
 type bundledModule struct {
-	path string
-	deps []moduleDependency
+	resolved module.ResolvedModule
+	source   string
+	deps     []moduleDependency
 }
 
 type moduleDependency struct {
@@ -39,76 +41,78 @@ func Bundle(entry string) (string, error) {
 	seen := make(map[string]*bundledModule)
 	order := make([]string, 0)
 
-	var walk func(path string) error
-	walk = func(path string) error {
-		if _, ok := seen[path]; ok {
+	var walk func(resolved module.ResolvedModule) error
+	walk = func(resolved module.ResolvedModule) error {
+		id := moduleID(resolved)
+		if _, ok := seen[id]; ok {
 			return nil
 		}
 
-		src, err := os.ReadFile(path)
+		src, err := readResolvedSource(resolved)
 		if err != nil {
 			return err
 		}
-		mod := &bundledModule{path: path}
-		seen[path] = mod
-		for _, spec := range findRequires(string(src)) {
+		mod := &bundledModule{resolved: resolved, source: src}
+		seen[id] = mod
+		for _, spec := range findStaticDependencies(src) {
 			resolved, err := resolver.Resolve(spec, module.ResolveOptions{
 				ProjectRoot: projectRoot,
-				BaseDir:     filepath.Dir(path),
-				Referrer:    path,
+				BaseDir:     resolvedModuleDir(mod.resolved),
+				Referrer:    mod.resolved.Path,
 			})
 			if err != nil {
 				return err
 			}
 			mod.deps = append(mod.deps, moduleDependency{spec: spec, resolved: resolved})
 			if !resolved.External && resolved.Path != "" {
-				if err := walk(resolved.Path); err != nil {
+				if err := walk(resolved); err != nil {
 					return err
 				}
 			}
 		}
-		order = append(order, path)
+		order = append(order, id)
 		return nil
 	}
 
-	if err := walk(entryResolved.Path); err != nil {
+	if err := walk(entryResolved); err != nil {
 		return "", err
 	}
 
 	// Build module name map
 	modNames := make(map[string]string)
-	for i, p := range order {
-		name := fmt.Sprintf("__mod_%d_%s", i, sanitize(filepath.Base(p)))
-		modNames[p] = name
+	for i, id := range order {
+		name := fmt.Sprintf("__mod_%d_%s", i, sanitize(moduleDisplayName(seen[id].resolved)))
+		modNames[id] = name
 	}
 
 	var b strings.Builder
 	b.WriteString("// GoScript bundle\n\n")
 
 	// Generate module functions
-	for _, p := range order {
-		src, _ := os.ReadFile(p)
-		name := modNames[p]
+	for _, id := range order {
+		mod := seen[id]
+		src := mod.source
+		name := modNames[id]
 
 		// Build require() replacement for dependencies
-		rewritten := string(src)
-		for _, dep := range seen[p].deps {
+		rewritten := src
+		for _, dep := range mod.deps {
 			if dep.resolved.External {
 				continue
 			}
-			depName := modNames[dep.resolved.Path]
+			depName := modNames[moduleID(dep.resolved)]
 			rewritten = strings.ReplaceAll(rewritten, fmt.Sprintf("require(%q)", dep.spec), depName+"_exports")
 		}
 
-		fmt.Fprintf(&b, "// %s\n", filepath.Base(p))
+		fmt.Fprintf(&b, "// %s\n", moduleDisplayName(mod.resolved))
 		fmt.Fprintf(&b, "var %s_exports = {};\n", name)
 
 		// Call dependency modules
-		for _, dep := range seen[p].deps {
+		for _, dep := range mod.deps {
 			if dep.resolved.External {
 				continue
 			}
-			depName := modNames[dep.resolved.Path]
+			depName := modNames[moduleID(dep.resolved)]
 			fmt.Fprintf(&b, "__run_%s(%s_exports);\n", depName, depName)
 		}
 
@@ -123,7 +127,7 @@ func Bundle(entry string) (string, error) {
 	}
 
 	// Call entry
-	entryName := modNames[entryResolved.Path]
+	entryName := modNames[moduleID(entryResolved)]
 	fmt.Fprintf(&b, "%s_exports;\n", entryName)
 
 	return b.String(), nil
@@ -137,24 +141,58 @@ func sanitize(path string) string {
 	return s
 }
 
-func findRequires(src string) []string {
+func moduleID(resolved module.ResolvedModule) string {
+	if resolved.ID != "" {
+		return resolved.ID
+	}
+	return resolved.Path
+}
+
+func moduleDisplayName(resolved module.ResolvedModule) string {
+	if resolved.PackageFile != "" {
+		return filepath.Base(resolved.PackageFile) + "!" + resolved.ArchivePath
+	}
+	return filepath.Base(resolved.Path)
+}
+
+func resolvedModuleDir(resolved module.ResolvedModule) string {
+	if resolved.PackageFile != "" {
+		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
+	}
+	return filepath.Dir(resolved.Path)
+}
+
+func readResolvedSource(resolved module.ResolvedModule) (string, error) {
+	if resolved.PackageFile != "" {
+		return packagefile.ReadNestedText(resolved.PackageFile, resolved.ArchivePath)
+	}
+	data, err := os.ReadFile(resolved.Path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func findStaticDependencies(src string) []string {
 	l := lexer.New(src)
 	p := parser.New(l, "<bundle>")
 	prog := p.ParseProgram()
-	return collectRequires(prog.Body)
+	return collectDependencies(prog.Body)
 }
 
-func collectRequires(stmts []ast.Statement) []string {
+func collectDependencies(stmts []ast.Statement) []string {
 	var paths []string
 	for _, stmt := range stmts {
-		paths = append(paths, walkNodeForRequire(stmt)...)
+		paths = append(paths, walkNodeForDependency(stmt)...)
 	}
 	return unique(paths)
 }
 
-func walkNodeForRequire(node ast.Node) []string {
+func walkNodeForDependency(node ast.Node) []string {
 	var paths []string
 	switch n := node.(type) {
+	case *ast.ImportDecl:
+		paths = append(paths, unquoteModulePath(n.Source))
 	case *ast.LetStmt, *ast.ConstStmt, *ast.VarStmt:
 		var v ast.Expression
 		switch s := n.(type) {
@@ -166,43 +204,51 @@ func walkNodeForRequire(node ast.Node) []string {
 			v = s.Value
 		}
 		if v != nil {
-			paths = append(paths, walkNodeForRequire(v)...)
+			paths = append(paths, walkNodeForDependency(v)...)
 		}
 	case *ast.ExprStmt:
-		paths = append(paths, walkNodeForRequire(n.Expr)...)
+		paths = append(paths, walkNodeForDependency(n.Expr)...)
 	case *ast.CallExpr:
 		if ident, ok := n.Callee.(*ast.Ident); ok && ident.TokenLit == "require" {
 			if len(n.Args) > 0 {
 				if str, ok := n.Args[0].(*ast.StringLit); ok {
-					lit := str.TokenLit
-					if len(lit) >= 2 {
-						paths = append(paths, lit[1:len(lit)-1])
-					}
+					paths = append(paths, unquoteModulePath(str.TokenLit))
 				}
 			}
 		}
 		for _, a := range n.Args {
-			paths = append(paths, walkNodeForRequire(a)...)
+			paths = append(paths, walkNodeForDependency(a)...)
 		}
 	case *ast.InfixExpr:
-		paths = append(paths, walkNodeForRequire(n.Left)...)
-		paths = append(paths, walkNodeForRequire(n.Right)...)
+		paths = append(paths, walkNodeForDependency(n.Left)...)
+		paths = append(paths, walkNodeForDependency(n.Right)...)
 	case *ast.BlockStmt:
-		paths = append(paths, collectRequires(n.Statements)...)
+		paths = append(paths, collectDependencies(n.Statements)...)
 	case *ast.IfStmt:
-		paths = append(paths, walkNodeForRequire(n.Cond)...)
-		paths = append(paths, collectRequires(n.Consequence.Statements)...)
+		paths = append(paths, walkNodeForDependency(n.Cond)...)
+		paths = append(paths, collectDependencies(n.Consequence.Statements)...)
 		if n.Alternative != nil {
-			paths = append(paths, walkNodeForRequire(n.Alternative)...)
+			paths = append(paths, walkNodeForDependency(n.Alternative)...)
 		}
 	case *ast.ReturnStmt:
 		if n.Value != nil {
-			paths = append(paths, walkNodeForRequire(n.Value)...)
+			paths = append(paths, walkNodeForDependency(n.Value)...)
 		}
 	case *ast.FuncDecl:
-		paths = append(paths, collectRequires(n.Body.Statements)...)
+		paths = append(paths, collectDependencies(n.Body.Statements)...)
 	}
 	return paths
+}
+
+func unquoteModulePath(path string) string {
+	if len(path) >= 2 {
+		first := path[0]
+		last := path[len(path)-1]
+		if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+			return path[1 : len(path)-1]
+		}
+	}
+	return path
 }
 
 func unique(strs []string) []string {

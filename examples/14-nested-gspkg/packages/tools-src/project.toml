@@ -1,0 +1,10 @@
+[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+
+[dependencies]
+"helper" = "file:vendor/helper.gspkg"

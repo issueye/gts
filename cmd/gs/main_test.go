@@ -119,6 +119,44 @@ func TestRunProject(t *testing.T) {
 	}
 }
 
+func TestPackCommandCreatesPackageFile(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "project.toml"), `[package]
+name = "tools"
+main = "src/index.gs"
+`)
+	writeTestFile(t, filepath.Join(root, "src", "index.gs"), `export const value = 42;`)
+	out := filepath.Join(t.TempDir(), "tools.gspkg")
+
+	if err := packCommand([]string{root, out}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBundleCommandWritesOutput(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "main.gs"), `let lib = require("./lib");
+exports.value = lib.value;
+`)
+	writeTestFile(t, filepath.Join(root, "lib.gs"), `exports.value = 42;
+`)
+	out := filepath.Join(root, "dist", "app.bundle.gs")
+
+	if err := bundleCommand([]string{filepath.Join(root, "main.gs"), out}); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "GoScript bundle") || strings.Contains(string(data), `require("./lib")`) {
+		t.Fatalf("unexpected bundle output:\n%s", data)
+	}
+}
+
 func TestRequireRelativePathAndCache(t *testing.T) {
 	dir := t.TempDir()
 	lib := filepath.Join(dir, "lib.gs")
@@ -1167,6 +1205,262 @@ b.state.count;
 	}
 }
 
+func TestPackageImportAliasRuntime(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	if err := os.MkdirAll(filepath.Join(srcDir, "internal"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "project.toml"), []byte(`
+[package]
+name = "app"
+main = "src/app.gs"
+
+[imports]
+"#util" = "src/internal/util.gs"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "internal", "util.gs"), []byte(`export function label(x) { return "private:" + x; }`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(srcDir, "app.gs")
+	if err := os.WriteFile(app, []byte(`
+import { label } from "#util";
+label("ok");
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "private:ok" {
+		t.Fatalf("want private:ok, got %T %v", result, result)
+	}
+}
+
+func TestPackageDependencyResolvesOwnDependencies(t *testing.T) {
+	dir := t.TempDir()
+	toolsDir := filepath.Join(dir, "vendor", "tools")
+	helperDir := filepath.Join(toolsDir, "vendor", "helper")
+	if err := os.MkdirAll(filepath.Join(toolsDir, "src"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(helperDir, "src"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "project.toml"), []byte(`
+[project]
+entry = "app.gs"
+
+[dependencies]
+"tools" = "file:vendor/tools"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsDir, "project.toml"), []byte(`
+[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+
+[dependencies]
+"helper" = "file:vendor/helper"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "project.toml"), []byte(`
+[package]
+name = "helper"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(helperDir, "src", "index.gs"), []byte(`export const label = "nested";`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(toolsDir, "src", "index.gs"), []byte(`
+import { label } from "helper";
+export const value = "tools:" + label;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(dir, "app.gs")
+	if err := os.WriteFile(app, []byte(`
+import { value } from "tools";
+value;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "tools:nested" {
+		t.Fatalf("want tools:nested, got %T %v", result, result)
+	}
+}
+
+func TestImportPackageFileDependency(t *testing.T) {
+	dir := t.TempDir()
+	pkgRoot := filepath.Join(dir, "tools-src")
+	writeTestFile(t, filepath.Join(pkgRoot, "project.toml"), `[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+`)
+	writeTestFile(t, filepath.Join(pkgRoot, "src", "index.gs"), `
+import { decorate } from "./format";
+export const value = decorate("pkgfile");
+`)
+	writeTestFile(t, filepath.Join(pkgRoot, "src", "format.gs"), `
+export function decorate(x) { return "[" + x + "]"; }
+`)
+	pkgPath := filepath.Join(dir, "vendor", "tools.gspkg")
+	if err := packCommand([]string{pkgRoot, pkgPath}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, filepath.Join(dir, "project.toml"), `[project]
+entry = "app.gs"
+
+[dependencies]
+"tools" = "file:vendor/tools.gspkg"
+`)
+	app := filepath.Join(dir, "app.gs")
+	writeTestFile(t, app, `
+import { value } from "tools";
+value;
+`)
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "[pkgfile]" {
+		t.Fatalf("want [pkgfile], got %T %v", result, result)
+	}
+}
+
+func TestImportPackageFileNestedDependency(t *testing.T) {
+	dir := t.TempDir()
+	helperRoot := filepath.Join(dir, "helper-src")
+	writeTestFile(t, filepath.Join(helperRoot, "project.toml"), `[package]
+name = "helper"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+`)
+	writeTestFile(t, filepath.Join(helperRoot, "src", "index.gs"), `
+export const label = "nested-pkgfile";
+`)
+	helperPkg := filepath.Join(dir, "helper.gspkg")
+	if err := packCommand([]string{helperRoot, helperPkg}); err != nil {
+		t.Fatal(err)
+	}
+
+	toolsRoot := filepath.Join(dir, "tools-src")
+	writeTestFile(t, filepath.Join(toolsRoot, "project.toml"), `[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+
+[dependencies]
+"helper" = "file:vendor/helper.gspkg"
+`)
+	writeTestFile(t, filepath.Join(toolsRoot, "src", "index.gs"), `
+import { label } from "helper";
+export const value = "tools:" + label;
+`)
+	toolsHelperPkg := filepath.Join(toolsRoot, "vendor", "helper.gspkg")
+	if err := os.MkdirAll(filepath.Dir(toolsHelperPkg), 0755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(helperPkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(toolsHelperPkg, data, 0644); err != nil {
+		t.Fatal(err)
+	}
+	toolsPkg := filepath.Join(dir, "vendor", "tools.gspkg")
+	if err := packCommand([]string{toolsRoot, toolsPkg}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, filepath.Join(dir, "project.toml"), `[project]
+entry = "app.gs"
+
+[dependencies]
+"tools" = "file:vendor/tools.gspkg"
+`)
+	app := filepath.Join(dir, "app.gs")
+	writeTestFile(t, app, `
+import { value } from "tools";
+value;
+`)
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "tools:nested-pkgfile" {
+		t.Fatalf("want tools:nested-pkgfile, got %T %v", result, result)
+	}
+}
+
+func TestRequireReturnsAssignedModuleExports(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "lib.gs"), []byte(`
+module.exports = function label(x) { return "module:" + x; };
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	app := filepath.Join(dir, "app.gs")
+	if err := os.WriteFile(app, []byte(`
+let label = require("./lib");
+label("ok");
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "module:ok" {
+		t.Fatalf("want module:ok, got %T %v", result, result)
+	}
+}
+
 func TestRunScriptTimeout(t *testing.T) {
 	if os.Getenv("GOSCRIPT_TIMEOUT_HELPER") == "1" {
 		os.Exit(run([]string{"--timeout", "20ms", os.Getenv("GOSCRIPT_TIMEOUT_SCRIPT")}))
@@ -1223,4 +1517,21 @@ func TestStableExamples(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+
+	t.Run("examples/14-nested-gspkg", func(t *testing.T) {
+		r := newRunner(options{workers: 1, timeout: time.Second})
+		if err := r.runProject(filepath.Join(root, "examples", "14-nested-gspkg")); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func writeTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
+		t.Fatal(err)
+	}
 }

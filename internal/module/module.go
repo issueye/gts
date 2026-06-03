@@ -119,8 +119,17 @@ func SetupExports(env *object.Environment) {
 
 // GetExports returns the exports object from a module env.
 func GetExports(env *object.Environment) object.Object {
-	v, _ := env.Get("exports")
-	return v
+	if modObj, ok := env.Get("module"); ok {
+		if mod, ok := modObj.(*object.Hash); ok {
+			if pair, ok := mod.Pairs[hashKey(&object.String{Value: "exports"})]; ok {
+				return pair.Value
+			}
+		}
+	}
+	if v, ok := env.Get("exports"); ok {
+		return v
+	}
+	return object.UNDEFINED
 }
 
 func hashKey(o object.Object) object.HashKey {

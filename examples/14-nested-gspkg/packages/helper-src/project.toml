@@ -1,0 +1,7 @@
+[package]
+name = "helper"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"

@@ -12,10 +12,12 @@ import (
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/async"
+	"github.com/issueye/goscript/internal/bundle"
 	"github.com/issueye/goscript/internal/evaluator"
 	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
+	"github.com/issueye/goscript/internal/packagefile"
 	"github.com/issueye/goscript/internal/parser"
 	"github.com/issueye/goscript/internal/proj"
 	_ "github.com/issueye/goscript/internal/stdlib"
@@ -81,6 +83,10 @@ func run(args []string) int {
 	switch rest[0] {
 	case "run":
 		err = r.runProject(".")
+	case "pack":
+		err = packCommand(rest[1:])
+	case "bundle":
+		err = bundleCommand(rest[1:])
 	case "help", "-h", "--help":
 		printUsage(fs)
 		return 0
@@ -107,8 +113,58 @@ func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "Usage:\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] <script.gs>\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] run\n\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] pack [dir] [out.gspkg]\n\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] bundle <entry.gs> [out.gs]\n\n")
 	fmt.Fprintf(fs.Output(), "Flags:\n")
 	fs.PrintDefaults()
+}
+
+func bundleCommand(args []string) error {
+	if len(args) < 1 || len(args) > 2 {
+		return fmt.Errorf("bundle expects: <entry.gs> [out.gs]")
+	}
+	entry, err := filepath.Abs(args[0])
+	if err != nil {
+		return err
+	}
+	out, err := bundle.Bundle(entry)
+	if err != nil {
+		return err
+	}
+	if len(args) == 1 {
+		fmt.Fprint(os.Stdout, out)
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(args[1]), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(args[1], []byte(out), 0644)
+}
+
+func packCommand(args []string) error {
+	dir := "."
+	out := ""
+	if len(args) > 0 {
+		dir = args[0]
+	}
+	if len(args) > 1 {
+		out = args[1]
+	}
+	if len(args) > 2 {
+		return fmt.Errorf("pack expects at most 2 arguments: [dir] [out.gspkg]")
+	}
+	if err := packagefile.PackDirectory(dir, out); err != nil {
+		return err
+	}
+	if out == "" {
+		out = filepath.Base(filepath.Clean(dir)) + packagefile.Extension
+	}
+	absOut, err := filepath.Abs(out)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(os.Stdout, absOut)
+	return nil
 }
 
 func (r *runner) runProject(dir string) error {
@@ -116,7 +172,10 @@ func (r *runner) runProject(dir string) error {
 	if err != nil {
 		return err
 	}
-	cfg := proj.Load(filepath.Join(absDir, "project.toml"))
+	cfg, err := proj.LoadStrict(filepath.Join(absDir, "project.toml"))
+	if err != nil {
+		return err
+	}
 	return r.runFileWithOptions(filepath.Join(absDir, cfg.Entry), runOptions{autoMain: true})
 }
 
@@ -247,9 +306,9 @@ func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 
 		env := r.cache.GetOrCreate(cacheKey)
 		module.SetupExports(env)
-		r.configureModuleLoaders(env, filepath.Dir(resolved.Path))
+		r.configureModuleLoaders(env, resolvedModuleDir(resolved))
 
-		src, err := os.ReadFile(resolved.Path)
+		src, err := r.readResolvedSource(resolved)
 		if err != nil {
 			return nil, err
 		}
@@ -281,11 +340,40 @@ func (r *runner) ensureRuntime() {
 
 func (r *runner) configureModuleLoaders(env *object.Environment, baseDir string) {
 	r.ensureRuntime()
-	require := r.requireFunc(baseDir)
+	env.ModuleDir = baseDir
+	require := func(path string) (object.Object, error) {
+		return r.requireFrom(env, path)
+	}
 	evaluator.RegisterBuiltinsWithCache(env, require)
 	env.VM().SetImportFunc(func(env *object.Environment, path string) (object.Object, error) {
-		return require(path)
+		return r.requireFrom(env, path)
 	})
+}
+
+func (r *runner) requireFrom(env *object.Environment, path string) (object.Object, error) {
+	baseDir := env.ModuleDir
+	if baseDir == "" {
+		baseDir = r.rootDir
+	}
+	return r.requireFunc(baseDir)(path)
+}
+
+func (r *runner) readResolvedSource(resolved module.ResolvedModule) (string, error) {
+	if resolved.PackageFile != "" {
+		return packagefile.ReadNestedText(resolved.PackageFile, resolved.ArchivePath)
+	}
+	data, err := os.ReadFile(resolved.Path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func resolvedModuleDir(resolved module.ResolvedModule) string {
+	if resolved.PackageFile != "" {
+		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
+	}
+	return filepath.Dir(resolved.Path)
 }
 
 func (r *runner) waitPromise(p *object.Promise, label string) (object.Object, error) {

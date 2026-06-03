@@ -19,6 +19,7 @@
 | 11 | `11-async.gs` | 异步编程 async/await |
 | 12 | `12-comprehensive.gs` | 综合实战：图书管理系统 |
 | 13 | `13-package-modules/` | 包模块清单、导出映射与本地依赖引用 |
+| 14 | `14-nested-gspkg/` | 单文件包 `.gspkg` 与多层级包依赖 |
 
 ## 运行方式
 
@@ -35,9 +36,13 @@ go run ./cmd/gs examples/01-basics.gs
 # 运行带 project.toml 的包模块示例
 cd examples/13-package-modules
 go run ../../cmd/gs run
+
+# 运行嵌套 .gspkg 包示例
+cd ../14-nested-gspkg
+go run ../../cmd/gs run
 ```
 
-编号 01-12 的 `.gs` 文件都是独立可执行的脚本；第 13 个示例是一个小项目，需要在示例目录内运行 `gs run`。
+编号 01-12 的 `.gs` 文件都是独立可执行的脚本；第 13、14 个示例是小项目，需要在示例目录内运行 `gs run`。
 
 ## 当前自动验证状态
 
@@ -51,6 +56,8 @@ go run ../../cmd/gs run
 | 稳定回归 | `docs/examples/counter.gs` |
 | 稳定回归 | `docs/examples/modules.gs` |
 | 稳定回归 | `docs/examples/sqlite.gs` |
+| 稳定回归 | `examples/13-package-modules` |
+| 稳定回归 | `examples/14-nested-gspkg` |
 
 其余示例目前保留为教学/目标行为示例，暂不纳入自动测试。主要原因是部分示例使用了尚未完整支持的语法、类型检查能力，或包含异步、网络、长时间运行行为。后续每修复一类能力，再把对应示例移动到稳定回归清单。
 

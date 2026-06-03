@@ -1,0 +1,7 @@
+[project]
+name = "nested-gspkg-demo"
+version = "0.1.0"
+entry = "app.gs"
+
+[dependencies]
+"tools" = "file:vendor/tools.gspkg"

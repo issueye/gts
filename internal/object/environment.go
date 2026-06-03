@@ -4,12 +4,13 @@ import "github.com/issueye/goscript/internal/ast"
 
 // Environment is a scope for variable bindings.
 type Environment struct {
-	store  map[string]Object
-	consts map[string]bool
-	parent *Environment
-	vm     *VirtualMachine
-	Extra  Object // bound context for method dispatch (array/string instance)
-	Pos    ast.Position
+	store     map[string]Object
+	consts    map[string]bool
+	parent    *Environment
+	vm        *VirtualMachine
+	Extra     Object // bound context for method dispatch (array/string instance)
+	ModuleDir string
+	Pos       ast.Position
 }
 
 func NewEnvironment() *Environment {
@@ -114,6 +115,7 @@ func (e *Environment) Has(name string) bool {
 func (e *Environment) NewScope() *Environment {
 	env := NewEnvironmentWithVM(e.VM())
 	env.parent = e
+	env.ModuleDir = e.ModuleDir
 	return env
 }
 
