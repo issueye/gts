@@ -934,6 +934,22 @@ func TestEval_ConstCannotBeReassigned(t *testing.T) {
 	}
 }
 
+func TestEval_GlobalBuiltinConstantCannotBeReassigned(t *testing.T) {
+	evaluated := testEval(`Math = 1;`)
+	err, ok := evaluated.(*object.Error)
+	if !ok {
+		t.Fatalf("want error, got %T", evaluated)
+	}
+	if !strings.Contains(err.Message, "assignment to constant 'Math'") {
+		t.Fatalf("unexpected error: %s", err.Inspect())
+	}
+}
+
+func TestEval_GlobalBuiltinConstantCanBeShadowed(t *testing.T) {
+	evaluated := testEval(`let Math = 1; Math = 2; Math;`)
+	testNumber(t, evaluated, "2")
+}
+
 func TestEval_AssignUndeclaredFails(t *testing.T) {
 	evaluated := testEval(`x = 1;`)
 	err, ok := evaluated.(*object.Error)

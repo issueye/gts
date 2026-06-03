@@ -27,8 +27,8 @@ func init() {
 }
 
 func registerMapSet(env *object.Environment) {
-	env.Set("Map", callableBuiltinObject("Map", builtinMapConstructor, nil))
-	env.Set("Set", callableBuiltinObject("Set", builtinSetConstructor, nil))
+	env.VM().SetGlobalConst("Map", callableBuiltinObject("Map", builtinMapConstructor, nil))
+	env.VM().SetGlobalConst("Set", callableBuiltinObject("Set", builtinSetConstructor, nil))
 }
 
 func builtinMapConstructor(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

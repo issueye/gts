@@ -33,11 +33,21 @@ GoScript 的目标是为 Go 生态提供一个**易嵌入、可扩展、熟悉 J
 # 构建 CLI
 go build -o gs ./cmd/gs
 
+# 初始化一个新项目
+./gs init hello-app
+cd hello-app
+
 # 运行根目录 project.toml 指定的入口
 ./gs run
 
 # 运行单个脚本
 ./gs examples/01-basics.gs
+
+# 打包成 .gspkg
+./gs pack . dist/hello-app.gspkg
+
+# 打包成可直接分发运行的二进制
+./gs dist . dist/hello-app
 
 # 不构建，直接运行
 go run ./cmd/gs main.gs

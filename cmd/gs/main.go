@@ -88,6 +88,8 @@ func run(args []string) int {
 
 	var err error
 	switch rest[0] {
+	case "init":
+		err = initCommand(rest[1:])
 	case "run":
 		err = r.runProject(".")
 	case "pack":
@@ -121,6 +123,7 @@ func newRunner(opts options) *runner {
 func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "Usage:\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] <script.gs>\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] init [dir]\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] run\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] pack [dir] [out.gspkg]\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] dist [dir] [out]\n\n")
@@ -128,6 +131,57 @@ func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "Flags:\n")
 	fs.PrintDefaults()
 }
+
+func initCommand(args []string) error {
+	dir := "."
+	if len(args) > 0 {
+		dir = args[0]
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("init expects at most 1 argument: [dir]")
+	}
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(absDir, 0755); err != nil {
+		return err
+	}
+	name := filepath.Base(filepath.Clean(absDir))
+	if name == "." || name == string(filepath.Separator) {
+		name = "goscript-app"
+	}
+	files := map[string]string{
+		"project.toml": initProjectTemplate(name),
+		"main.gs":      initMainTemplate,
+	}
+	for rel, contents := range files {
+		path := filepath.Join(absDir, rel)
+		if _, err := os.Stat(path); err == nil {
+			return fmt.Errorf("%s already exists", path)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(os.Stdout, absDir)
+	return nil
+}
+
+func initProjectTemplate(name string) string {
+	return fmt.Sprintf(`[project]
+name = %q
+version = "0.1.0"
+entry = "main.gs"
+`, name)
+}
+
+const initMainTemplate = `function main() {
+  println("Hello, GoScript!");
+}
+`
 
 func bundleCommand(args []string) error {
 	if len(args) < 1 || len(args) > 2 {

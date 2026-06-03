@@ -121,6 +121,48 @@ func TestRunProject(t *testing.T) {
 	}
 }
 
+func TestInitCommandCreatesProject(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "hello-app")
+	if err := initCommand([]string{dir}); err != nil {
+		t.Fatal(err)
+	}
+	project, err := os.ReadFile(filepath.Join(dir, "project.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(project), `name = "hello-app"`) || !strings.Contains(string(project), `entry = "main.gs"`) {
+		t.Fatalf("unexpected project.toml:\n%s", project)
+	}
+	main, err := os.ReadFile(filepath.Join(dir, "main.gs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(main), `function main()`) {
+		t.Fatalf("unexpected main.gs:\n%s", main)
+	}
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	if err := r.runProject(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInitCommandDoesNotOverwriteExistingFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "project.toml"), `[project]
+name = "existing"
+`)
+	if err := initCommand([]string{dir}); err == nil {
+		t.Fatal("expected init to reject existing project.toml")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "project.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `name = "existing"`) {
+		t.Fatalf("init overwrote project.toml:\n%s", data)
+	}
+}
+
 func TestRunProjectUsesProjectWorkingDirectory(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "project.toml"), "[project]\nentry = \"app.gs\"\n")

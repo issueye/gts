@@ -44,11 +44,12 @@ func (e *Environment) ObjectManager() *ObjectManager {
 }
 
 func (e *Environment) Get(name string) (Object, bool) {
-	obj, ok := e.store[name]
-	if !ok && e.parent != nil {
-		return e.parent.Get(name)
+	for env := e; env != nil; env = env.parent {
+		if obj, ok := env.store[name]; ok {
+			return obj, true
+		}
 	}
-	return obj, ok
+	return e.VM().GetGlobalConst(name)
 }
 
 func (e *Environment) Set(name string, val Object) Object {
@@ -66,31 +67,38 @@ func (e *Environment) SetConst(name string, val Object) Object {
 // SetUp sets a variable in the nearest ancestor scope where it exists,
 // creating it in the current scope if not found anywhere.
 func (e *Environment) SetUp(name string, val Object) Object {
-	if _, ok := e.store[name]; ok {
-		if e.consts[name] {
-			return nil
+	for env := e; env != nil; env = env.parent {
+		if _, ok := env.store[name]; ok {
+			if env.consts[name] {
+				return nil
+			}
+			env.store[name] = val
+			return val
 		}
-		e.store[name] = val
-		return val
+		if env.parent == nil {
+			if env.VM().HasGlobalConst(name) {
+				return nil
+			}
+			env.store[name] = val
+			env.consts[name] = false
+			return val
+		}
 	}
-	if e.parent != nil {
-		return e.parent.SetUp(name, val)
-	}
-	e.store[name] = val
-	e.consts[name] = false
 	return val
 }
 
 func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
-	if _, ok := e.store[name]; ok {
-		if e.consts[name] {
-			return nil, true, true
+	for env := e; env != nil; env = env.parent {
+		if _, ok := env.store[name]; ok {
+			if env.consts[name] {
+				return nil, true, true
+			}
+			env.store[name] = val
+			return val, true, false
 		}
-		e.store[name] = val
-		return val, true, false
 	}
-	if e.parent != nil {
-		return e.parent.Assign(name, val)
+	if e.VM().HasGlobalConst(name) {
+		return nil, true, true
 	}
 	return nil, false, false
 }
@@ -104,11 +112,12 @@ func (e *Environment) SetHere(name string, val Object) Object {
 
 // Has checks if name exists in this environment.
 func (e *Environment) Has(name string) bool {
-	_, ok := e.store[name]
-	if !ok && e.parent != nil {
-		return e.parent.Has(name)
+	for env := e; env != nil; env = env.parent {
+		if _, ok := env.store[name]; ok {
+			return true
+		}
 	}
-	return ok
+	return e.VM().HasGlobalConst(name)
 }
 
 // NewScope creates a child environment (for block scope).

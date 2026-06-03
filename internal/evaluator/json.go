@@ -12,7 +12,7 @@ import (
 )
 
 func registerJSON(env *object.Environment) {
-	env.Set("JSON", &object.Hash{
+	env.VM().SetGlobalConst("JSON", &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hk("stringify"): {Key: &object.String{Value: "stringify"}, Value: &object.Builtin{Name: "JSON.stringify", Fn: builtinJSONStringify}},
 			hk("parse"):     {Key: &object.String{Value: "parse"}, Value: &object.Builtin{Name: "JSON.parse", Fn: builtinJSONParse}},

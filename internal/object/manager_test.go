@@ -235,3 +235,62 @@ func TestVirtualMachineSpawnersAreIndependent(t *testing.T) {
 		t.Fatal("vm b should use its own spawner")
 	}
 }
+
+func TestVirtualMachineGlobalConstantsAreSharedAndIsolated(t *testing.T) {
+	vmA := NewVirtualMachine()
+	vmB := NewVirtualMachine()
+	envA := vmA.NewEnvironment()
+	childA := envA.NewScope()
+	envB := vmB.NewEnvironment()
+
+	vmA.SetGlobalConst("answer", &Number{Value: 42})
+
+	if got, ok := childA.Get("answer"); !ok || got.Inspect() != "42" {
+		t.Fatalf("child scope should read vm global const, got %v ok=%v", got, ok)
+	}
+	if _, ok := envB.Get("answer"); ok {
+		t.Fatal("global constants should not leak across virtual machines")
+	}
+}
+
+func TestEnvironmentGlobalConstantsAreReadOnlyButShadowable(t *testing.T) {
+	vm := NewVirtualMachine()
+	env := vm.NewEnvironment()
+	vm.SetGlobalConst("name", &String{Value: "global"})
+
+	if _, ok, isConst := env.Assign("name", &String{Value: "changed"}); !ok || !isConst {
+		t.Fatalf("assigning a vm global const should report an existing const binding, ok=%v const=%v", ok, isConst)
+	}
+
+	child := env.NewScope()
+	child.Set("name", &String{Value: "local"})
+	if got, ok := child.Get("name"); !ok || got.Inspect() != "local" {
+		t.Fatalf("local binding should shadow vm global const, got %v ok=%v", got, ok)
+	}
+	if _, ok, isConst := child.Assign("name", &String{Value: "changed"}); !ok || isConst {
+		t.Fatalf("local shadow should remain mutable, ok=%v const=%v", ok, isConst)
+	}
+	if got, _ := child.Get("name"); got.Inspect() != "changed" {
+		t.Fatalf("local shadow assignment should update local binding, got %q", got.Inspect())
+	}
+	if got, _ := env.Get("name"); got.Inspect() != "global" {
+		t.Fatalf("vm global const should remain unchanged, got %q", got.Inspect())
+	}
+}
+
+func TestVirtualMachineGlobalConstantsSnapshot(t *testing.T) {
+	vm := NewVirtualMachine()
+	vm.SetGlobalConst("one", &Number{Value: 1})
+
+	snapshot := vm.GlobalConstants()
+	snapshot["one"] = &Number{Value: 2}
+	snapshot["two"] = &Number{Value: 2}
+
+	got, ok := vm.GetGlobalConst("one")
+	if !ok || got.Inspect() != "1" {
+		t.Fatalf("snapshot mutation should not affect stored constant, got %v ok=%v", got, ok)
+	}
+	if _, ok := vm.GetGlobalConst("two"); ok {
+		t.Fatal("snapshot mutation should not add vm constants")
+	}
+}

@@ -6,7 +6,7 @@ import (
 )
 
 func registerArray(env *object.Environment) {
-	env.Set("Array", callableBuiltinObject("Array", builtinArrayConstructor, map[string]object.Object{
+	env.VM().SetGlobalConst("Array", callableBuiltinObject("Array", builtinArrayConstructor, map[string]object.Object{
 		"isArray": &object.Builtin{Name: "Array.isArray", Fn: builtinArrayIsArray},
 		"of":      &object.Builtin{Name: "Array.of", Fn: builtinArrayOf},
 		"from":    &object.Builtin{Name: "Array.from", Fn: builtinArrayFrom},

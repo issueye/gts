@@ -45,7 +45,7 @@ func registerConsole(env *object.Environment) {
 		key := &object.String{Value: name}
 		pairs[hashKey(key)] = object.HashPair{Key: key, Value: value}
 	}
-	env.Set("console", &object.Hash{Pairs: pairs})
+	env.VM().SetGlobalConst("console", &object.Hash{Pairs: pairs})
 }
 
 func builtinConsoleLog(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

@@ -19,15 +19,44 @@ func RegisterBuiltins(env *object.Environment) {
 type RequireFn func(path string) (object.Object, error)
 
 func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
+	registerStandardGlobalConstants(env)
+
+	env.VM().SetEvaluator(func(node interface{}, env *object.Environment) object.Object {
+		return Eval(node.(ast.Node), env)
+	})
+
+	if require != nil {
+		env.Set("require", &object.Builtin{Name: "require", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+			if len(args) < 1 {
+				return object.NewError(pos, "require requires a path string")
+			}
+			path, ok := args[0].(*object.String)
+			if !ok {
+				return object.NewError(pos, "require requires a string path")
+			}
+			result, err := require(path.Value)
+			if err != nil {
+				return object.NewError(pos, "require: %v", err)
+			}
+			return result
+		}})
+	}
+}
+
+func registerStandardGlobalConstants(env *object.Environment) {
+	if env.VM().HasGlobalConst("Math") {
+		return
+	}
+
 	registerConsole(env)
-	env.Set("println", &object.Builtin{Name: "println", Fn: builtinPrintln})
-	env.Set("print", &object.Builtin{Name: "print", Fn: builtinPrint})
-	env.Set("String", callableBuiltinObject("String", builtinString, map[string]object.Object{
+	env.VM().SetGlobalConst("println", &object.Builtin{Name: "println", Fn: builtinPrintln})
+	env.VM().SetGlobalConst("print", &object.Builtin{Name: "print", Fn: builtinPrint})
+	env.VM().SetGlobalConst("String", callableBuiltinObject("String", builtinString, map[string]object.Object{
 		"fromCharCode":  &object.Builtin{Name: "String.fromCharCode", Fn: builtinStringFromCharCode},
 		"fromCodePoint": &object.Builtin{Name: "String.fromCodePoint", Fn: builtinStringFromCodePoint},
 		"raw":           &object.Builtin{Name: "String.raw", Fn: builtinStringRaw},
 	}))
-	env.Set("Number", callableBuiltinObject("Number", builtinNumber, map[string]object.Object{
+	env.VM().SetGlobalConst("Number", callableBuiltinObject("Number", builtinNumber, map[string]object.Object{
 		"MAX_SAFE_INTEGER":  &object.Number{Value: 9007199254740991},
 		"MIN_SAFE_INTEGER":  &object.Number{Value: -9007199254740991},
 		"MAX_VALUE":         &object.Number{Value: math.MaxFloat64},
@@ -43,29 +72,29 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 		"parseFloat":        &object.Builtin{Name: "Number.parseFloat", Fn: builtinParseFloat},
 		"parseInt":          &object.Builtin{Name: "Number.parseInt", Fn: builtinParseInt},
 	}))
-	env.Set("Boolean", callableBuiltinObject("Boolean", builtinBoolean, map[string]object.Object{
+	env.VM().SetGlobalConst("Boolean", callableBuiltinObject("Boolean", builtinBoolean, map[string]object.Object{
 		"__constructBoolean": object.TRUE,
 	}))
-	env.Set("Date", callableBuiltinObject("Date", builtinDate, map[string]object.Object{
+	env.VM().SetGlobalConst("Date", callableBuiltinObject("Date", builtinDate, map[string]object.Object{
 		"now":   &object.Builtin{Name: "Date.now", Fn: builtinDateNow},
 		"parse": &object.Builtin{Name: "Date.parse", Fn: builtinDateParse},
 		"UTC":   &object.Builtin{Name: "Date.UTC", Fn: builtinDateUTC},
 	}))
-	env.Set("RegExp", callableBuiltinObject("RegExp", builtinRegExp, nil))
-	env.Set("Error", &object.Builtin{Name: "Error", Fn: builtinError})
-	env.Set("TypeError", &object.Builtin{Name: "TypeError", Fn: builtinNamedError("TypeError")})
-	env.Set("RangeError", &object.Builtin{Name: "RangeError", Fn: builtinNamedError("RangeError")})
-	env.Set("ReferenceError", &object.Builtin{Name: "ReferenceError", Fn: builtinNamedError("ReferenceError")})
-	env.Set("SyntaxError", &object.Builtin{Name: "SyntaxError", Fn: builtinNamedError("SyntaxError")})
-	env.Set("parseInt", &object.Builtin{Name: "parseInt", Fn: builtinParseInt})
-	env.Set("parseFloat", &object.Builtin{Name: "parseFloat", Fn: builtinParseFloat})
-	env.Set("isNaN", &object.Builtin{Name: "isNaN", Fn: builtinIsNaN})
-	env.Set("isFinite", &object.Builtin{Name: "isFinite", Fn: builtinIsFinite})
-	env.Set("encodeURI", &object.Builtin{Name: "encodeURI", Fn: builtinEncodeURI})
-	env.Set("decodeURI", &object.Builtin{Name: "decodeURI", Fn: builtinDecodeURI})
-	env.Set("encodeURIComponent", &object.Builtin{Name: "encodeURIComponent", Fn: builtinEncodeURIComponent})
-	env.Set("decodeURIComponent", &object.Builtin{Name: "decodeURIComponent", Fn: builtinDecodeURIComponent})
-	env.Set("Math", &object.Hash{
+	env.VM().SetGlobalConst("RegExp", callableBuiltinObject("RegExp", builtinRegExp, nil))
+	env.VM().SetGlobalConst("Error", &object.Builtin{Name: "Error", Fn: builtinError})
+	env.VM().SetGlobalConst("TypeError", &object.Builtin{Name: "TypeError", Fn: builtinNamedError("TypeError")})
+	env.VM().SetGlobalConst("RangeError", &object.Builtin{Name: "RangeError", Fn: builtinNamedError("RangeError")})
+	env.VM().SetGlobalConst("ReferenceError", &object.Builtin{Name: "ReferenceError", Fn: builtinNamedError("ReferenceError")})
+	env.VM().SetGlobalConst("SyntaxError", &object.Builtin{Name: "SyntaxError", Fn: builtinNamedError("SyntaxError")})
+	env.VM().SetGlobalConst("parseInt", &object.Builtin{Name: "parseInt", Fn: builtinParseInt})
+	env.VM().SetGlobalConst("parseFloat", &object.Builtin{Name: "parseFloat", Fn: builtinParseFloat})
+	env.VM().SetGlobalConst("isNaN", &object.Builtin{Name: "isNaN", Fn: builtinIsNaN})
+	env.VM().SetGlobalConst("isFinite", &object.Builtin{Name: "isFinite", Fn: builtinIsFinite})
+	env.VM().SetGlobalConst("encodeURI", &object.Builtin{Name: "encodeURI", Fn: builtinEncodeURI})
+	env.VM().SetGlobalConst("decodeURI", &object.Builtin{Name: "decodeURI", Fn: builtinDecodeURI})
+	env.VM().SetGlobalConst("encodeURIComponent", &object.Builtin{Name: "encodeURIComponent", Fn: builtinEncodeURIComponent})
+	env.VM().SetGlobalConst("decodeURIComponent", &object.Builtin{Name: "decodeURIComponent", Fn: builtinDecodeURIComponent})
+	env.VM().SetGlobalConst("Math", &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hashKey(&object.String{Value: "E"}):       {Key: &object.String{Value: "E"}, Value: &object.Number{Value: math.E}},
 			hashKey(&object.String{Value: "LN2"}):     {Key: &object.String{Value: "LN2"}, Value: &object.Number{Value: math.Ln2}},
@@ -108,27 +137,6 @@ func RegisterBuiltinsWithCache(env *object.Environment, require RequireFn) {
 	registerArray(env)
 	registerMapSet(env)
 	registerAsync(env)
-
-	env.VM().SetEvaluator(func(node interface{}, env *object.Environment) object.Object {
-		return Eval(node.(ast.Node), env)
-	})
-
-	if require != nil {
-		env.Set("require", &object.Builtin{Name: "require", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-			if len(args) < 1 {
-				return object.NewError(pos, "require requires a path string")
-			}
-			path, ok := args[0].(*object.String)
-			if !ok {
-				return object.NewError(pos, "require requires a string path")
-			}
-			result, err := require(path.Value)
-			if err != nil {
-				return object.NewError(pos, "require: %v", err)
-			}
-			return result
-		}})
-	}
 }
 
 func builtinPrintln(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

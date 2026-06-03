@@ -10,16 +10,20 @@ import (
 // Environments inside the same VM share this manager. Separate VM instances get
 // separate managers, so their runtime objects, ids, and stats stay independent.
 type VirtualMachine struct {
-	manager   *ObjectManager
-	asyncWG   sync.WaitGroup
-	nextTimer int64
-	spawn     func(func())
-	importer  func(env *Environment, path string) (Object, error)
-	evaluator func(node interface{}, env *Environment) Object
+	manager         *ObjectManager
+	asyncWG         sync.WaitGroup
+	nextTimer       int64
+	globalConstants atomic.Value // stores map[string]Object
+	globalMu        sync.Mutex
+	spawn           func(func())
+	importer        func(env *Environment, path string) (Object, error)
+	evaluator       func(node interface{}, env *Environment) Object
 }
 
 func NewVirtualMachine() *VirtualMachine {
-	return &VirtualMachine{manager: NewObjectManager()}
+	vm := &VirtualMachine{manager: NewObjectManager()}
+	vm.globalConstants.Store(map[string]Object{})
+	return vm
 }
 
 func (vm *VirtualMachine) ObjectManager() *ObjectManager {
@@ -27,6 +31,61 @@ func (vm *VirtualMachine) ObjectManager() *ObjectManager {
 		vm.manager = NewObjectManager()
 	}
 	return vm.manager
+}
+
+func (vm *VirtualMachine) globalConstantMap() map[string]Object {
+	if vm == nil {
+		return nil
+	}
+	if constants, ok := vm.globalConstants.Load().(map[string]Object); ok {
+		return constants
+	}
+	empty := map[string]Object{}
+	vm.globalConstants.Store(empty)
+	return empty
+}
+
+// SetGlobalConst registers a VM-level read-only binding.
+//
+// Global constants are visible to every environment in the VM after local and
+// parent scopes are checked. They are copy-on-write so reads stay lock-free on
+// the identifier hot path.
+func (vm *VirtualMachine) SetGlobalConst(name string, val Object) Object {
+	if vm == nil || name == "" {
+		return val
+	}
+	vm.globalMu.Lock()
+	defer vm.globalMu.Unlock()
+
+	current := vm.globalConstantMap()
+	next := make(map[string]Object, len(current)+1)
+	for key, value := range current {
+		next[key] = value
+	}
+	next[name] = val
+	vm.globalConstants.Store(next)
+	return val
+}
+
+func (vm *VirtualMachine) GetGlobalConst(name string) (Object, bool) {
+	constants := vm.globalConstantMap()
+	obj, ok := constants[name]
+	return obj, ok
+}
+
+func (vm *VirtualMachine) HasGlobalConst(name string) bool {
+	_, ok := vm.GetGlobalConst(name)
+	return ok
+}
+
+// GlobalConstants returns a stable snapshot of VM-level read-only bindings.
+func (vm *VirtualMachine) GlobalConstants() map[string]Object {
+	current := vm.globalConstantMap()
+	out := make(map[string]Object, len(current))
+	for key, value := range current {
+		out[key] = value
+	}
+	return out
 }
 
 func (vm *VirtualMachine) NewEnvironment() *Environment {

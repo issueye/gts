@@ -9,7 +9,7 @@ import (
 )
 
 func registerAsync(env *object.Environment) {
-	env.Set("Promise", &object.Hash{
+	env.VM().SetGlobalConst("Promise", &object.Hash{
 		Pairs: map[object.HashKey]object.HashPair{
 			hk("__promiseConstructor"): {Key: &object.String{Value: "__promiseConstructor"}, Value: object.TRUE},
 			hk("resolve"):              {Key: &object.String{Value: "resolve"}, Value: &object.Builtin{Name: "Promise.resolve", Fn: builtinPromiseResolve}},
@@ -19,12 +19,12 @@ func registerAsync(env *object.Environment) {
 			hk("allSettled"):           {Key: &object.String{Value: "allSettled"}, Value: &object.Builtin{Name: "Promise.allSettled", Fn: builtinPromiseAllSettled}},
 		},
 	})
-	env.Set("setTimeout", &object.Builtin{Name: "setTimeout", Fn: builtinSetTimeout})
-	env.Set("clearTimeout", &object.Builtin{Name: "clearTimeout", Fn: builtinClearTimeout})
-	env.Set("setInterval", &object.Builtin{Name: "setInterval", Fn: builtinSetInterval})
-	env.Set("clearInterval", &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval})
-	env.Set("queueMicrotask", &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask})
-	env.Set("sleep", &object.Builtin{Name: "sleep", Fn: builtinSleep})
+	env.VM().SetGlobalConst("setTimeout", &object.Builtin{Name: "setTimeout", Fn: builtinSetTimeout})
+	env.VM().SetGlobalConst("clearTimeout", &object.Builtin{Name: "clearTimeout", Fn: builtinClearTimeout})
+	env.VM().SetGlobalConst("setInterval", &object.Builtin{Name: "setInterval", Fn: builtinSetInterval})
+	env.VM().SetGlobalConst("clearInterval", &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval})
+	env.VM().SetGlobalConst("queueMicrotask", &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask})
+	env.VM().SetGlobalConst("sleep", &object.Builtin{Name: "sleep", Fn: builtinSleep})
 }
 
 func constructPromise(env *object.Environment, args []object.Object, pos ast.Position) object.Object {
