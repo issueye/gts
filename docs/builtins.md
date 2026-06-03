@@ -391,6 +391,7 @@ err.stack;
 | `@std/crypto` | `randomUUID`, `randomBytes`, `sha1`, `sha256`, `sha512`, `hmac`, `pbkdf2`, `timingSafeEqual` |
 | `@std/events` | `EventEmitter` 基础版：`on`, `once`, `off`, `emit`, `listeners`, `listenerCount`, `removeAllListeners` |
 | `@std/timers` | `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `queueMicrotask`, `sleep` 的模块化别名 |
+| `@std/log` | `createFileLogger(path, opts)`；logger 支持 `debug/info/warn/error/log/close`，可选 `append/timestamp/json/level` |
 | `@std/buffer` | `from`, `alloc`, `byteLength`, `concat`, `isBuffer`；支持 `utf8`、`hex`、`base64` |
 | `@std/process` | `argv`, `argv0`, `env`, `envObject`, `pid`, `cwd`, `chdir`, `execPath`, `getenv`, `setenv`, `unsetenv`, `uptime`, `hrtime`, `version`, `exit` |
 

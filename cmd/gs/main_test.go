@@ -1095,6 +1095,57 @@ mimeKind + ":" + mailKind;
 	}
 }
 
+func TestStdLogModuleWritesToFile(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "log.gs")
+	logFile := filepath.Join(dir, "app.log")
+	jsonFile := filepath.Join(dir, "app.jsonl")
+	appSource := strings.NewReplacer(
+		"__LOG__", strings.ReplaceAll(logFile, `\`, `\\`),
+		"__JSON__", strings.ReplaceAll(jsonFile, `\`, `\\`),
+	).Replace(`
+let fs = require("@std/fs");
+let log = require("@std/log");
+
+let logger = log.createFileLogger("__LOG__", { append: false, timestamp: false, level: "info" });
+logger.debug("hidden");
+logger.info("started", 1);
+logger.warn("careful");
+logger.error("failed");
+logger.close();
+
+let again = log.createFileLogger("__LOG__", { append: true, timestamp: false });
+again.info("again");
+again.close();
+
+let json = log.createFileLogger("__JSON__", { append: false, timestamp: false, json: true });
+json.info("structured");
+json.close();
+
+let text = fs.readFileSync("__LOG__");
+let jsonText = fs.readFileSync("__JSON__");
+
+let kind = "log-bad";
+if (!text.includes("hidden") && text.includes("[INFO] started 1") && text.includes("[WARN] careful") && text.includes("[ERROR] failed") && text.includes("[INFO] again") && jsonText.includes("\"level\":\"info\"") && jsonText.includes("\"message\":\"structured\"")) {
+  kind = "log";
+}
+kind;
+`)
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "log" {
+		t.Fatalf("want log, got %T %v", result, result)
+	}
+}
+
 func TestStdConfigCodecModules(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "config_codecs.gs")
