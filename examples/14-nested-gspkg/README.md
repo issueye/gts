@@ -1,6 +1,8 @@
 # 14-nested-gspkg
 
 Demonstrates nested single-file package dependencies.
+The `tools` package also uses an absolute-style import alias:
+`@/* = "src/*.gs"`.
 
 ```text
 app.gs

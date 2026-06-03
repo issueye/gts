@@ -1243,6 +1243,33 @@ label("ok");
 	}
 }
 
+func TestPackageAbsoluteStyleAliasRuntime(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "project.toml"), `[package]
+name = "app"
+main = "src/app.gs"
+
+[imports]
+"@/*" = "src/*.gs"
+`)
+	writeTestFile(t, filepath.Join(dir, "src", "internal", "util.gs"), `export function label(x) { return "alias:" + x; }`)
+	app := filepath.Join(dir, "src", "app.gs")
+	writeTestFile(t, app, `
+import { label } from "@/internal/util";
+label("ok");
+`)
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "alias:ok" {
+		t.Fatalf("want alias:ok, got %T %v", result, result)
+	}
+}
+
 func TestPackageDependencyResolvesOwnDependencies(t *testing.T) {
 	dir := t.TempDir()
 	toolsDir := filepath.Join(dir, "vendor", "tools")
@@ -1358,6 +1385,55 @@ value;
 	str, ok := result.(*object.String)
 	if !ok || str.Value != "[pkgfile]" {
 		t.Fatalf("want [pkgfile], got %T %v", result, result)
+	}
+}
+
+func TestImportPackageFileDependencyWithAbsoluteStyleAlias(t *testing.T) {
+	dir := t.TempDir()
+	pkgRoot := filepath.Join(dir, "tools-src")
+	writeTestFile(t, filepath.Join(pkgRoot, "project.toml"), `[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[exports]
+"." = "src/index.gs"
+
+[imports]
+"@/*" = "src/*.gs"
+`)
+	writeTestFile(t, filepath.Join(pkgRoot, "src", "index.gs"), `
+import { decorate } from "@/internal/format";
+export const value = decorate("pkgfile-alias");
+`)
+	writeTestFile(t, filepath.Join(pkgRoot, "src", "internal", "format.gs"), `
+export function decorate(x) { return "[" + x + "]"; }
+`)
+	pkgPath := filepath.Join(dir, "vendor", "tools.gspkg")
+	if err := packCommand([]string{pkgRoot, pkgPath}); err != nil {
+		t.Fatal(err)
+	}
+
+	writeTestFile(t, filepath.Join(dir, "project.toml"), `[project]
+entry = "app.gs"
+
+[dependencies]
+"tools" = "file:vendor/tools.gspkg"
+`)
+	app := filepath.Join(dir, "app.gs")
+	writeTestFile(t, app, `
+import { value } from "tools";
+value;
+`)
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(app, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "[pkgfile-alias]" {
+		t.Fatalf("want [pkgfile-alias], got %T %v", result, result)
 	}
 }
 

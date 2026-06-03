@@ -129,6 +129,24 @@ main = "src/main.gs"
 	assertPath(t, resolved.Path, filepath.Join(root, "src", "internal", "format.gs"))
 }
 
+func TestResolverPackageImportAliasAbsoluteStyle(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "project.toml"), `[package]
+name = "app"
+main = "src/main.gs"
+
+[imports]
+"@/*" = "src/*.gs"
+`)
+	writeFile(t, filepath.Join(root, "src", "lib", "format.gs"), "")
+
+	resolved, err := NewResolver("").Resolve("@/lib/format", ResolveOptions{BaseDir: filepath.Join(root, "src")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPath(t, resolved.Path, filepath.Join(root, "src", "lib", "format.gs"))
+}
+
 func TestResolverPackageDependencyUsesNearestPackageRoot(t *testing.T) {
 	root := t.TempDir()
 	tools := filepath.Join(root, "vendor", "tools")
@@ -272,6 +290,35 @@ main = "src/index.gs"
 	}
 	if resolved.ArchivePath != "src/index.gs" {
 		t.Fatalf("want nested archive path src/index.gs, got %q", resolved.ArchivePath)
+	}
+}
+
+func TestResolverPackageFileImportAliasAbsoluteStyle(t *testing.T) {
+	root := t.TempDir()
+	pkgRoot := filepath.Join(root, "tools-src")
+	pkgPath := filepath.Join(root, "tools.gspkg")
+	writeFile(t, filepath.Join(pkgRoot, "project.toml"), `[package]
+name = "tools"
+version = "1.0.0"
+main = "src/index.gs"
+
+[imports]
+"@/*" = "src/*.gs"
+`)
+	writeFile(t, filepath.Join(pkgRoot, "src", "internal", "format.gs"), "")
+	if err := packagefile.PackDirectory(pkgRoot, pkgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := NewResolver(root).Resolve("@/internal/format", ResolveOptions{
+		ProjectRoot: root,
+		BaseDir:     filepath.ToSlash(pkgPath) + "!src",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.PackageFile == "" || resolved.ArchivePath != "src/internal/format.gs" {
+		t.Fatalf("unexpected package file alias resolution: %#v", resolved)
 	}
 }
 

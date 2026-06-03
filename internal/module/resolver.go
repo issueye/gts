@@ -78,8 +78,8 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 		if isPathSpecifier(specifier) {
 			return resolvePackageFileRelative(specifier, pkgPath, archiveBase)
 		}
-		if strings.HasPrefix(specifier, "#") {
-			return resolvePackageFileImportAlias(specifier, pkgPath)
+		if resolved, ok, err := tryResolvePackageFileImportAlias(specifier, pkgPath); ok || err != nil {
+			return resolved, err
 		}
 		if !strings.HasPrefix(specifier, "@std/") && !strings.HasPrefix(specifier, "@agent/") {
 			return resolvePackageFromPackageFile(specifier, pkgPath, projectRoot)
@@ -115,8 +115,8 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 		return sourceModule(specifier, path, ModuleKindSource, "", ""), nil
 	}
 
-	if strings.HasPrefix(specifier, "#") {
-		return r.resolveImportAlias(specifier, baseDir, projectRoot)
+	if resolved, ok, err := r.tryResolveImportAlias(specifier, baseDir, projectRoot); ok || err != nil {
+		return resolved, err
 	}
 
 	return r.resolvePackage(specifier, baseDir, projectRoot)
@@ -151,23 +151,26 @@ func resolvePackageFileRelative(specifier, pkgPath, archiveBase string) (Resolve
 	}, nil
 }
 
-func resolvePackageFileImportAlias(specifier, pkgPath string) (ResolvedModule, error) {
-	pkg, err := packagefile.Open(pkgPath)
+func tryResolvePackageFileImportAlias(specifier, pkgPath string) (ResolvedModule, bool, error) {
+	pkg, err := openPackageFileRef(pkgPath)
 	if err != nil {
-		return ResolvedModule{}, err
+		return ResolvedModule{}, false, err
 	}
 	defer pkg.Close()
 	target, ok := matchPatternMap(pkg.Manifest.Imports, specifier)
 	if !ok {
-		return ResolvedModule{}, fmt.Errorf("package import %q is not defined", specifier)
+		return ResolvedModule{}, false, nil
 	}
-	path, err := resolveArchiveSourcePath(pkg, target)
+	path, err := resolveArchiveSourcePath(pkg, filepath.ToSlash(filepath.Join(pkg.Root, target)))
 	if err != nil {
-		return ResolvedModule{}, fmt.Errorf("package import %q not found: %w", specifier, err)
+		return ResolvedModule{}, true, fmt.Errorf("package import %q not found: %w", specifier, err)
 	}
 	name := packageNameFromManifest(pkg.Manifest, "")
 	version := pkg.Manifest.Package.Version
-	absPkg, _ := filepath.Abs(pkgPath)
+	absPkg := pkg.Path
+	if !strings.Contains(absPkg, "!") {
+		absPkg, _ = filepath.Abs(absPkg)
+	}
 	return ResolvedModule{
 		ID:          packageFileID(name, version, specifier, absPkg, path),
 		Kind:        ModuleKindPackage,
@@ -177,7 +180,28 @@ func resolvePackageFileImportAlias(specifier, pkgPath string) (ResolvedModule, e
 		PackageFile: absPkg,
 		ArchivePath: path,
 		PackageName: name,
-	}, nil
+	}, true, nil
+}
+
+func openPackageFileRef(pkgPath string) (*packagefile.Package, error) {
+	if !strings.Contains(pkgPath, "!") {
+		return packagefile.Open(pkgPath)
+	}
+	parts := strings.Split(pkgPath, "!")
+	pkg, err := packagefile.Open(parts[0])
+	if err != nil {
+		return nil, err
+	}
+	for _, nested := range parts[1:] {
+		next, err := pkg.OpenNested(nested)
+		if err != nil {
+			_ = pkg.Close()
+			return nil, err
+		}
+		_ = pkg.Close()
+		pkg = next
+	}
+	return pkg, nil
 }
 
 func resolvePackageFromPackageFile(specifier, pkgPath, projectRoot string) (ResolvedModule, error) {
@@ -325,7 +349,7 @@ func resolveOpenedPackageFile(specifier string, pkg *packagefile.Package, packag
 	}, nil
 }
 
-func (r *Resolver) resolveImportAlias(specifier, baseDir, projectRoot string) (ResolvedModule, error) {
+func (r *Resolver) tryResolveImportAlias(specifier, baseDir, projectRoot string) (ResolvedModule, bool, error) {
 	currentRoot := FindPackageRoot(baseDir)
 	if currentRoot == "" {
 		currentRoot = projectRoot
@@ -335,17 +359,17 @@ func (r *Resolver) resolveImportAlias(specifier, baseDir, projectRoot string) (R
 	}
 	manifest, err := loadManifest(currentRoot)
 	if err != nil {
-		return ResolvedModule{}, err
+		return ResolvedModule{}, false, err
 	}
 	target, ok := matchPatternMap(manifest.Imports, specifier)
 	if !ok {
-		return ResolvedModule{}, fmt.Errorf("package import %q is not defined", specifier)
+		return ResolvedModule{}, false, nil
 	}
 	path, err := resolveSourcePath(filepath.Join(currentRoot, target))
 	if err != nil {
-		return ResolvedModule{}, fmt.Errorf("package import %q not found: %w", specifier, err)
+		return ResolvedModule{}, true, fmt.Errorf("package import %q not found: %w", specifier, err)
 	}
-	return sourceModule(specifier, path, ModuleKindSource, currentRoot, packageNameFromManifest(manifest, "")), nil
+	return sourceModule(specifier, path, ModuleKindSource, currentRoot, packageNameFromManifest(manifest, "")), true, nil
 }
 
 func isPathSpecifier(specifier string) bool {
