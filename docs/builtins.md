@@ -373,7 +373,7 @@ err.stack;
 | `@std/exec` | `run`, `output`, `combinedOutput`, `start`, `command`, `spawn`；`spawn` 返回 stdin/stdout/stderr stream、`write/writeln/closeStdin/wait/kill` |
 | `@std/pty` | `spawn`, `open`；返回 PTY/ConPTY 进程对象，含 `output`, `write`, `writeln`, `readText`, `readLine`, `resize`, `wait`, `kill`, `close` |
 | `@std/terminal` | `isTTY`, `size`, `read`, `write`, `writeln`, `setRawMode`；用于宿主终端探测、读写和 raw mode 恢复 |
-| `@std/net/http/client` | `request`, `get`, `post`, `stream` |
+| `@std/net/http/client` | `request`, `fetch`, `get`, `post`, `stream`；`request/fetch({ stream: true })` 或 `responseType: "stream"` 返回带 `body` readable stream 的响应对象 |
 | `@std/net/http/server` | `createServer` |
 | `@std/net/socket/client`、`@std/net/socket/server` | TCP socket client/server |
 | `@std/net/ws/client`、`@std/net/ws/server` | WebSocket client/server |

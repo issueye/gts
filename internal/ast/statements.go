@@ -77,6 +77,7 @@ type Param struct {
 	TypeAnno *TypeAnnotation
 	Default  Expression
 	Spread   bool
+	Optional bool
 }
 
 // BlockStmt is a `{ ... }` block.

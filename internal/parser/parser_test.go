@@ -78,6 +78,42 @@ func TestParse_FuncDecl(t *testing.T) {
 	}
 }
 
+func TestParse_OptionalParams(t *testing.T) {
+	input := `function greet(name?: string, title?) { return name; }`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	fn, ok := prog.Body[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("want FuncDecl, got %T", prog.Body[0])
+	}
+	if len(fn.Params) != 2 {
+		t.Fatalf("want 2 params, got %d", len(fn.Params))
+	}
+	if !fn.Params[0].Optional || fn.Params[0].TypeAnno == nil || !fn.Params[0].TypeAnno.Optional || fn.Params[0].TypeAnno.Name != "string" {
+		t.Fatalf("expected first param to be optional string, got %+v", fn.Params[0])
+	}
+	if !fn.Params[1].Optional || fn.Params[1].TypeAnno == nil || !fn.Params[1].TypeAnno.Optional || fn.Params[1].TypeAnno.Name != "any" {
+		t.Fatalf("expected second param to be optional any, got %+v", fn.Params[1])
+	}
+}
+
+func TestParse_ArrowOptionalParams(t *testing.T) {
+	input := `let f = (value?: number) => value;`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	stmt := prog.Body[0].(*ast.LetStmt)
+	fn, ok := stmt.Value.(*ast.ArrowFuncExpr)
+	if !ok {
+		t.Fatalf("want ArrowFuncExpr, got %T", stmt.Value)
+	}
+	if len(fn.Params) != 1 || !fn.Params[0].Optional {
+		t.Fatalf("expected one optional param, got %+v", fn.Params)
+	}
+	if fn.Params[0].TypeAnno == nil || !fn.Params[0].TypeAnno.Optional || fn.Params[0].TypeAnno.Name != "number" {
+		t.Fatalf("expected optional number annotation, got %+v", fn.Params[0].TypeAnno)
+	}
+}
+
 func TestParse_ReturnStmt(t *testing.T) {
 	input := `return 42;`
 	prog := Parse(input)

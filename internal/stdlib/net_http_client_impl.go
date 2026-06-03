@@ -86,57 +86,27 @@ func httpClientPost(env *object.Environment, pos ast.Position, args ...object.Ob
 }
 
 func httpClientRequest(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	if len(args) < 1 {
-		return object.NewError(pos, "http.request requires an options object or URL string")
-	}
-	var method, urlStr string
-	var headers map[string]string
-	var body io.Reader
-	method = "GET"
-	if urlArg, ok := args[0].(*object.String); ok {
-		urlStr = urlArg.Value
-	} else if opts, ok := args[0].(*object.Hash); ok {
-		if v, ok := hashValue(opts, "url"); ok {
-			urlStr = v.Inspect()
-		}
-		if v, ok := hashValue(opts, "method"); ok {
-			method = v.Inspect()
-		}
-		if v, ok := hashValue(opts, "headers"); ok {
-			if h, ok := v.(*object.Hash); ok {
-				headers = make(map[string]string)
-				for _, pair := range h.Pairs {
-					headers[pair.Key.Inspect()] = pair.Value.Inspect()
-				}
-			}
-		}
-		if v, ok := hashValue(opts, "body"); ok {
-			switch b := v.(type) {
-			case *object.String:
-				body = strings.NewReader(b.Value)
-			case *object.Hash:
-				body = strings.NewReader(toJSONString(b))
-			default:
-				body = strings.NewReader(v.Inspect())
-			}
-		}
-	} else {
-		return object.NewError(pos, "http.request: first argument must be a string URL or options object")
-	}
-	if urlStr == "" {
-		return object.NewError(pos, "http.request: URL is required")
+	opts, errObj := parseHTTPRequestOptions(pos, "http.request", args)
+	if errObj != nil {
+		return errObj
 	}
 	client := &http.Client{}
-	req, err := http.NewRequest(method, urlStr, body)
+	if opts.timeoutMs > 0 {
+		client.Timeout = time.Duration(opts.timeoutMs) * time.Millisecond
+	}
+	req, err := http.NewRequest(opts.method, opts.url, opts.body)
 	if err != nil {
 		return object.NewError(pos, "http.request: %v", err)
 	}
-	for k, v := range headers {
+	for k, v := range opts.headers {
 		req.Header.Set(k, v)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return object.NewError(pos, "http.request: %v", err)
+	}
+	if opts.stream {
+		return buildStreamingResponseObject(resp)
 	}
 	defer resp.Body.Close()
 	return buildResponseObject(resp)
@@ -215,6 +185,7 @@ type httpRequestOptions struct {
 	headers   map[string]string
 	body      io.Reader
 	timeoutMs int
+	stream    bool
 }
 
 func parseHTTPRequestOptions(pos ast.Position, name string, args []object.Object) (*httpRequestOptions, *object.Error) {
@@ -252,6 +223,14 @@ func parseHTTPRequestOptions(pos ast.Position, name string, args []object.Object
 			if n, ok := v.(*object.Number); ok {
 				opts.timeoutMs = int(n.Value)
 			}
+		}
+		if v, ok := hashValue(h, "stream"); ok {
+			if b, ok := v.(*object.Boolean); ok {
+				opts.stream = b.Value
+			}
+		}
+		if v, ok := hashValue(h, "responseType"); ok && v.Inspect() == "stream" {
+			opts.stream = true
 		}
 	} else {
 		return nil, object.NewError(pos, "%s: first argument must be a string URL or options object", name)

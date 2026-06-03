@@ -999,6 +999,44 @@ okKind + ":" + first.data + ":" + second.type + ":" + second.data;
 	}
 }
 
+func TestStdHTTPFetchStreamOption(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("alpha\n"))
+		_, _ = w.Write([]byte("beta\n"))
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "http_fetch_stream.gs")
+	source := strings.ReplaceAll(`
+let http = require("@std/net/http/client");
+let resp = http.fetch({ url: "__URL__", stream: true, timeoutMs: 1000 });
+let first = resp.body.readLine();
+let second = resp.body.readLine();
+resp.close();
+let okKind = "bad";
+if (resp.ok) {
+  okKind = "ok";
+}
+okKind + ":" + first + ":" + second;
+`, "__URL__", server.URL)
+	if err := os.WriteFile(script, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ok:alpha:beta" {
+		t.Fatalf("want ok:alpha:beta, got %T %v", result, result)
+	}
+}
+
 func TestAgentAnthropicProviderWithMockServer(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

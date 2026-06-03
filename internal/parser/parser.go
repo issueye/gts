@@ -661,12 +661,7 @@ func (p *Parser) parseFuncParams() ([]*ast.Param, *ast.TypeAnnotation) {
 			spread = true
 			p.nextToken()
 		}
-		param := &ast.Param{Pos_: p.pos(), Name: p.cur.Literal, Spread: spread}
-		p.nextToken()
-		if p.curTokenIs(lexer.TOKEN_COLON) {
-			p.nextToken()
-			param.TypeAnno = p.parseType()
-		}
+		param := p.parseParam(spread)
 		if p.curTokenIs(lexer.TOKEN_EQ) {
 			p.nextToken()
 			param.Default = p.parseExpression(PREC_COMMA)
@@ -1022,12 +1017,7 @@ func (p *Parser) parseParamList() []*ast.Param {
 		if !p.curTokenIs(lexer.TOKEN_IDENT) {
 			return nil // not a parameter, must be expression
 		}
-		param := &ast.Param{Pos_: p.pos(), Name: p.cur.Literal, Spread: spread}
-		p.nextToken()
-		if p.curTokenIs(lexer.TOKEN_COLON) {
-			p.nextToken()
-			param.TypeAnno = p.parseType()
-		}
+		param := p.parseParam(spread)
 		if p.curTokenIs(lexer.TOKEN_EQ) {
 			p.nextToken()
 			param.Default = p.parseExpression(PREC_COMMA)
@@ -1043,6 +1033,25 @@ func (p *Parser) parseParamList() []*ast.Param {
 		}
 		return nil
 	}
+}
+
+func (p *Parser) parseParam(spread bool) *ast.Param {
+	param := &ast.Param{Pos_: p.pos(), Name: p.cur.Literal, Spread: spread}
+	p.nextToken()
+	if p.curTokenIs(lexer.TOKEN_QUESTION) {
+		param.Optional = true
+		p.nextToken()
+	}
+	if p.curTokenIs(lexer.TOKEN_COLON) {
+		p.nextToken()
+		param.TypeAnno = p.parseType()
+	} else if param.Optional {
+		param.TypeAnno = &ast.TypeAnnotation{Kind: ast.TK_PRIMITIVE, Name: "any", Optional: true}
+	}
+	if param.Optional && param.TypeAnno != nil {
+		param.TypeAnno.Optional = true
+	}
+	return param
 }
 
 func (p *Parser) parseArray() ast.Expression {
