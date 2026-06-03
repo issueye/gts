@@ -387,7 +387,10 @@ err.stack;
 | `@std/net/ip` | `parseIP`, `parseCIDR`, `contains`, `splitHostPort`, `joinHostPort`, `lookupHost` |
 | `@std/url` | `parse`, `format`, `resolve`, `pathToFileURL`, `fileURLToPath`, `URL`, `URLSearchParams` |
 | `@std/mime` | `typeByExtension`, `extensionByType`, `parseMediaType`, `formatMediaType` |
-| `@std/mail` | `parseAddress`, `parseAddressList`, `parseMessage` |
+| `@std/mail` | `parseAddress`, `parseAddressList`, `parseMessage`, `formatAddress`, `formatAddressList`, `parseDate`, `formatDate`, `getHeader` |
+| `@std/template` | `render`, `renderHTML`, `renderFileSync`, `escapeHTML`；支持 `json/upper/lower/trim/join` 模板函数 |
+| `@std/time` | `now`, `nowMs`, `unix`, `unixMs`, `parse`, `format`, `add`, `since`, `until`, `parseDuration`, `duration`, `sleep` 和常用 Go 时间 layout 常量 |
+| `@std/signal` | `supported`, `wait`, `notify`, `send`；支持常用 POSIX 信号名常量 |
 | `@std/crypto` | `randomUUID`, `randomBytes`, `sha1`, `sha256`, `sha512`, `hmac`, `pbkdf2`, `timingSafeEqual` |
 | `@std/events` | `EventEmitter` 基础版：`on`, `once`, `off`, `emit`, `listeners`, `listenerCount`, `removeAllListeners` |
 | `@std/timers` | `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `queueMicrotask`, `sleep` 的模块化别名 |

@@ -1073,9 +1073,14 @@ if (mime.typeByExtension(".html").includes("text/html") && media.type === "text/
 let addr = mail.parseAddress("Ada Lovelace <ada@example.com>");
 let list = mail.parseAddressList("Ada <ada@example.com>, linus@example.com");
 let msg = mail.parseMessage("From: Ada <ada@example.com>\r\nTo: Linus <linus@example.com>\r\nSubject: Hello\r\n\r\nBody text");
+let formattedAddr = mail.formatAddress({ name: "Ada Lovelace", address: "ada@example.com" });
+let formattedList = mail.formatAddressList([{ name: "Ada", address: "ada@example.com" }, "linus@example.com"]);
+let parsedDate = mail.parseDate("Mon, 02 Jan 2006 15:04:05 +0000");
+let formattedDate = mail.formatDate(parsedDate);
+let subject = mail.getHeader(msg.headers, "subject");
 
 let mailKind = "mail-bad";
-if (addr.name === "Ada Lovelace" && addr.address === "ada@example.com" && list.length === 2 && list[1].address === "linus@example.com" && msg.headers.Subject[0] === "Hello" && msg.body === "Body text") {
+if (addr.name === "Ada Lovelace" && addr.address === "ada@example.com" && list.length === 2 && list[1].address === "linus@example.com" && msg.headers.Subject[0] === "Hello" && msg.body === "Body text" && formattedAddr === "\"Ada Lovelace\" <ada@example.com>" && formattedList.includes("linus@example.com") && formattedDate.includes("2006") && subject === "Hello") {
   mailKind = "mail";
 }
 
@@ -1092,6 +1097,73 @@ mimeKind + ":" + mailKind;
 	str, ok := result.(*object.String)
 	if !ok || str.Value != "mime:mail" {
 		t.Fatalf("want mime:mail, got %T %v", result, result)
+	}
+}
+
+func TestStdTemplateTimeAndSignalModules(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "template_time_signal.gs")
+	tplFile := filepath.Join(dir, "hello.tmpl")
+	appSource := strings.NewReplacer(
+		"__TPL__", strings.ReplaceAll(tplFile, `\`, `\\`),
+	).Replace(`
+let fs = require("@std/fs");
+let template = require("@std/template");
+let time = require("@std/time");
+let signal = require("@std/signal");
+
+fs.writeFileSync("__TPL__", "File {{.Name}}");
+
+let rendered = template.render("Hello {{upper .Name}} {{join .Items \",\"}}", {
+  Name: "ada",
+  Items: ["x", "y"],
+});
+let html = template.renderHTML("<b>{{.Value}}</b>", { Value: "<tag>" });
+let fileRendered = template.renderFileSync("__TPL__", { Name: "Grace" });
+let escaped = template.escapeHTML("<x>");
+
+let parsed = time.parse("2020-01-02T03:04:05Z");
+let formatted = time.format(parsed, time.RFC3339, "UTC");
+let later = time.add(parsed, "2s");
+let duration = time.parseDuration("1.5s");
+let fromMs = time.unixMs(0);
+
+let waited = signal.wait({ signals: ["SIGINT"], timeoutMs: 1 });
+let watcher = signal.notify(["SIGINT"]);
+let watcherWaited = watcher.wait(1);
+watcher.stop();
+let supported = signal.supported();
+
+let kind = "std-bad";
+if (
+  rendered === "Hello ADA x,y" &&
+  html === "<b>&lt;tag&gt;</b>" &&
+  fileRendered === "File Grace" &&
+  escaped === "&lt;x&gt;" &&
+  formatted === "2020-01-02T03:04:05Z" &&
+  later.toISOString() === "2020-01-02T03:04:07.000Z" &&
+  duration.milliseconds === 1500 &&
+  fromMs.toISOString() === "1970-01-01T00:00:00.000Z" &&
+  waited === null &&
+  watcherWaited === null &&
+  supported.includes("SIGINT")
+) {
+  kind = "std";
+}
+kind;
+`)
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "std" {
+		t.Fatalf("want std, got %T %v", result, result)
 	}
 }
 
