@@ -40,11 +40,19 @@ type Parser struct {
 	cur    lexer.Token
 	peek   lexer.Token
 	buf    []lexer.Token
+	marks  []*parserMark
 	file   string
 	errors []string
 
 	prefixFns map[lexer.TokenType]prefixFn
 	infixFns  map[lexer.TokenType]infixFn
+}
+
+type parserMark struct {
+	cur      lexer.Token
+	peek     lexer.Token
+	buf      []lexer.Token
+	captured []lexer.Token
 }
 
 func New(l *lexer.Lexer, file string) *Parser {
@@ -129,12 +137,21 @@ func (p *Parser) nextToken() {
 }
 
 func (p *Parser) readToken() lexer.Token {
+	var tok lexer.Token
+	fromBuffer := false
 	if len(p.buf) > 0 {
-		tok := p.buf[0]
+		tok = p.buf[0]
 		p.buf = p.buf[1:]
-		return tok
+		fromBuffer = true
+	} else {
+		tok = p.l.NextToken()
 	}
-	return p.l.NextToken()
+	if !fromBuffer {
+		for _, mark := range p.marks {
+			mark.captured = append(mark.captured, tok)
+		}
+	}
+	return tok
 }
 
 func (p *Parser) unreadTokens(tokens []lexer.Token) {
@@ -142,6 +159,36 @@ func (p *Parser) unreadTokens(tokens []lexer.Token) {
 		return
 	}
 	p.buf = append(append([]lexer.Token{}, tokens...), p.buf...)
+}
+
+func (p *Parser) mark() *parserMark {
+	m := &parserMark{
+		cur: p.cur,
+		peek: p.peek,
+		buf: append([]lexer.Token{}, p.buf...),
+	}
+	p.marks = append(p.marks, m)
+	return m
+}
+
+func (p *Parser) rewind(m *parserMark) {
+	p.popMark(m)
+	p.cur = m.cur
+	p.peek = m.peek
+	p.buf = append(append([]lexer.Token{}, m.buf...), m.captured...)
+}
+
+func (p *Parser) commit(m *parserMark) {
+	p.popMark(m)
+}
+
+func (p *Parser) popMark(m *parserMark) {
+	for i := len(p.marks) - 1; i >= 0; i = i - 1 {
+		if p.marks[i] == m {
+			p.marks = append(p.marks[:i], p.marks[i+1:]...)
+			return
+		}
+	}
 }
 
 func (p *Parser) curTokenIs(t lexer.TokenType) bool  { return p.cur.Type == t }
@@ -989,18 +1036,20 @@ func (p *Parser) parseParenOrArrow() ast.Expression {
 		return nil
 	}
 	// Try to parse as arrow parameter list
-	savedCur := p.cur
-	savedPeek := p.peek
+	mark := p.mark()
 	params := p.parseParamList()
 	if params != nil && p.curTokenIs(lexer.TOKEN_ARROW) {
+		p.commit(mark)
 		return p.parseArrowLambda(params)
 	}
 	// Not arrow, backtrack and parse as parenthesized expression
-	p.cur = savedCur
-	p.peek = savedPeek
+	p.rewind(mark)
 	expr := p.parseExpression(PREC_COMMA)
-	p.expectPeek(lexer.TOKEN_RPAREN)
-	p.nextToken()
+	if p.curTokenIs(lexer.TOKEN_RPAREN) {
+		p.nextToken()
+	} else if p.expectPeek(lexer.TOKEN_RPAREN) {
+		p.nextToken()
+	}
 	if p.curTokenIs(lexer.TOKEN_ARROW) {
 		return p.parseArrowLambda([]*ast.Param{{Name: "_", Spread: false}})
 	}

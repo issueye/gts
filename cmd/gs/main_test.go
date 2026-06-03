@@ -54,6 +54,18 @@ func TestRunScript(t *testing.T) {
 	}
 }
 
+func TestRunInlineCode(t *testing.T) {
+	if code := run([]string{`console.log("ok")`}); code != 0 {
+		t.Fatalf("want exit code 0, got %d", code)
+	}
+}
+
+func TestRunInlineCodeWithSplitArgs(t *testing.T) {
+	if code := run([]string{`let`, `value`, `=`, `"ok";`, `console.log(value)`}); code != 0 {
+		t.Fatalf("want exit code 0, got %d", code)
+	}
+}
+
 func TestRunScriptReusesResetVirtualMachine(t *testing.T) {
 	dir := t.TempDir()
 	first := filepath.Join(dir, "first.gs")
@@ -480,6 +492,7 @@ fs.mkdirSync(path.join(root, "nested"), { recursive: true });
 let file = path.join(root, "nested", "note.txt");
 fs.writeFileAtomicSync(file, "one");
 fs.appendFileSync(file, "\ntwo");
+fs.appendTextSync(file, "\nthree");
 let tmpDir = fs.mkdtempSync(path.join(root, "tmp-"));
 let copy = path.join(root, "copy.txt");
 fs.copyFileSync(file, copy);
@@ -533,7 +546,7 @@ text + ":" + copyText + ":" + countKind + ":" + typedKind + ":" + globKind + ":"
 		t.Fatal(err)
 	}
 	str, ok := result.(*object.String)
-	want := "one\ntwo:one\ntwo:two-files:dirent:glob:real:lstat:tmp:removed"
+	want := "one\ntwo\nthree:one\ntwo\nthree:two-files:dirent:glob:real:lstat:tmp:removed"
 	if !ok || str.Value != want {
 		t.Fatalf("want %q, got %T %v", want, result, result)
 	}

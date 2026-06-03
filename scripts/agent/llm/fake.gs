@@ -15,7 +15,14 @@ export function createFakeToolProvider(toolName, toolArgs, finalText) {
 export function createScriptedProvider(steps) {
   let step = 0;
 
-  function next(messages, tools) {
+  function next(messages, tools, turnOptions) {
+    if (turnOptions !== undefined && turnOptions.toolChoice === "none") {
+      return {
+        role: "assistant",
+        content: "No tool call requested.",
+      };
+    }
+
     if (step < steps.length) {
       let current = steps[step];
       step = step + 1;

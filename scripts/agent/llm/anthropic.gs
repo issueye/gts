@@ -108,14 +108,32 @@ export function createAnthropicProvider(options) {
     system = "You are a concise coding assistant.";
   }
 
-  function next(messages, tools) {
+  function next(messages, tools, turnOptions) {
+    if (turnOptions === undefined) {
+      turnOptions = {};
+    }
+
     let body = {
       model: model,
       max_tokens: maxTokens,
       system: system,
       messages: toAnthropicMessages(messages),
-      tools: toAnthropicTools(tools),
     };
+
+    let toolChoice = turnOptions.toolChoice;
+    if (toolChoice === undefined) {
+      toolChoice = options.toolChoice;
+    }
+    if (toolChoice === undefined) {
+      toolChoice = "auto";
+    }
+
+    if (toolChoice !== "none") {
+      body.tools = toAnthropicTools(tools);
+    }
+    if (toolChoice !== "auto" && toolChoice !== "none") {
+      body.tool_choice = toolChoice;
+    }
 
     if (options.temperature !== undefined) {
       body.temperature = options.temperature;
@@ -124,7 +142,7 @@ export function createAnthropicProvider(options) {
     let response = http.request({
       method: "POST",
       url: baseUrl + "/v1/messages",
-      timeoutMs: options.timeoutMs || 60000,
+      timeoutMs: options.timeoutMs === undefined ? 60000 : options.timeoutMs,
       headers: {
         "content-type": "application/json",
         "x-api-key": apiKey,

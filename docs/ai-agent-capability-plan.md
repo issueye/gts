@@ -72,7 +72,7 @@
 | C 风格 `for` 循环 | 已修复基础缺陷 | 修复 `for (let i = 0; ...)` 试探解析吞 token 的问题，闭包和工具 registry 循环可稳定运行 |
 | Agent 模块别名 | 已完成基础版 | `@agent/*` 映射到项目根目录下 `scripts/agent/*`，并支持默认 `.gs` 扩展 |
 | `@std/path` | 已完成增强版 | `join/resolve/relative/normalize/dirname/basename/extname/isAbs/toSlash/fromSlash/matches/parse/format/splitList/sep/delimiter` |
-| `@std/fs` | 已完成增强版 | `readFileSync/writeFileSync/readTextSync/writeTextSync/appendFileSync/writeFileAtomicSync/existsSync/readdirSync({withFileTypes})/walkSync/globSync/copyFileSync/rmSync/mkdtempSync/realpathSync/lstatSync/mkdirSync/statSync/renameSync/unlinkSync` |
+| `@std/fs` | 已完成增强版 | `readFileSync/writeFileSync/readTextSync/writeTextSync/appendFileSync/appendTextSync/writeFileAtomicSync/existsSync/readdirSync({withFileTypes})/walkSync/globSync/copyFileSync/rmSync/mkdtempSync/realpathSync/lstatSync/mkdirSync/statSync/renameSync/unlinkSync` |
 | `@std/process` | 已完成增强版 | `argv/argv0/env/envObject/pid/cwd/chdir/execPath/getenv/setenv/unsetenv/uptime/hrtime/version/exit` |
 | `@std/os` | 已完成增强版 | `platform/arch/eol/type/release/homedir/tmpdir/hostname/cpus/userInfo` |
 | `@std/exec` | 已完成交互基础版 | `run/output/combinedOutput/start/command/spawn`；`spawn` 支持 stdin 写入、stdout/stderr stream、cwd/env、timeoutMs、kill/wait |

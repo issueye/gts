@@ -35,9 +35,26 @@ export function createAgent(options) {
 
     for (let turn = 0; turn < maxTurns; turn = turn + 1) {
       emit("turn_start", { turn: turn });
-      let next = provider.next(messages, registry.list());
+      let turnOptions = {};
+      if (turn === maxTurns - 1) {
+        turnOptions.toolChoice = "none";
+      }
+      let tools = registry.list();
+      if (turnOptions.toolChoice === "none") {
+        tools = [];
+      }
+      let next = provider.next(messages, tools, turnOptions);
 
       if (next.kind === "tool_call") {
+        if (turnOptions.toolChoice === "none") {
+          let forced = {
+            role: "assistant",
+            content: "Agent stopped before another tool call because maxTurns=" + String(maxTurns),
+          };
+          emit("message", forced);
+          emit("turn_end", { turn: turn, stop: "tool_disabled" });
+          return forced;
+        }
         if (next.id === undefined) {
           next.id = "tool_" + String(turn);
         }

@@ -12,8 +12,7 @@ function readText(file) {
 function appendLine(file, line) {
   let dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
-  let current = readText(file);
-  fs.writeFileSync(file, current + line + "\n");
+  fs.appendTextSync(file, line + "\n");
 }
 
 export function createJSONLSession(file) {

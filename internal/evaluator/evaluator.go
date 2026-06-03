@@ -3,6 +3,7 @@ package evaluator
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/issueye/goscript/internal/ast"
@@ -1057,6 +1058,8 @@ func evalInfix(n *ast.InfixExpr, env *object.Environment) object.Object {
 		return evalCompare(left, right, ">=", n.Pos())
 	case "instanceof":
 		return evalInstanceOf(left, right)
+	case "in":
+		return evalIn(left, right, n.Pos())
 	case "&&":
 		if !object.IsTruthy(left) {
 			return left
@@ -1157,6 +1160,33 @@ func evalCompare(left, right object.Object, op string, pos ast.Position) object.
 		}
 	}
 	return object.NewError(pos, "TypeError: cannot compare %s and %s — types must match", left.Type(), right.Type())
+}
+
+func evalIn(left, right object.Object, pos ast.Position) object.Object {
+	if _, ok := left.(*object.String); !ok {
+		return object.NewError(pos, "TypeError: left operand of 'in' must be string")
+	}
+	switch r := right.(type) {
+	case *object.Hash:
+		_, ok := r.Pairs[hashKey(left)]
+		return object.NativeBool(ok)
+	case *object.Array:
+		idx, ok := left.(*object.String)
+		if !ok {
+			return object.FALSE
+		}
+		i, err := strconv.Atoi(idx.Value)
+		return object.NativeBool(err == nil && i >= 0 && i < len(r.Elements))
+	case *object.Instance:
+		key := left.(*object.String).Value
+		if _, ok := r.Props[key]; ok {
+			return object.TRUE
+		}
+		_, ok := r.Class.Methods[key]
+		return object.NativeBool(ok)
+	default:
+		return object.NewError(pos, "TypeError: right operand of 'in' must be object")
+	}
 }
 
 func evalInstanceOf(left, right object.Object) object.Object {

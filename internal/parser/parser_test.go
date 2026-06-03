@@ -266,6 +266,41 @@ func TestParse_Precedence(t *testing.T) {
 	}
 }
 
+func TestParse_PrefixParenthesizedInExpr(t *testing.T) {
+	input := `!("x" in obj);`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	expr := prog.Body[0].(*ast.ExprStmt).Expr
+	prefix, ok := expr.(*ast.PrefixExpr)
+	if !ok {
+		t.Fatalf("want PrefixExpr, got %T", expr)
+	}
+	if prefix.Op != "!" {
+		t.Fatalf("want ! operator, got %q", prefix.Op)
+	}
+	infix, ok := prefix.Right.(*ast.InfixExpr)
+	if !ok {
+		t.Fatalf("want parenthesized InfixExpr on right, got %T", prefix.Right)
+	}
+	if infix.Op != "in" {
+		t.Fatalf("want in operator, got %q", infix.Op)
+	}
+}
+
+func TestParse_ParenthesizedExprAfterFailedArrowParamParse(t *testing.T) {
+	input := `(a + b);`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	expr := prog.Body[0].(*ast.ExprStmt).Expr
+	infix, ok := expr.(*ast.InfixExpr)
+	if !ok {
+		t.Fatalf("want InfixExpr, got %T", expr)
+	}
+	if infix.Op != "+" {
+		t.Fatalf("want + operator, got %q", infix.Op)
+	}
+}
+
 func TestParse_StrictEquals(t *testing.T) {
 	input := `a === b; c !== d;`
 	prog := Parse(input)

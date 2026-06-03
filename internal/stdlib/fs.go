@@ -25,6 +25,7 @@ func initFSModule(exports *object.Hash) {
 	setHashMember(exports, "writeFileSync", &object.Builtin{Name: "fs.writeFileSync", Fn: fsWriteFileSync})
 	setHashMember(exports, "writeTextSync", &object.Builtin{Name: "fs.writeTextSync", Fn: fsWriteFileSync})
 	setHashMember(exports, "appendFileSync", &object.Builtin{Name: "fs.appendFileSync", Fn: fsAppendFileSync})
+	setHashMember(exports, "appendTextSync", &object.Builtin{Name: "fs.appendTextSync", Fn: fsAppendFileSync})
 	setHashMember(exports, "writeFileAtomicSync", &object.Builtin{Name: "fs.writeFileAtomicSync", Fn: fsWriteFileAtomicSync})
 	setHashMember(exports, "existsSync", &object.Builtin{Name: "fs.existsSync", Fn: fsExistsSync})
 	setHashMember(exports, "readdirSync", &object.Builtin{Name: "fs.readdirSync", Fn: fsReaddirSync})

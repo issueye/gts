@@ -99,7 +99,7 @@ func run(args []string) int {
 		printUsage(fs)
 		return 0
 	default:
-		err = r.runFile(rest[0])
+		err = r.runArg(rest)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -120,6 +120,7 @@ func newRunner(opts options) *runner {
 func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "Usage:\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] <script.gs>\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] <code>\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] init [dir]\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] run\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] pack [dir] [out.gspkg]\n\n")
@@ -290,6 +291,59 @@ func (r *runner) runProject(dir string) error {
 func (r *runner) runFile(path string) error {
 	autoMain := strings.EqualFold(filepath.Base(path), "main.gs")
 	return r.runFileWithOptions(path, runOptions{autoMain: autoMain})
+}
+
+func (r *runner) runArg(args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	if _, err := os.Stat(args[0]); err == nil {
+		return r.runFile(args[0])
+	} else if !os.IsNotExist(err) && !isInvalidPathError(err) {
+		return err
+	}
+	return r.runInline(strings.Join(args, " "))
+}
+
+func isInvalidPathError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "filename, directory name, or volume label syntax is incorrect")
+}
+
+func (r *runner) runInline(src string) error {
+	return r.withTimeout("script execution", func() error {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		reuseVM := false
+		defer func() {
+			if reuseVM {
+				r.releaseVM()
+			} else {
+				r.discardVM()
+			}
+		}()
+		r.checkoutVM()
+		r.pool = async.NewPool(r.opts.workers)
+		r.vm.SetSpawner(r.pool.Go)
+		r.cache = module.NewCacheWithVM(r.vm)
+		r.rootDir = module.FindProjectRoot(cwd)
+		r.resolver = module.NewResolver(r.rootDir)
+		env := r.vm.NewEnvironment()
+		module.SetupExports(env)
+		r.configureModuleLoaders(env, cwd)
+		if _, err := r.evalSource(src, "<inline>", env); err != nil {
+			return err
+		}
+		if err := r.drainRuntime(); err != nil {
+			return err
+		}
+		reuseVM = true
+		return nil
+	})
 }
 
 func (r *runner) runEmbeddedExecutable() error {

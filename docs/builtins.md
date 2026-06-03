@@ -364,7 +364,7 @@ err.stack;
 
 | 模块 | 提供 |
 |------|------|
-| `@std/fs` | `readFileSync`, `readTextSync`, `writeFileSync`, `writeTextSync`, `appendFileSync`, `writeFileAtomicSync`, `existsSync`, `readdirSync`, `walkSync`, `globSync`, `copyFileSync`, `rmSync`, `mkdtempSync`, `realpathSync`, `lstatSync`, `mkdirSync`, `statSync`, `renameSync`, `unlinkSync` |
+| `@std/fs` | `readFileSync`, `readTextSync`, `writeFileSync`, `writeTextSync`, `appendFileSync`, `appendTextSync`, `writeFileAtomicSync`, `existsSync`, `readdirSync`, `walkSync`, `globSync`, `copyFileSync`, `rmSync`, `mkdtempSync`, `realpathSync`, `lstatSync`, `mkdirSync`, `statSync`, `renameSync`, `unlinkSync` |
 | `@std/path` | `join`, `resolve`, `relative`, `normalize`, `dirname`, `basename`, `extname`, `isAbs`, `toSlash`, `fromSlash`, `matches`, `parse`, `format`, `splitList`, `sep`, `delimiter` |
 | `@std/os` | `platform`, `arch`, `eol`, `type`, `release`, `hostname`, `cpus`, `homedir`, `tmpdir`, `userInfo` |
 | `@std/toml` | `parse`, `stringify`, `readFileSync`, `writeFileSync` |

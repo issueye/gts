@@ -104,6 +104,23 @@ func TestEval_Boolean(t *testing.T) {
 	}
 }
 
+func TestEval_InOperator(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected bool
+	}{
+		{`"x" in { x: 1 };`, true},
+		{`!("x" in { x: 1 });`, false},
+		{`!("missing" in { x: 1 });`, true},
+		{`"0" in ["a"];`, true},
+		{`"1" in ["a"];`, false},
+	}
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testBoolean(t, evaluated, tt.expected)
+	}
+}
+
 func TestEval_LetStmt(t *testing.T) {
 	tests := []struct{ input, expected string }{
 		{"let a = 5; a;", "5"},
