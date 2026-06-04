@@ -22,7 +22,7 @@ import (
 	"github.com/issueye/goscript/internal/packagefile"
 	"github.com/issueye/goscript/internal/parser"
 	"github.com/issueye/goscript/internal/proj"
-	_ "github.com/issueye/goscript/internal/stdlib"
+	"github.com/issueye/goscript/internal/stdlib"
 )
 
 const version = "0.1.0-dev"
@@ -707,11 +707,15 @@ func (r *runner) releaseVM() {
 	if r.vm == nil {
 		return
 	}
+	stdlib.StopTerminalSessionsForVM(r.vm)
 	sharedVMPool.Put(r.vm)
 	r.discardVM()
 }
 
 func (r *runner) discardVM() {
+	if r.vm != nil {
+		stdlib.StopTerminalSessionsForVM(r.vm)
+	}
 	r.vm = nil
 	r.cache = nil
 	r.resolver = nil

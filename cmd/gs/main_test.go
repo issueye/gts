@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	gopty "github.com/aymanbagabas/go-pty"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
 	"github.com/issueye/goscript/internal/packagefile"
@@ -1609,9 +1611,8 @@ if (process.env.OS === "Windows_NT") {
 let term = pty.spawn(cmdName, cmdArgs, { cwd: "__DIR__", cols: 80, rows: 24 });
 let output = "";
 for (let i = 0; i < 8; i = i + 1) {
-  let chunk = term.readText(4096);
+  let chunk = term.readText(4096, 500);
   if (chunk === null) {
-    i = 8;
   } else {
     output = output + chunk;
     if (output.includes("got:pty")) {
@@ -1644,6 +1645,54 @@ gotKind + ":" + okKind;
 	str, ok := result.(*object.String)
 	if !ok || str.Value != "got:ok" {
 		t.Fatalf("want got:ok, got %T %v", result, result)
+	}
+}
+
+func TestStdPTYReadTextTimeout(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "pty_timeout.gs")
+	appSource := strings.ReplaceAll(`
+let pty = require("@std/pty");
+let process = require("@std/process");
+let cmdName = "bash";
+let cmdArgs = ["-lc", "sleep 0.2; echo late"];
+if (process.env.OS === "Windows_NT") {
+  cmdName = "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+  cmdArgs = ["-NoProfile", "-Command", "Start-Sleep -Milliseconds 200; Write-Output late"];
+}
+let term = pty.spawn(cmdName, cmdArgs, { cwd: "__DIR__", cols: 80, rows: 24 });
+let early = term.readText(4096, 50);
+let late = "";
+for (let i = 0; i < 8; i = i + 1) {
+  let chunk = term.readTextTimeout(4096, 500);
+  if (chunk === null) {
+  } else {
+    late = late + chunk;
+    if (late.includes("late")) {
+      i = 8;
+    }
+  }
+}
+let result = term.wait();
+term.close();
+let kind = "bad";
+if (late.includes("late") && result.success) {
+  kind = "ok";
+}
+kind;
+`, "__DIR__", strings.ReplaceAll(dir, `\`, `\\`))
+	if err := os.WriteFile(script, []byte(appSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: 3 * time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ok" {
+		t.Fatalf("want ok, got %T %v", result, result)
 	}
 }
 
@@ -1681,6 +1730,178 @@ ttyKind + ":" + sizeKind + ":" + writeKind;
 	if !ok || str.Value != "bool:size:write" {
 		t.Fatalf("want bool:size:write, got %T %v", result, result)
 	}
+}
+
+func TestStdTerminalStartModule(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "terminal_start.gs")
+	if err := os.WriteFile(script, []byte(`
+let terminal = require("@std/terminal");
+let session = terminal.start({ raw: false, bracketedPaste: false });
+let size = session.size();
+let writeCount = session.write("");
+session.hideCursor();
+session.showCursor();
+session.disableBracketedPaste();
+session.stop();
+session.stop();
+let sizeKind = "bad";
+if (size.cols > 0 && size.rows > 0) {
+  sizeKind = "size";
+}
+let writeKind = "bad";
+if (writeCount === 0) {
+  writeKind = "write";
+}
+sizeKind + ":" + writeKind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "size:write" {
+		t.Fatalf("want size:write, got %T %v", result, result)
+	}
+}
+
+func TestStdTerminalModuleListeners(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "terminal_listeners.gs")
+	if err := os.WriteFile(script, []byte(`
+let terminal = require("@std/terminal");
+function onResize(size) {
+  return size.cols;
+}
+let resizeHandle = terminal.onResize(onResize);
+let removedResize = terminal.offResize(onResize);
+resizeHandle.stop();
+let session = terminal.start({ raw: false, onResize: onResize });
+session.stop();
+let kind = "bad";
+if (removedResize === 1) {
+  kind = "ok";
+}
+kind;
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ok" {
+		t.Fatalf("want ok, got %T %v", result, result)
+	}
+}
+
+func TestStdTerminalOnInputWithPTY(t *testing.T) {
+	dir := t.TempDir()
+	childScript := filepath.Join(dir, "terminal_child.gs")
+	childSource := `
+let terminal = require("@std/terminal");
+let timers = require("@std/timers");
+let seen = "";
+let session = null;
+function onInput(data) {
+  seen = seen + data;
+  if (seen.includes("xy")) {
+    println("input:" + seen);
+    session.stop();
+  }
+}
+session = terminal.start({ raw: true, onInput: onInput });
+timers.setTimeout(function() {
+  println("timeout:" + seen);
+  session.stop();
+}, 1000);
+`
+	if err := os.WriteFile(childScript, []byte(childSource), 0644); err != nil {
+		t.Fatal(err)
+	}
+	output := runGsInPTY(t, childScript, func(pty gopty.Pty) {
+		_, _ = pty.Write([]byte("xy"))
+	})
+	if !strings.Contains(output, "input:xy") {
+		t.Fatalf("want input:xy, got %q", output)
+	}
+}
+
+func runGsInPTY(t *testing.T, script string, interact func(gopty.Pty)) string {
+	t.Helper()
+	goPath, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pty, err := gopty.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pty.Close()
+	_ = pty.Resize(80, 24)
+	cmd := pty.Command(goPath, "run", "./cmd/gs", script)
+	cmd.Dir = repoRoot(t)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	outputCh := make(chan string, 1)
+	go func() {
+		var out strings.Builder
+		reader := bufio.NewReader(pty)
+		buf := make([]byte, 4096)
+		deadline := time.Now().Add(4 * time.Second)
+		for time.Now().Before(deadline) {
+			chunk, err := reader.Read(buf)
+			if chunk > 0 {
+				out.Write(buf[:chunk])
+				text := out.String()
+				if strings.Contains(text, "input:xy") ||
+					strings.Contains(text, "resize:100x30") ||
+					strings.Contains(text, "timeout:") {
+					break
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		outputCh <- out.String()
+	}()
+	if interact != nil {
+		interact(pty)
+	}
+
+	var output string
+	select {
+	case output = <-outputCh:
+	case <-time.After(5 * time.Second):
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+		t.Fatal("pty output timed out")
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	_ = cmd.Wait()
+	return output
+}
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate test file")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
 func TestStdStreamAndSSEModules(t *testing.T) {

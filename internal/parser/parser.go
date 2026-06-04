@@ -64,6 +64,7 @@ func New(l *lexer.Lexer, file string) *Parser {
 	p.registerPrefix(lexer.TOKEN_NUMBER, p.parseNumber)
 	p.registerPrefix(lexer.TOKEN_STRING, p.parseString)
 	p.registerPrefix(lexer.TOKEN_TEMPLATE, p.parseTemplate)
+	p.registerPrefix(lexer.TOKEN_REGEXP, p.parseRegExp)
 	p.registerPrefix(lexer.TOKEN_TRUE, p.parseBool)
 	p.registerPrefix(lexer.TOKEN_FALSE, p.parseBool)
 	p.registerPrefix(lexer.TOKEN_NULL, p.parseNull)

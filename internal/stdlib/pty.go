@@ -3,6 +3,7 @@ package stdlib
 import (
 	"bufio"
 	"context"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -17,10 +18,19 @@ type ptyProcess struct {
 	pty        gopty.Pty
 	cmd        *gopty.Cmd
 	stream     *readableStream
+	outputMu   sync.Mutex
+	pending    []byte
+	output     chan ptyOutputChunk
+	outputOnce sync.Once
 	cancel     context.CancelFunc
 	waitOnce   sync.Once
 	waitResult object.Object
 	waitErr    error
+}
+
+type ptyOutputChunk struct {
+	data []byte
+	err  error
 }
 
 func init() {
@@ -96,6 +106,7 @@ func ptySpawn(env *object.Environment, pos ast.Position, args ...object.Object) 
 	setHashMember(obj, "read", &object.Builtin{Name: "pty.read", Fn: ptyRead, Extra: &object.GoObject{Value: proc}})
 	setHashMember(obj, "readText", &object.Builtin{Name: "pty.readText", Fn: ptyReadText, Extra: &object.GoObject{Value: proc}})
 	setHashMember(obj, "readLine", &object.Builtin{Name: "pty.readLine", Fn: ptyReadLine, Extra: &object.GoObject{Value: proc}})
+	setHashMember(obj, "readTextTimeout", &object.Builtin{Name: "pty.readTextTimeout", Fn: ptyReadTextTimeout, Extra: &object.GoObject{Value: proc}})
 	setHashMember(obj, "resize", &object.Builtin{Name: "pty.resize", Fn: ptyResize, Extra: &object.GoObject{Value: proc}})
 	setHashMember(obj, "wait", &object.Builtin{Name: "pty.wait", Fn: ptyWait, Extra: &object.GoObject{Value: proc}})
 	setHashMember(obj, "kill", &object.Builtin{Name: "pty.kill", Fn: ptyKill, Extra: &object.GoObject{Value: proc}})
@@ -155,6 +166,9 @@ func ptyReadText(env *object.Environment, pos ast.Position, args ...object.Objec
 	if errObj != nil {
 		return errObj
 	}
+	if len(args) >= 2 && args[1] != object.UNDEFINED && args[1] != object.NULL {
+		return ptyReadTextTimeoutWithName(pos, proc, "pty.readText", args...)
+	}
 	return streamReadText(&object.Environment{Extra: &object.GoObject{Value: proc.stream}}, pos, args...)
 }
 
@@ -164,6 +178,56 @@ func ptyReadLine(env *object.Environment, pos ast.Position, args ...object.Objec
 		return errObj
 	}
 	return streamReadLine(&object.Environment{Extra: &object.GoObject{Value: proc.stream}}, pos, args...)
+}
+
+func ptyReadTextTimeout(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	proc, errObj := boundPTYProcess(pos, env, "pty.readTextTimeout")
+	if errObj != nil {
+		return errObj
+	}
+	return ptyReadTextTimeoutWithName(pos, proc, "pty.readTextTimeout", args...)
+}
+
+func ptyReadTextTimeoutWithName(pos ast.Position, proc *ptyProcess, name string, args ...object.Object) object.Object {
+	size := 8192
+	timeoutMs := 0
+	if len(args) >= 1 && args[0] != object.UNDEFINED && args[0] != object.NULL {
+		n, ok := args[0].(*object.Number)
+		if !ok {
+			return object.NewError(pos, "%s: size must be a number", name)
+		}
+		size = int(n.Value)
+		if size < 1 {
+			return object.NewError(pos, "%s: size must be positive", name)
+		}
+	}
+	if len(args) >= 2 && args[1] != object.UNDEFINED && args[1] != object.NULL {
+		n, ok := args[1].(*object.Number)
+		if !ok {
+			return object.NewError(pos, "%s: timeoutMs must be a number", name)
+		}
+		timeoutMs = int(n.Value)
+		if timeoutMs < 0 {
+			return object.NewError(pos, "%s: timeoutMs must be non-negative", name)
+		}
+	}
+	chunk, timedOut := proc.readOutputChunk(size, timeoutMs)
+	if timedOut {
+		return object.NULL
+	}
+	if chunk.err == io.EOF {
+		return object.NULL
+	}
+	if chunk.err != nil {
+		return object.NewError(pos, "%s: %v", name, chunk.err)
+	}
+	if len(chunk.data) > size {
+		data := make([]byte, size)
+		copy(data, chunk.data[:size])
+		proc.pushBackOutput(chunk.data[size:])
+		return &object.String{Value: string(data)}
+	}
+	return &object.String{Value: string(chunk.data)}
 }
 
 func ptyResize(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -246,6 +310,84 @@ func ptyClose(env *object.Environment, pos ast.Position, args ...object.Object) 
 		proc.cancel()
 	}
 	return object.UNDEFINED
+}
+
+func (p *ptyProcess) ensureOutputReader() {
+	p.outputOnce.Do(func() {
+		p.output = make(chan ptyOutputChunk, 128)
+		go func() {
+			buf := make([]byte, 4096)
+			for {
+				n, err := p.pty.Read(buf)
+				if n > 0 {
+					data := make([]byte, n)
+					copy(data, buf[:n])
+					p.output <- ptyOutputChunk{data: data}
+				}
+				if err != nil {
+					p.output <- ptyOutputChunk{err: err}
+					close(p.output)
+					return
+				}
+			}
+		}()
+	})
+}
+
+func (p *ptyProcess) readOutputChunk(size, timeoutMs int) (ptyOutputChunk, bool) {
+	p.ensureOutputReader()
+	if pending := p.takePending(size); len(pending) > 0 {
+		return ptyOutputChunk{data: pending}, false
+	}
+	if timeoutMs <= 0 {
+		chunk, ok := <-p.output
+		if !ok {
+			return ptyOutputChunk{err: io.EOF}, false
+		}
+		return chunk, false
+	}
+	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case chunk, ok := <-p.output:
+		if !ok {
+			return ptyOutputChunk{err: io.EOF}, false
+		}
+		return chunk, false
+	case <-timer.C:
+		return ptyOutputChunk{}, true
+	}
+}
+
+func (p *ptyProcess) pushBackOutput(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	p.outputMu.Lock()
+	next := make([]byte, 0, len(data)+len(p.pending))
+	next = append(next, data...)
+	next = append(next, p.pending...)
+	p.pending = next
+	p.outputMu.Unlock()
+}
+
+func (p *ptyProcess) takePending(size int) []byte {
+	p.outputMu.Lock()
+	defer p.outputMu.Unlock()
+	if len(p.pending) == 0 {
+		return nil
+	}
+	if len(p.pending) <= size {
+		data := p.pending
+		p.pending = nil
+		return data
+	}
+	data := make([]byte, size)
+	copy(data, p.pending[:size])
+	rest := make([]byte, len(p.pending)-size)
+	copy(rest, p.pending[size:])
+	p.pending = rest
+	return data
 }
 
 func boundPTYProcess(pos ast.Position, env *object.Environment, name string) (*ptyProcess, *object.Error) {

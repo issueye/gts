@@ -175,6 +175,29 @@ func TestLexer_TemplateExpressionDoesNotConsumeFollowingToken(t *testing.T) {
 	tokenEq(t, input, tests)
 }
 
+func TestLexer_RegExpLiteral(t *testing.T) {
+	input := `let ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g; let div = a / b;`
+	tests := []struct {
+		Type TokenType
+		Lit  string
+	}{
+		{TOKEN_LET, "let"},
+		{TOKEN_IDENT, "ansi"},
+		{TOKEN_EQ, "="},
+		{TOKEN_REGEXP, `/\x1b\[[0-?]*[ -/]*[@-~]/g`},
+		{TOKEN_SEMI, ";"},
+		{TOKEN_LET, "let"},
+		{TOKEN_IDENT, "div"},
+		{TOKEN_EQ, "="},
+		{TOKEN_IDENT, "a"},
+		{TOKEN_SLASH, "/"},
+		{TOKEN_IDENT, "b"},
+		{TOKEN_SEMI, ";"},
+		{TOKEN_EOF, ""},
+	}
+	tokenEq(t, input, tests)
+}
+
 func TestLexer_Comments(t *testing.T) {
 	input := `let x /* block */ = // line
 5`

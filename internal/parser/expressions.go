@@ -59,6 +59,10 @@ func (p *Parser) parseTemplate() ast.Expression {
 	return &ast.TemplateLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
 }
 
+func (p *Parser) parseRegExp() ast.Expression {
+	return &ast.RegExpLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
+}
+
 func (p *Parser) parseBool() ast.Expression {
 	return &ast.BoolLit{Pos_: p.pos(), TokenLit: p.cur.Literal, Value: p.curTokenIs(lexer.TOKEN_TRUE)}
 }

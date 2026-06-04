@@ -18,6 +18,7 @@ const (
 	TOKEN_NUMBER   TokenType = "NUMBER"
 	TOKEN_STRING   TokenType = "STRING"
 	TOKEN_TEMPLATE TokenType = "TEMPLATE"
+	TOKEN_REGEXP   TokenType = "REGEXP"
 
 	// --- Keywords ---
 	TOKEN_LET        TokenType = "LET"        // let

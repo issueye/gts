@@ -15,6 +15,7 @@ type Lexer struct {
 	col     int
 	prevCol int // column before current ch
 	errors  []string
+	prevTok TokenType
 }
 
 func New(input string) *Lexer {
@@ -177,6 +178,10 @@ func (l *Lexer) NextToken() Token {
 		} else if l.peekChar() == '=' {
 			l.readChar()
 			tok = l.newToken(TOKEN_SLASH_EQ, "/=")
+		} else if l.canStartRegexp() && l.hasRegexpTerminator() {
+			tok = l.readRegexp()
+			l.recordToken(tok)
+			return tok
 		} else {
 			tok = l.newToken(TOKEN_SLASH, "/")
 		}
@@ -309,10 +314,12 @@ func (l *Lexer) NextToken() Token {
 		if isLetter(l.ch) {
 			ident := l.readIdentifier()
 			tok = l.makeIdentToken(ident, startLine, startCol)
+			l.recordToken(tok)
 			return tok
 		} else if isDigit(l.ch) {
 			num := l.readNumber()
 			tok = l.makeToken(TOKEN_NUMBER, num, startLine, startCol, startOff)
+			l.recordToken(tok)
 			return tok
 		} else {
 			l.addError(fmt.Sprintf("unexpected character: %q (U+%04X)", l.ch, l.ch))
@@ -323,6 +330,7 @@ func (l *Lexer) NextToken() Token {
 	tok.Line = startLine
 	tok.Column = startCol
 	l.readChar()
+	l.recordToken(tok)
 	return tok
 }
 
@@ -374,6 +382,62 @@ func (l *Lexer) readIdentifier() string {
 		l.readChar()
 	}
 	return l.input[start:l.offset]
+}
+
+func (l *Lexer) recordToken(tok Token) {
+	if tok.Type != TOKEN_ILLEGAL && tok.Type != TOKEN_EOF {
+		l.prevTok = tok.Type
+	}
+}
+
+func (l *Lexer) canStartRegexp() bool {
+	switch l.prevTok {
+	case "", TOKEN_LPAREN, TOKEN_LBRACE, TOKEN_LBRACK, TOKEN_COMMA, TOKEN_SEMI, TOKEN_COLON,
+		TOKEN_EQ, TOKEN_PLUS, TOKEN_MINUS, TOKEN_STAR, TOKEN_SLASH, TOKEN_PERCENT, TOKEN_POW,
+		TOKEN_BANG, TOKEN_AMP, TOKEN_PIPE, TOKEN_CARET, TOKEN_TILDE, TOKEN_QUESTION,
+		TOKEN_ARROW, TOKEN_EQ_EQ_EQ, TOKEN_NEQ_EQ, TOKEN_LT, TOKEN_LT_EQ, TOKEN_GT, TOKEN_GT_EQ,
+		TOKEN_AND_AND, TOKEN_OR_OR, TOKEN_QM_QM, TOKEN_PLUS_EQ, TOKEN_MINUS_EQ, TOKEN_STAR_EQ,
+		TOKEN_SLASH_EQ, TOKEN_PERCENT_EQ, TOKEN_POW_EQ, TOKEN_LSHIFT_EQ, TOKEN_RSHIFT_EQ,
+		TOKEN_URSHIFT_EQ, TOKEN_AMP_EQ, TOKEN_PIPE_EQ, TOKEN_CARET_EQ, TOKEN_RETURN,
+		TOKEN_THROW, TOKEN_DELETE, TOKEN_TYPEOF, TOKEN_VOID, TOKEN_AWAIT:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *Lexer) hasRegexpTerminator() bool {
+	inClass := false
+	escape := false
+	for off := l.readOff; off < len(l.input); {
+		r, size := utf8.DecodeRuneInString(l.input[off:])
+		if r == 0 || r == '\n' {
+			return false
+		}
+		off += size
+		if escape {
+			escape = false
+			continue
+		}
+		if r == '\\' {
+			escape = true
+			continue
+		}
+		if inClass {
+			if r == ']' {
+				inClass = false
+			}
+			continue
+		}
+		if r == '[' {
+			inClass = true
+			continue
+		}
+		if r == '/' {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Lexer) readNumber() string {
@@ -514,6 +578,49 @@ func (l *Lexer) readTemplate() Token {
 	lit := l.input[start:end] // includes both backticks
 	// do NOT readChar here — outer NextToken does it
 	return Token{Type: TOKEN_TEMPLATE, Literal: lit, Line: startLine, Column: startCol, Offset: start}
+}
+
+func (l *Lexer) readRegexp() Token {
+	start := l.offset
+	startLine := l.line
+	startCol := l.col
+	l.readChar() // consume opening slash
+	inClass := false
+	escape := false
+	for l.ch != 0 && l.ch != '\n' {
+		if escape {
+			escape = false
+			l.readChar()
+			continue
+		}
+		if l.ch == '\\' {
+			escape = true
+			l.readChar()
+			continue
+		}
+		if inClass {
+			if l.ch == ']' {
+				inClass = false
+			}
+			l.readChar()
+			continue
+		}
+		if l.ch == '[' {
+			inClass = true
+			l.readChar()
+			continue
+		}
+		if l.ch == '/' {
+			l.readChar()
+			for isLetter(l.ch) {
+				l.readChar()
+			}
+			return Token{Type: TOKEN_REGEXP, Literal: l.input[start:l.offset], Line: startLine, Column: startCol, Offset: start}
+		}
+		l.readChar()
+	}
+	l.addError("unterminated regexp literal")
+	return Token{Type: TOKEN_ILLEGAL, Literal: l.input[start:l.offset], Line: startLine, Column: startCol, Offset: start}
 }
 
 func isLetter(ch rune) bool {

@@ -84,6 +84,8 @@ func Eval(node ast.Node, env *object.Environment) object.Object {
 		return evalStringLit(n)
 	case *ast.TemplateLit:
 		return evalTemplate(n, env)
+	case *ast.RegExpLit:
+		return evalRegExpLit(n)
 	case *ast.BoolLit:
 		return object.NativeBool(n.Value)
 	case *ast.NullLit:

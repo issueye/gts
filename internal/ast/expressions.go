@@ -20,8 +20,8 @@ type NumberLit struct {
 }
 
 func (n *NumberLit) expressionNode()      {}
-func (n *NumberLit) TokenLiteral() string  { return n.TokenLit }
-func (n *NumberLit) Pos() Position         { return n.Pos_ }
+func (n *NumberLit) TokenLiteral() string { return n.TokenLit }
+func (n *NumberLit) Pos() Position        { return n.Pos_ }
 
 type StringLit struct {
 	Pos_     Position
@@ -40,6 +40,15 @@ type TemplateLit struct {
 func (t *TemplateLit) expressionNode()      {}
 func (t *TemplateLit) TokenLiteral() string { return t.TokenLit }
 func (t *TemplateLit) Pos() Position        { return t.Pos_ }
+
+type RegExpLit struct {
+	Pos_     Position
+	TokenLit string
+}
+
+func (r *RegExpLit) expressionNode()      {}
+func (r *RegExpLit) TokenLiteral() string { return r.TokenLit }
+func (r *RegExpLit) Pos() Position        { return r.Pos_ }
 
 type BoolLit struct {
 	Pos_     Position

@@ -1,7 +1,12 @@
 package stdlib
 
 import (
+	"fmt"
+	"io"
 	"os"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/module"
@@ -13,6 +18,35 @@ type terminalRawMode struct {
 	fd    int
 	state *term.State
 }
+
+type terminalSession struct {
+	mu              sync.Mutex
+	vm              *object.VirtualMachine
+	raw             *terminalRawMode
+	bracketedPaste  bool
+	cursorHidden    bool
+	onInput         *object.Function
+	onResize        *object.Function
+	moduleEvent     string
+	events          chan terminalEvent
+	stop            chan struct{}
+	stopped         bool
+	asyncRegistered bool
+	lastCols        int
+	lastRows        int
+}
+
+type terminalEvent struct {
+	kind string
+	data string
+	cols int
+	rows int
+}
+
+var activeTerminalSessions = struct {
+	sync.Mutex
+	sessions map[*terminalSession]struct{}
+}{sessions: make(map[*terminalSession]struct{})}
 
 func init() {
 	module.RegisterNative("@std/terminal", func(env *object.Environment) (object.Object, error) {
@@ -29,6 +63,21 @@ func initTerminalModule(exports *object.Hash) {
 	setHashMember(exports, "write", &object.Builtin{Name: "terminal.write", Fn: terminalWrite})
 	setHashMember(exports, "writeln", &object.Builtin{Name: "terminal.writeln", Fn: terminalWriteln})
 	setHashMember(exports, "setRawMode", &object.Builtin{Name: "terminal.setRawMode", Fn: terminalSetRawMode})
+	setHashMember(exports, "start", &object.Builtin{Name: "terminal.start", Fn: terminalStart})
+	setHashMember(exports, "onInput", &object.Builtin{Name: "terminal.onInput", Fn: terminalOnInput})
+	setHashMember(exports, "offInput", &object.Builtin{Name: "terminal.offInput", Fn: terminalOffInput})
+	setHashMember(exports, "onResize", &object.Builtin{Name: "terminal.onResize", Fn: terminalOnResize})
+	setHashMember(exports, "offResize", &object.Builtin{Name: "terminal.offResize", Fn: terminalOffResize})
+	setHashMember(exports, "hideCursor", &object.Builtin{Name: "terminal.hideCursor", Fn: terminalHideCursor})
+	setHashMember(exports, "showCursor", &object.Builtin{Name: "terminal.showCursor", Fn: terminalShowCursor})
+	setHashMember(exports, "clearScreen", &object.Builtin{Name: "terminal.clearScreen", Fn: terminalClearScreen})
+	setHashMember(exports, "clearLine", &object.Builtin{Name: "terminal.clearLine", Fn: terminalClearLine})
+	setHashMember(exports, "clearFromCursor", &object.Builtin{Name: "terminal.clearFromCursor", Fn: terminalClearFromCursor})
+	setHashMember(exports, "moveTo", &object.Builtin{Name: "terminal.moveTo", Fn: terminalMoveTo})
+	setHashMember(exports, "moveBy", &object.Builtin{Name: "terminal.moveBy", Fn: terminalMoveBy})
+	setHashMember(exports, "setTitle", &object.Builtin{Name: "terminal.setTitle", Fn: terminalSetTitle})
+	setHashMember(exports, "enableBracketedPaste", &object.Builtin{Name: "terminal.enableBracketedPaste", Fn: terminalEnableBracketedPaste})
+	setHashMember(exports, "disableBracketedPaste", &object.Builtin{Name: "terminal.disableBracketedPaste", Fn: terminalDisableBracketedPaste})
 }
 
 func terminalIsTTY(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -119,6 +168,161 @@ func terminalSetRawMode(env *object.Environment, pos ast.Position, args ...objec
 	return obj
 }
 
+func terminalStart(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	opts, errObj := terminalStartOptions(pos, args)
+	if errObj != nil {
+		return errObj
+	}
+	return terminalStartSession(env, pos, opts, "")
+}
+
+func terminalStartSession(env *object.Environment, pos ast.Position, opts terminalOptions, moduleEvent string) object.Object {
+	session := &terminalSession{
+		vm:          env.VM(),
+		onInput:     opts.onInput,
+		onResize:    opts.onResize,
+		moduleEvent: moduleEvent,
+		events:      make(chan terminalEvent, 256),
+		stop:        make(chan struct{}),
+	}
+	session.lastCols, session.lastRows = terminalGetSize()
+
+	if opts.raw {
+		raw, err := terminalMakeRaw()
+		if err != nil {
+			return object.NewError(pos, "terminal.start: %v", err)
+		}
+		session.raw = raw
+	}
+	if opts.bracketedPaste {
+		if _, err := os.Stdout.Write([]byte("\x1b[?2004h")); err != nil {
+			session.restore()
+			return object.NewError(pos, "terminal.start: %v", err)
+		}
+		session.bracketedPaste = true
+	}
+
+	registerTerminalSession(session)
+	if session.onInput != nil || session.onResize != nil {
+		session.startAsyncLoops()
+	}
+	return terminalSessionObject(session)
+}
+
+func terminalOnInput(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "terminal.onInput requires listener")
+	}
+	fn, ok := args[0].(*object.Function)
+	if !ok {
+		return object.NewError(pos, "terminal.onInput: listener must be a function")
+	}
+	return terminalStartSession(env, pos, terminalOptions{onInput: fn}, "input")
+}
+
+func terminalOffInput(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "terminal.offInput requires listener")
+	}
+	fn, ok := args[0].(*object.Function)
+	if !ok {
+		return object.NewError(pos, "terminal.offInput: listener must be a function")
+	}
+	return &object.Number{Value: float64(stopModuleTerminalSessions(env.VM(), "input", fn))}
+}
+
+func terminalOnResize(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "terminal.onResize requires listener")
+	}
+	fn, ok := args[0].(*object.Function)
+	if !ok {
+		return object.NewError(pos, "terminal.onResize: listener must be a function")
+	}
+	return terminalStartSession(env, pos, terminalOptions{onResize: fn}, "resize")
+}
+
+func terminalOffResize(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "terminal.offResize requires listener")
+	}
+	fn, ok := args[0].(*object.Function)
+	if !ok {
+		return object.NewError(pos, "terminal.offResize: listener must be a function")
+	}
+	return &object.Number{Value: float64(stopModuleTerminalSessions(env.VM(), "resize", fn))}
+}
+
+type terminalOptions struct {
+	raw            bool
+	bracketedPaste bool
+	onInput        *object.Function
+	onResize       *object.Function
+}
+
+func terminalStartOptions(pos ast.Position, args []object.Object) (terminalOptions, *object.Error) {
+	opts := terminalOptions{}
+	if len(args) == 0 || args[0] == object.UNDEFINED || args[0] == object.NULL {
+		return opts, nil
+	}
+	hash, ok := args[0].(*object.Hash)
+	if !ok {
+		return opts, object.NewError(pos, "terminal.start: options must be an object")
+	}
+	if rawObj, ok := hashValue(hash, "raw"); ok && rawObj != object.UNDEFINED && rawObj != object.NULL {
+		raw, ok := rawObj.(*object.Boolean)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: raw must be a boolean")
+		}
+		opts.raw = raw.Value
+	}
+	if pasteObj, ok := hashValue(hash, "bracketedPaste"); ok && pasteObj != object.UNDEFINED && pasteObj != object.NULL {
+		paste, ok := pasteObj.(*object.Boolean)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: bracketedPaste must be a boolean")
+		}
+		opts.bracketedPaste = paste.Value
+	}
+	if fnObj, ok := hashValue(hash, "onInput"); ok && fnObj != object.UNDEFINED && fnObj != object.NULL {
+		fn, ok := fnObj.(*object.Function)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: onInput must be a function")
+		}
+		opts.onInput = fn
+	}
+	if fnObj, ok := hashValue(hash, "onResize"); ok && fnObj != object.UNDEFINED && fnObj != object.NULL {
+		fn, ok := fnObj.(*object.Function)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: onResize must be a function")
+		}
+		opts.onResize = fn
+	}
+	return opts, nil
+}
+
+func terminalSessionObject(session *terminalSession) *object.Hash {
+	extra := &object.GoObject{Value: session}
+	obj := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+	setHashMember(obj, "__terminalSession", extra)
+	setHashMember(obj, "write", &object.Builtin{Name: "terminal.session.write", Fn: terminalSessionWrite, Extra: extra})
+	setHashMember(obj, "writeln", &object.Builtin{Name: "terminal.session.writeln", Fn: terminalSessionWriteln, Extra: extra})
+	setHashMember(obj, "size", &object.Builtin{Name: "terminal.session.size", Fn: terminalSessionSize, Extra: extra})
+	setHashMember(obj, "setRawMode", &object.Builtin{Name: "terminal.session.setRawMode", Fn: terminalSessionSetRawMode, Extra: extra})
+	setHashMember(obj, "stop", &object.Builtin{Name: "terminal.session.stop", Fn: terminalSessionStop, Extra: extra})
+	setHashMember(obj, "drainInput", &object.Builtin{Name: "terminal.session.drainInput", Fn: terminalSessionDrainInput, Extra: extra})
+	setHashMember(obj, "hideCursor", &object.Builtin{Name: "terminal.session.hideCursor", Fn: terminalSessionHideCursor, Extra: extra})
+	setHashMember(obj, "showCursor", &object.Builtin{Name: "terminal.session.showCursor", Fn: terminalSessionShowCursor, Extra: extra})
+	setHashMember(obj, "clearScreen", &object.Builtin{Name: "terminal.session.clearScreen", Fn: terminalClearScreen})
+	setHashMember(obj, "clearLine", &object.Builtin{Name: "terminal.session.clearLine", Fn: terminalClearLine})
+	setHashMember(obj, "clearFromCursor", &object.Builtin{Name: "terminal.session.clearFromCursor", Fn: terminalClearFromCursor})
+	setHashMember(obj, "moveTo", &object.Builtin{Name: "terminal.session.moveTo", Fn: terminalMoveTo})
+	setHashMember(obj, "moveBy", &object.Builtin{Name: "terminal.session.moveBy", Fn: terminalMoveBy})
+	setHashMember(obj, "setTitle", &object.Builtin{Name: "terminal.session.setTitle", Fn: terminalSetTitle})
+	setHashMember(obj, "enableBracketedPaste", &object.Builtin{Name: "terminal.session.enableBracketedPaste", Fn: terminalSessionEnableBracketedPaste, Extra: extra})
+	setHashMember(obj, "disableBracketedPaste", &object.Builtin{Name: "terminal.session.disableBracketedPaste", Fn: terminalSessionDisableBracketedPaste, Extra: extra})
+	return obj
+}
+
 func terminalRestoreRawMode(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	goObj, ok := env.Extra.(*object.GoObject)
 	if !ok {
@@ -136,6 +340,571 @@ func terminalRestoreRawMode(env *object.Environment, pos ast.Position, args ...o
 	}
 	mode.state = nil
 	return object.UNDEFINED
+}
+
+func terminalSessionWrite(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWrite(env, pos, args...)
+}
+
+func terminalSessionWriteln(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteln(env, pos, args...)
+}
+
+func terminalSessionSize(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalSize(env, pos, args...)
+}
+
+func terminalSessionSetRawMode(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.setRawMode")
+	if errObj != nil {
+		return errObj
+	}
+	enabled := true
+	if len(args) >= 1 {
+		b, ok := args[0].(*object.Boolean)
+		if !ok {
+			return object.NewError(pos, "terminal.session.setRawMode: enabled must be a boolean")
+		}
+		enabled = b.Value
+	}
+	if err := session.setRawMode(enabled); err != nil {
+		return object.NewError(pos, "terminal.session.setRawMode: %v", err)
+	}
+	return object.UNDEFINED
+}
+
+func terminalSessionStop(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.stop")
+	if errObj != nil {
+		return errObj
+	}
+	if err := session.stopSession(); err != nil {
+		return object.NewError(pos, "terminal.session.stop: %v", err)
+	}
+	return object.UNDEFINED
+}
+
+func terminalSessionDrainInput(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.drainInput")
+	if errObj != nil {
+		return errObj
+	}
+	maxMs := 50
+	idleMs := 10
+	if len(args) >= 1 {
+		n, ok := args[0].(*object.Number)
+		if !ok {
+			return object.NewError(pos, "terminal.session.drainInput: maxMs must be a number")
+		}
+		maxMs = int(n.Value)
+	}
+	if len(args) >= 2 {
+		n, ok := args[1].(*object.Number)
+		if !ok {
+			return object.NewError(pos, "terminal.session.drainInput: idleMs must be a number")
+		}
+		idleMs = int(n.Value)
+	}
+	if maxMs < 0 {
+		maxMs = 0
+	}
+	if idleMs < 0 {
+		idleMs = 0
+	}
+	deadline := time.Now().Add(time.Duration(maxMs) * time.Millisecond)
+	idle := time.NewTimer(time.Duration(idleMs) * time.Millisecond)
+	defer idle.Stop()
+	drained := 0
+	for {
+		select {
+		case <-idle.C:
+			return &object.Number{Value: float64(drained)}
+		case event := <-session.events:
+			if event.kind == "input" {
+				drained++
+			}
+			if time.Now().After(deadline) {
+				return &object.Number{Value: float64(drained)}
+			}
+			if !idle.Stop() {
+				select {
+				case <-idle.C:
+				default:
+				}
+			}
+			idle.Reset(time.Duration(idleMs) * time.Millisecond)
+		default:
+			if time.Now().After(deadline) {
+				return &object.Number{Value: float64(drained)}
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func terminalSessionHideCursor(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.hideCursor")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalHideCursor(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.cursorHidden = true
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
+func terminalSessionShowCursor(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.showCursor")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalShowCursor(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.cursorHidden = false
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
+func terminalSessionEnableBracketedPaste(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.enableBracketedPaste")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalEnableBracketedPaste(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.bracketedPaste = true
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
+func terminalSessionDisableBracketedPaste(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.disableBracketedPaste")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalDisableBracketedPaste(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.bracketedPaste = false
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
+func terminalHideCursor(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?25l")
+}
+
+func terminalShowCursor(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?25h")
+}
+
+func terminalClearScreen(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[2J\x1b[H")
+}
+
+func terminalClearLine(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[2K")
+}
+
+func terminalClearFromCursor(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[J")
+}
+
+func terminalMoveTo(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 2 {
+		return object.NewError(pos, "terminal.moveTo requires row and col")
+	}
+	row, ok := args[0].(*object.Number)
+	if !ok {
+		return object.NewError(pos, "terminal.moveTo: row must be a number")
+	}
+	col, ok := args[1].(*object.Number)
+	if !ok {
+		return object.NewError(pos, "terminal.moveTo: col must be a number")
+	}
+	r := int(row.Value)
+	c := int(col.Value)
+	if r < 1 {
+		r = 1
+	}
+	if c < 1 {
+		c = 1
+	}
+	return terminalWriteANSI(pos, fmt.Sprintf("\x1b[%d;%dH", r, c))
+}
+
+func terminalMoveBy(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 2 {
+		return object.NewError(pos, "terminal.moveBy requires rows and cols")
+	}
+	rows, ok := args[0].(*object.Number)
+	if !ok {
+		return object.NewError(pos, "terminal.moveBy: rows must be a number")
+	}
+	cols, ok := args[1].(*object.Number)
+	if !ok {
+		return object.NewError(pos, "terminal.moveBy: cols must be a number")
+	}
+	seq := strings.Builder{}
+	if rows.Value < 0 {
+		seq.WriteString(fmt.Sprintf("\x1b[%dA", int(-rows.Value)))
+	} else if rows.Value > 0 {
+		seq.WriteString(fmt.Sprintf("\x1b[%dB", int(rows.Value)))
+	}
+	if cols.Value < 0 {
+		seq.WriteString(fmt.Sprintf("\x1b[%dD", int(-cols.Value)))
+	} else if cols.Value > 0 {
+		seq.WriteString(fmt.Sprintf("\x1b[%dC", int(cols.Value)))
+	}
+	return terminalWriteANSI(pos, seq.String())
+}
+
+func terminalSetTitle(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "terminal.setTitle requires title")
+	}
+	return terminalWriteANSI(pos, "\x1b]0;"+objectToText(args[0])+"\x07")
+}
+
+func terminalEnableBracketedPaste(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?2004h")
+}
+
+func terminalDisableBracketedPaste(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?2004l")
+}
+
+func terminalWriteANSI(pos ast.Position, text string) object.Object {
+	n, err := os.Stdout.Write([]byte(text))
+	if err != nil {
+		return object.NewError(pos, "terminal.write: %v", err)
+	}
+	return &object.Number{Value: float64(n)}
+}
+
+func boundTerminalSession(pos ast.Position, env *object.Environment, name string) (*terminalSession, *object.Error) {
+	goObj, ok := env.Extra.(*object.GoObject)
+	if !ok {
+		return nil, object.NewError(pos, "%s: missing terminal session receiver", name)
+	}
+	session, ok := goObj.Value.(*terminalSession)
+	if !ok {
+		return nil, object.NewError(pos, "%s: invalid terminal session receiver", name)
+	}
+	return session, nil
+}
+
+func (s *terminalSession) startAsyncLoops() {
+	s.mu.Lock()
+	if s.asyncRegistered {
+		s.mu.Unlock()
+		return
+	}
+	s.asyncRegistered = true
+	s.mu.Unlock()
+
+	s.vm.AsyncAdd(1)
+	s.vm.Go(func() {
+		defer s.vm.AsyncDone()
+		s.eventLoop()
+	})
+	if s.onInput != nil {
+		go s.readInputLoop()
+	}
+	if s.onResize != nil {
+		go s.resizeLoop()
+	}
+}
+
+func (s *terminalSession) eventLoop() {
+	for {
+		select {
+		case <-s.stop:
+			return
+		case event := <-s.events:
+			switch event.kind {
+			case "input":
+				if s.onInput != nil {
+					result := callTerminalFunction(s.onInput, nil, []object.Object{&object.String{Value: event.data}})
+					if object.IsRuntimeError(result) {
+						fmt.Fprintln(os.Stderr, result.Inspect())
+					}
+				}
+			case "resize":
+				if s.onResize != nil {
+					size := terminalSizeObject(event.cols, event.rows)
+					result := callTerminalFunction(s.onResize, nil, []object.Object{size})
+					if object.IsRuntimeError(result) {
+						fmt.Fprintln(os.Stderr, result.Inspect())
+					}
+				}
+			}
+		}
+	}
+}
+
+func (s *terminalSession) readInputLoop() {
+	buf := make([]byte, 4096)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if n > 0 {
+			if !s.sendEvent(terminalEvent{kind: "input", data: string(buf[:n])}) {
+				return
+			}
+		}
+		if err != nil {
+			if err != io.EOF {
+				fmt.Fprintf(os.Stderr, "terminal.start: input read: %v\n", err)
+			}
+			return
+		}
+		select {
+		case <-s.stop:
+			return
+		default:
+		}
+	}
+}
+
+func (s *terminalSession) resizeLoop() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-s.stop:
+			return
+		case <-ticker.C:
+			cols, rows := terminalGetSize()
+			s.mu.Lock()
+			changed := cols != s.lastCols || rows != s.lastRows
+			if changed {
+				s.lastCols = cols
+				s.lastRows = rows
+			}
+			s.mu.Unlock()
+			if changed && !s.sendEvent(terminalEvent{kind: "resize", cols: cols, rows: rows}) {
+				return
+			}
+		}
+	}
+}
+
+func (s *terminalSession) sendEvent(event terminalEvent) bool {
+	select {
+	case <-s.stop:
+		return false
+	case s.events <- event:
+		return true
+	default:
+		select {
+		case <-s.events:
+		default:
+		}
+		select {
+		case <-s.stop:
+			return false
+		case s.events <- event:
+			return true
+		default:
+			return true
+		}
+	}
+}
+
+func (s *terminalSession) setRawMode(enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if enabled {
+		if s.raw != nil && s.raw.state != nil {
+			return nil
+		}
+		raw, err := terminalMakeRaw()
+		if err != nil {
+			return err
+		}
+		s.raw = raw
+		return nil
+	}
+	return s.restoreRawLocked()
+}
+
+func (s *terminalSession) stopSession() error {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return nil
+	}
+	s.stopped = true
+	close(s.stop)
+	err := s.restoreLocked()
+	s.mu.Unlock()
+	unregisterTerminalSession(s)
+	return err
+}
+
+func (s *terminalSession) restore() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.restoreLocked()
+}
+
+func (s *terminalSession) restoreLocked() error {
+	var errs []string
+	if s.cursorHidden {
+		if _, err := os.Stdout.Write([]byte("\x1b[?25h")); err != nil {
+			errs = append(errs, err.Error())
+		}
+		s.cursorHidden = false
+	}
+	if s.bracketedPaste {
+		if _, err := os.Stdout.Write([]byte("\x1b[?2004l")); err != nil {
+			errs = append(errs, err.Error())
+		}
+		s.bracketedPaste = false
+	}
+	if err := s.restoreRawLocked(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+func (s *terminalSession) restoreRawLocked() error {
+	if s.raw == nil || s.raw.state == nil {
+		return nil
+	}
+	if err := term.Restore(s.raw.fd, s.raw.state); err != nil {
+		return err
+	}
+	s.raw.state = nil
+	return nil
+}
+
+func terminalMakeRaw() (*terminalRawMode, error) {
+	fd := int(os.Stdin.Fd())
+	state, err := term.MakeRaw(fd)
+	if err != nil {
+		return nil, err
+	}
+	if err := terminalEnableVirtualTerminalInput(fd); err != nil {
+		_ = term.Restore(fd, state)
+		return nil, err
+	}
+	return &terminalRawMode{fd: fd, state: state}, nil
+}
+
+func registerTerminalSession(session *terminalSession) {
+	activeTerminalSessions.Lock()
+	activeTerminalSessions.sessions[session] = struct{}{}
+	activeTerminalSessions.Unlock()
+}
+
+func unregisterTerminalSession(session *terminalSession) {
+	activeTerminalSessions.Lock()
+	delete(activeTerminalSessions.sessions, session)
+	activeTerminalSessions.Unlock()
+}
+
+func StopTerminalSessionsForVM(vm *object.VirtualMachine) {
+	if vm == nil {
+		return
+	}
+	activeTerminalSessions.Lock()
+	sessions := make([]*terminalSession, 0, len(activeTerminalSessions.sessions))
+	for session := range activeTerminalSessions.sessions {
+		if session.vm == vm {
+			sessions = append(sessions, session)
+		}
+	}
+	activeTerminalSessions.Unlock()
+	for _, session := range sessions {
+		_ = session.stopSession()
+	}
+}
+
+func StopAllTerminalSessions() {
+	activeTerminalSessions.Lock()
+	sessions := make([]*terminalSession, 0, len(activeTerminalSessions.sessions))
+	for session := range activeTerminalSessions.sessions {
+		sessions = append(sessions, session)
+	}
+	activeTerminalSessions.Unlock()
+	for _, session := range sessions {
+		_ = session.stopSession()
+	}
+}
+
+func stopModuleTerminalSessions(vm *object.VirtualMachine, moduleEvent string, fn *object.Function) int {
+	activeTerminalSessions.Lock()
+	sessions := make([]*terminalSession, 0, len(activeTerminalSessions.sessions))
+	for session := range activeTerminalSessions.sessions {
+		if session.vm != vm || session.moduleEvent != moduleEvent {
+			continue
+		}
+		if moduleEvent == "input" && session.onInput == fn {
+			sessions = append(sessions, session)
+		}
+		if moduleEvent == "resize" && session.onResize == fn {
+			sessions = append(sessions, session)
+		}
+	}
+	activeTerminalSessions.Unlock()
+	for _, session := range sessions {
+		_ = session.stopSession()
+	}
+	return len(sessions)
+}
+
+func terminalGetSize() (int, int) {
+	cols, rows, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		cols, rows = terminalSizeFromEnv()
+	}
+	return cols, rows
+}
+
+func terminalSizeObject(cols, rows int) *object.Hash {
+	out := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+	setHashMember(out, "cols", &object.Number{Value: float64(cols)})
+	setHashMember(out, "rows", &object.Number{Value: float64(rows)})
+	return out
+}
+
+func callTerminalFunction(fn *object.Function, this object.Object, args []object.Object) object.Object {
+	scope := fn.Env.NewScope()
+	if this != nil {
+		scope.Set("this", this)
+	}
+	for i, p := range fn.Parameters {
+		if i < len(args) {
+			if p.Spread {
+				rest := make([]object.Object, len(args)-i)
+				copy(rest, args[i:])
+				scope.Set(p.Name, fn.Env.ObjectManager().NewArray(rest))
+				break
+			}
+			scope.Set(p.Name, args[i])
+		} else if p.Default != nil {
+			scope.Set(p.Name, fn.Env.VM().EvalNode(p.Default, fn.Env))
+		} else {
+			scope.Set(p.Name, object.UNDEFINED)
+		}
+	}
+	result := fn.Env.VM().EvalNode(fn.Body, scope)
+	if rv, ok := result.(*object.ReturnValue); ok {
+		return rv.Value
+	}
+	return result
 }
 
 func terminalFD(name string) int {

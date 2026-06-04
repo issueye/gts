@@ -171,6 +171,7 @@ func processExit(env *object.Environment, pos ast.Position, args ...object.Objec
 			return object.NewError(pos, "process.exit: code must be a number")
 		}
 	}
+	StopAllTerminalSessions()
 	os.Exit(code)
 	return object.UNDEFINED
 }

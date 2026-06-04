@@ -66,6 +66,20 @@ func TestEval_String(t *testing.T) {
 	}
 }
 
+func TestEval_StringEscapes(t *testing.T) {
+	tests := []struct{ input, expected string }{
+		{`"\x1b[2J";`, "\x1b[2J"},
+		{`"\x12";`, "\x12"},
+		{`"\u001b[?25l";`, "\x1b[?25l"},
+		{`"\u{2603}";`, "☃"},
+		{"`\\x1b[2J`;", "\x1b[2J"},
+	}
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testString(t, evaluated, tt.expected)
+	}
+}
+
 func TestEval_TemplateExpressionSyntaxError(t *testing.T) {
 	evaluated := testEval("`hello ${name`;")
 	err, ok := evaluated.(*object.Error)
@@ -1426,6 +1440,21 @@ assert(re.flags === "i", "RegExp.flags");
 "ok";
 `
 	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "ok")
+}
+
+func TestEval_RegExpLiteral(t *testing.T) {
+	input := `
+function assert(cond, msg) { if (!cond) { throw new Error(msg); } }
+let esc = "\x1b";
+let ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
+assert(ansi.test(esc + "[2J") === true, "ansi regexp literal");
+assert(/[@-~]/.test("@") === true, "at in char class");
+let div = 6 / 2;
+assert(div === 3, "division still works");
+"ok";
+`
+	evaluated := testEval(input)
 	testString(t, evaluated, "ok")
 }
 

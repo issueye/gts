@@ -11,9 +11,9 @@ if (process.env.OS === "Windows_NT") {
 let term = pty.spawn(cmdName, cmdArgs, { cols: 80, rows: 24 });
 let text = "";
 for (let i = 0; i < 8; i = i + 1) {
-  let chunk = term.readText(4096);
+  let chunk = term.readText(4096, 500);
   if (chunk === null) {
-    i = 8;
+    // Keep waiting: Windows ConPTY can emit setup sequences before command output.
   } else {
     text = text + chunk;
     if (text.includes("got:pty")) {

@@ -1,7 +1,9 @@
 package evaluator
 
 import (
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/lexer"
@@ -47,12 +49,50 @@ func unescapeString(s string) string {
 				b.WriteByte('\t')
 			case 'r':
 				b.WriteByte('\r')
+			case 'b':
+				b.WriteByte('\b')
+			case 'f':
+				b.WriteByte('\f')
+			case 'v':
+				b.WriteByte('\v')
+			case '0':
+				b.WriteByte(0)
 			case '\\':
 				b.WriteByte('\\')
 			case '"':
 				b.WriteByte('"')
 			case '\'':
 				b.WriteByte('\'')
+			case 'x':
+				if i+3 < len(s) && isHexByte(s[i+2]) && isHexByte(s[i+3]) {
+					value, _ := strconv.ParseInt(s[i+2:i+4], 16, 32)
+					b.WriteByte(byte(value))
+					i += 4
+					continue
+				}
+				b.WriteByte('x')
+			case 'u':
+				if i+5 < len(s) && isHexByte(s[i+2]) && isHexByte(s[i+3]) && isHexByte(s[i+4]) && isHexByte(s[i+5]) {
+					value, _ := strconv.ParseInt(s[i+2:i+6], 16, 32)
+					b.WriteRune(rune(value))
+					i += 6
+					continue
+				}
+				if i+3 < len(s) && s[i+2] == '{' {
+					if end := strings.IndexByte(s[i+3:], '}'); end >= 0 {
+						hex := s[i+3 : i+3+end]
+						if hex != "" && allHex(hex) {
+							value, _ := strconv.ParseInt(hex, 16, 32)
+							r := rune(value)
+							if utf8.ValidRune(r) {
+								b.WriteRune(r)
+								i += 4 + end
+								continue
+							}
+						}
+					}
+				}
+				b.WriteByte('u')
 			default:
 				b.WriteByte(s[i+1])
 			}
@@ -63,6 +103,19 @@ func unescapeString(s string) string {
 		}
 	}
 	return b.String()
+}
+
+func isHexByte(ch byte) bool {
+	return (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F')
+}
+
+func allHex(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isHexByte(s[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func evalTemplate(n *ast.TemplateLit, env *object.Environment) object.Object {
@@ -93,8 +146,11 @@ func evalTemplate(n *ast.TemplateLit, env *object.Environment) object.Object {
 			i = end + 1
 			continue
 		}
-		result.WriteByte(inner[i])
-		i++
+		start := i
+		for i < len(inner) && !(i+1 < len(inner) && inner[i] == '$' && inner[i+1] == '{') {
+			i++
+		}
+		result.WriteString(unescapeString(inner[start:i]))
 	}
 	return &object.String{Value: result.String()}
 }
@@ -158,6 +214,51 @@ func evalTemplateExpression(expr string, env *object.Environment, pos ast.Positi
 		return object.UNDEFINED
 	}
 	return value
+}
+
+func evalRegExpLit(n *ast.RegExpLit) object.Object {
+	source, flags, ok := splitRegExpLiteral(n.TokenLit)
+	if !ok {
+		return object.NewError(n.Pos(), "SyntaxError: invalid regexp literal")
+	}
+	re, err := compileRegExp(n.Pos(), source, flags)
+	if err != nil {
+		return err
+	}
+	return re
+}
+
+func splitRegExpLiteral(lit string) (string, string, bool) {
+	if len(lit) < 2 || lit[0] != '/' {
+		return "", "", false
+	}
+	inClass := false
+	escape := false
+	for i := 1; i < len(lit); i++ {
+		ch := lit[i]
+		if escape {
+			escape = false
+			continue
+		}
+		if ch == '\\' {
+			escape = true
+			continue
+		}
+		if inClass {
+			if ch == ']' {
+				inClass = false
+			}
+			continue
+		}
+		if ch == '[' {
+			inClass = true
+			continue
+		}
+		if ch == '/' {
+			return lit[1:i], lit[i+1:], true
+		}
+	}
+	return "", "", false
 }
 
 func evalArray(n *ast.ArrayLit, env *object.Environment) object.Object {
