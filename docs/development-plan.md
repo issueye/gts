@@ -35,7 +35,7 @@ The main remaining gap is language/runtime completion: full module semantics, st
 
 | Area | Gap |
 |------|-----|
-| REPL | No interactive shell |
+| REPL | Basic interactive shell exists; line editing/history and richer recovery remain |
 | Module runtime | Basic `import/export` works; full semantics are incomplete |
 | Type checker | Type annotations parse, but `internal/typechecker` is missing |
 | Static resolver | `internal/module.Resolver` exists for module paths; a separate static scope resolver for declarations, `this`, and `super` is still missing |
@@ -336,12 +336,14 @@ This is separate from `internal/module.Resolver`, which already resolves module 
 
 **Goal:** Make `gs` without a file open an interactive shell.
 
+**Current status:** Basic MVP implemented. `gs` without arguments now starts a REPL after the appended executable check. The session keeps one VM and top-level environment, supports `.exit`, `.quit`, `.help`, `.load <file>`, prints non-`undefined` results, and keeps running after parse/runtime errors.
+
 **Scope:**
 
-- Multi-line input for blocks/functions/classes.
-- Persistent environment across entries.
-- `.exit`, `.help`, `.load`.
-- Friendly display of returned values and errors.
+- Improve multiline detection for syntax that is incomplete without unmatched delimiters.
+- Add line editing and command history.
+- Refine returned value and error display.
+- Document command behavior and limitations.
 
 **Acceptance:**
 

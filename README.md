@@ -22,7 +22,7 @@ GoScript 的目标是为 Go 生态提供一个**易嵌入、可扩展、熟悉 J
 | 异步模型 | `Promise`、`async/await`、timer 有部分实现，语义仍需加固 |
 | 模块系统 | `require(path)` 已接入 CLI；基础 named/default/namespace `import/export` 已可运行，完整语义仍待补齐 |
 | 类型系统 | 类型注解可解析；`--check-types` 暂未实现类型检查 |
-| REPL | 暂未实现 |
+| REPL | 基础版已实现：无参数启动、持久环境、`.help` / `.exit` / `.load` |
 | 嵌入 API | 暂未提供稳定公开 facade |
 
 ---
@@ -51,6 +51,9 @@ cd hello-app
 
 # 不构建，直接运行
 go run ./cmd/gs main.gs
+
+# 进入交互式 REPL
+go run ./cmd/gs
 ```
 
 CLI 常用参数：

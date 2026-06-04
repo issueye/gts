@@ -19,9 +19,11 @@ type Item[K comparable, V any] struct {
 // The zero value is ready to use. Sorting requires a Less function; without one,
 // SortedKeys and SortedItems return the same keys as insertion-neutral snapshots.
 type SafeSortedMap[K comparable, V any] struct {
-	mu     sync.RWMutex
-	values map[K]V
-	less   Less[K]
+	mu              sync.RWMutex
+	values          map[K]V
+	less            Less[K]
+	sortedKeys      []K
+	sortedKeysDirty bool
 }
 
 func New[K comparable, V any](less Less[K]) *SafeSortedMap[K, V] {
@@ -32,6 +34,7 @@ func (m *SafeSortedMap[K, V]) SetLess(less Less[K]) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.less = less
+	m.sortedKeysDirty = true
 }
 
 func (m *SafeSortedMap[K, V]) Set(key K, value V) {
@@ -39,6 +42,11 @@ func (m *SafeSortedMap[K, V]) Set(key K, value V) {
 	defer m.mu.Unlock()
 	if m.values == nil {
 		m.values = make(map[K]V)
+	}
+	if !m.sortedKeysDirty && m.sortedKeys != nil {
+		if _, exists := m.values[key]; !exists {
+			m.sortedKeysDirty = true
+		}
 	}
 	m.values[key] = value
 }
@@ -61,6 +69,9 @@ func (m *SafeSortedMap[K, V]) GetOrSetFunc(key K, makeValue func() V) (V, bool) 
 	}
 	value := makeValue()
 	m.values[key] = value
+	if !m.sortedKeysDirty && m.sortedKeys != nil {
+		m.sortedKeysDirty = true
+	}
 	return value, false
 }
 
@@ -74,6 +85,13 @@ func (m *SafeSortedMap[K, V]) Has(key K) bool {
 func (m *SafeSortedMap[K, V]) Delete(key K) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.sortedKeysDirty || m.sortedKeys == nil {
+		delete(m.values, key)
+		return
+	}
+	if _, exists := m.values[key]; exists {
+		m.sortedKeysDirty = true
+	}
 	delete(m.values, key)
 }
 
@@ -94,18 +112,10 @@ func (m *SafeSortedMap[K, V]) Keys() []K {
 }
 
 func (m *SafeSortedMap[K, V]) SortedKeys() []K {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	keys := make([]K, 0, len(m.values))
-	for key := range m.values {
-		keys = append(keys, key)
-	}
-	if m.less != nil {
-		sort.Slice(keys, func(i, j int) bool {
-			return m.less(keys[i], keys[j])
-		})
-	}
-	return keys
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	keys := m.sortedKeysLocked()
+	return append([]K(nil), keys...)
 }
 
 func (m *SafeSortedMap[K, V]) Snapshot() map[K]V {
@@ -129,16 +139,30 @@ func (m *SafeSortedMap[K, V]) Items() []Item[K, V] {
 }
 
 func (m *SafeSortedMap[K, V]) SortedItems() []Item[K, V] {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	items := make([]Item[K, V], 0, len(m.values))
-	for key, value := range m.values {
-		items = append(items, Item[K, V]{Key: key, Value: value})
-	}
-	if m.less != nil {
-		sort.Slice(items, func(i, j int) bool {
-			return m.less(items[i].Key, items[j].Key)
-		})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	keys := m.sortedKeysLocked()
+	items := make([]Item[K, V], 0, len(keys))
+	for _, key := range keys {
+		items = append(items, Item[K, V]{Key: key, Value: m.values[key]})
 	}
 	return items
+}
+
+func (m *SafeSortedMap[K, V]) sortedKeysLocked() []K {
+	if !m.sortedKeysDirty && len(m.sortedKeys) == len(m.values) {
+		return m.sortedKeys
+	}
+	keys := make([]K, 0, len(m.values))
+	for key := range m.values {
+		keys = append(keys, key)
+	}
+	if m.less != nil {
+		sort.Slice(keys, func(i, j int) bool {
+			return m.less(keys[i], keys[j])
+		})
+	}
+	m.sortedKeys = keys
+	m.sortedKeysDirty = false
+	return m.sortedKeys
 }

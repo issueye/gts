@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -112,8 +113,117 @@ func TestRunAPIDocUnknownNativeModule(t *testing.T) {
 }
 
 func TestRunWithoutArgs(t *testing.T) {
-	if code := run(nil); code != 2 {
-		t.Fatalf("want exit code 2, got %d", code)
+	oldInput := cliInput
+	cliInput = strings.NewReader(".exit\n")
+	defer func() { cliInput = oldInput }()
+
+	stdout, stderr, code := captureRunOutput(t, nil)
+	if code != 0 {
+		t.Fatalf("want exit code 0, got %d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "GoScript "+version) || !strings.Contains(stdout, "gs> ") {
+		t.Fatalf("unexpected repl output: %q", stdout)
+	}
+}
+
+func TestREPLPersistsBindings(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	err := r.runREPL(replConfig{
+		in:     strings.NewReader("let value = 40;\nvalue + 2\n.exit\n"),
+		out:    &stdout,
+		errOut: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "42\n") {
+		t.Fatalf("expected persisted expression result, got %q", stdout.String())
+	}
+}
+
+func TestREPLMultilineFunction(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	err := r.runREPL(replConfig{
+		in: strings.NewReader(`function add(a, b) {
+  return a + b;
+}
+add(2, 3)
+.exit
+`),
+		out:    &stdout,
+		errOut: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "5\n") {
+		t.Fatalf("expected multiline function result, got %q", stdout.String())
+	}
+}
+
+func TestREPLErrorDoesNotExitSession(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	err := r.runREPL(replConfig{
+		in:     strings.NewReader("missingName\n1 + 1\n.exit\n"),
+		out:    &stdout,
+		errOut: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "ReferenceError") {
+		t.Fatalf("expected runtime error, got %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "2\n") {
+		t.Fatalf("expected session to continue, got %q", stdout.String())
+	}
+}
+
+func TestREPLLoadCommand(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "load.gs")
+	writeTestFile(t, script, "let loaded = 7;\n")
+
+	var stdout, stderr bytes.Buffer
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	err := r.runREPL(replConfig{
+		in:     strings.NewReader(".load " + script + "\nloaded * 6\n.exit\n"),
+		out:    &stdout,
+		errOut: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stderr.String() != "" {
+		t.Fatalf("unexpected stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "42\n") {
+		t.Fatalf("expected loaded binding result, got %q", stdout.String())
+	}
+}
+
+func TestREPLUnknownDotCommand(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	err := r.runREPL(replConfig{
+		in:     strings.NewReader(".loadbad\n.exit\n"),
+		out:    &stdout,
+		errOut: &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "unknown command: .loadbad") {
+		t.Fatalf("expected unknown command error, got %q", stderr.String())
 	}
 }
 

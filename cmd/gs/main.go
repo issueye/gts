@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,6 +29,7 @@ const version = "0.1.0-dev"
 const defaultTimeout = 10 * time.Second
 
 var sharedVMPool = object.NewVirtualMachinePool(runtime.NumCPU())
+var cliInput io.Reader = os.Stdin
 
 type options struct {
 	checkTypes bool
@@ -42,6 +44,13 @@ type runner struct {
 	vm       *object.VirtualMachine
 	resolver *module.Resolver
 	rootDir  string
+}
+
+type replConfig struct {
+	in        io.Reader
+	out       io.Writer
+	errOut    io.Writer
+	showIntro bool
 }
 
 type runOptions struct {
@@ -89,8 +98,11 @@ func run(args []string) int {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
-		printUsage(fs)
-		return 2
+		if err := r.runREPL(replConfig{in: cliInput, out: os.Stdout, errOut: os.Stderr, showIntro: true}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
 	}
 
 	var err error
