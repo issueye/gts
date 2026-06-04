@@ -1832,6 +1832,87 @@ fs.writeTextSync("__PORT_FILE__", server.port.toString());
 	}
 }
 
+func TestStdWebFrameworkProxyMiddleware(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if r.Method != http.MethodPost {
+			t.Fatalf("want POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/items" || r.URL.RawQuery != "q=ok" {
+			t.Fatalf("unexpected upstream URL: %s", r.URL.String())
+		}
+		if string(body) != "hello" {
+			t.Fatalf("want forwarded body, got %q", string(body))
+		}
+		if r.Header.Get("X-Forwarded-Host") == "" {
+			t.Fatalf("missing X-Forwarded-Host")
+		}
+		w.Header().Set("X-Proxy-Test", "yes")
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte("proxied:" + r.Header.Get("X-Extra")))
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	portFile := filepath.Join(dir, "port.txt")
+	script := filepath.Join(dir, "web_proxy.gs")
+	source := strings.NewReplacer(
+		"__PORT_FILE__", strings.ReplaceAll(portFile, `\`, `\\`),
+		"__UPSTREAM__", upstream.URL,
+	).Replace(`
+let web = require("@std/web");
+let fs = require("@std/fs");
+
+let app = web.createApp();
+app.use("/api", web.proxy({
+  target: "__UPSTREAM__/v1",
+  stripPrefix: "/api",
+  headers: { "X-Extra": "native" },
+}));
+
+let server = app.listen(0);
+fs.writeTextSync("__PORT_FILE__", server.port.toString());
+"ready";
+`)
+	if err := os.WriteFile(script, []byte(source), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "ready" {
+		t.Fatalf("want ready, got %T %v", result, result)
+	}
+
+	portBytes, err := os.ReadFile(portFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL := "http://127.0.0.1:" + strings.TrimSpace(string(portBytes))
+	resp, err := http.Post(baseURL+"/api/items?q=ok", "text/plain", strings.NewReader("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("want 202, got %d: %s", resp.StatusCode, string(data))
+	}
+	if resp.Header.Get("X-Proxy-Test") != "yes" {
+		t.Fatalf("missing upstream header")
+	}
+	if string(data) != "proxied:native" {
+		t.Fatalf("want proxied:native, got %q", string(data))
+	}
+}
+
 func TestAgentAnthropicProviderWithMockServer(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

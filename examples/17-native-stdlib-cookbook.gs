@@ -14,6 +14,7 @@ let stream = require("@std/stream");
 let sse = require("@std/sse");
 let events = require("@std/events");
 let schema = require("@std/schema");
+let web = require("@std/web");
 let toml = require("@std/toml");
 let yaml = require("@std/yaml");
 let xml = require("@std/xml");
@@ -99,6 +100,20 @@ function main() {
     console.log("file URL roundtrip:", path.basename(filePath));
     console.log("schema valid:", validation.valid);
 
+    section("web / http proxy");
+
+    let proxyOptions = {
+      target: "http://127.0.0.1:9000/v1",
+      stripPrefix: "/api",
+      headers: { "X-Demo": "proxy" },
+    };
+    let proxyMiddleware = web.proxy(proxyOptions);
+    let proxyKind = "bad";
+    if (typeof proxyMiddleware === "BUILTIN" && proxyOptions.stripPrefix === "/api") {
+      proxyKind = "proxy";
+    }
+    console.log("proxy middleware:", proxyKind);
+
     section("events / stream / sse / timers");
 
     let emitter = events.EventEmitter();
@@ -164,6 +179,9 @@ function main() {
       ok = false;
     }
     if (secondEvent.type !== "delta") {
+      ok = false;
+    }
+    if (proxyKind !== "proxy") {
       ok = false;
     }
 

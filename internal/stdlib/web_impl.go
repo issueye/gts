@@ -1,15 +1,18 @@
 package stdlib
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/object"
@@ -45,6 +48,16 @@ type webResponse struct {
 type webNativeMiddleware struct {
 	name string
 	fn   func(*webContext, object.Object) object.Object
+}
+
+type webProxyOptions struct {
+	target          *url.URL
+	timeout         time.Duration
+	preserveHost    bool
+	stripPrefix     string
+	rewritePrefix   string
+	requestHeaders  map[string]string
+	responseHeaders map[string]string
 }
 
 func webCreateApp(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -135,6 +148,25 @@ func webStatic(env *object.Environment, pos ast.Position, args ...object.Object)
 		},
 	}
 	return &object.Builtin{Name: "web.static.middleware", Extra: &object.GoObject{Value: middleware}, Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		return object.UNDEFINED
+	}}
+}
+
+func webProxy(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	opts, errObj := parseWebProxyOptions(pos, args)
+	if errObj != nil {
+		return errObj
+	}
+	middleware := &webNativeMiddleware{
+		name: "web.proxy",
+		fn: func(ctx *webContext, next object.Object) object.Object {
+			if err := proxyWebRequest(ctx, opts); err != nil {
+				http.Error(ctx.writer, err.Error(), http.StatusBadGateway)
+			}
+			return object.UNDEFINED
+		},
+	}
+	return &object.Builtin{Name: "web.proxy.middleware", Extra: &object.GoObject{Value: middleware}, Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 		return object.UNDEFINED
 	}}
 }
@@ -347,6 +379,125 @@ func webStaticRequestPath(ctx *webContext) string {
 		path = strings.TrimPrefix(path, prefix)
 	}
 	return strings.TrimPrefix(path, "/")
+}
+
+func parseWebProxyOptions(pos ast.Position, args []object.Object) (*webProxyOptions, *object.Error) {
+	if len(args) < 1 {
+		return nil, object.NewError(pos, "web.proxy requires a target URL or options object")
+	}
+	opts := &webProxyOptions{
+		timeout:         30 * time.Second,
+		requestHeaders:  make(map[string]string),
+		responseHeaders: make(map[string]string),
+	}
+	switch first := args[0].(type) {
+	case *object.String:
+		target, err := url.Parse(first.Value)
+		if err != nil || target.Scheme == "" || target.Host == "" {
+			return nil, object.NewError(pos, "web.proxy: target must be an absolute URL")
+		}
+		opts.target = target
+	case *object.Hash:
+		if v, ok := hashValue(first, "target"); ok {
+			target, err := url.Parse(v.Inspect())
+			if err != nil || target.Scheme == "" || target.Host == "" {
+				return nil, object.NewError(pos, "web.proxy: target must be an absolute URL")
+			}
+			opts.target = target
+		}
+		if v, ok := hashValue(first, "timeoutMs"); ok {
+			if n, ok := v.(*object.Number); ok && n.Value > 0 {
+				opts.timeout = time.Duration(n.Value) * time.Millisecond
+			}
+		}
+		if v, ok := hashValue(first, "preserveHost"); ok {
+			if b, ok := v.(*object.Boolean); ok {
+				opts.preserveHost = b.Value
+			}
+		}
+		if v, ok := hashValue(first, "stripPrefix"); ok {
+			opts.stripPrefix = v.Inspect()
+		}
+		if v, ok := hashValue(first, "rewritePrefix"); ok {
+			opts.rewritePrefix = v.Inspect()
+		}
+		if v, ok := hashValue(first, "headers"); ok {
+			if headers, ok := v.(*object.Hash); ok {
+				for _, pair := range headers.Pairs {
+					opts.requestHeaders[pair.Key.Inspect()] = pair.Value.Inspect()
+				}
+			}
+		}
+		if v, ok := hashValue(first, "responseHeaders"); ok {
+			if headers, ok := v.(*object.Hash); ok {
+				for _, pair := range headers.Pairs {
+					opts.responseHeaders[pair.Key.Inspect()] = pair.Value.Inspect()
+				}
+			}
+		}
+	default:
+		return nil, object.NewError(pos, "web.proxy: first argument must be a target URL string or options object")
+	}
+	if opts.target == nil {
+		return nil, object.NewError(pos, "web.proxy: target is required")
+	}
+	return opts, nil
+}
+
+func proxyWebRequest(ctx *webContext, opts *webProxyOptions) error {
+	targetURL := buildWebProxyURL(ctx, opts)
+	req, err := http.NewRequestWithContext(ctx.req.Context(), ctx.req.Method, targetURL.String(), bytes.NewReader([]byte(ctx.body)))
+	if err != nil {
+		return err
+	}
+	copyHTTPHeader(req.Header, ctx.req.Header)
+	for k, v := range opts.requestHeaders {
+		req.Header.Set(k, v)
+	}
+	req.Header.Set("X-Forwarded-Host", ctx.req.Host)
+	req.Header.Set("X-Forwarded-Proto", forwardedProto(ctx.req))
+	req.Header.Set("X-Forwarded-For", appendForwardedFor(ctx.req.Header.Get("X-Forwarded-For"), ctx.req.RemoteAddr))
+	if opts.preserveHost {
+		req.Host = ctx.req.Host
+	}
+	removeHopByHopHeaders(req.Header)
+
+	client := &http.Client{Timeout: opts.timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	copyHTTPHeader(ctx.writer.Header(), resp.Header)
+	for k, v := range opts.responseHeaders {
+		ctx.writer.Header().Set(k, v)
+	}
+	removeHopByHopHeaders(ctx.writer.Header())
+	ctx.writer.WriteHeader(resp.StatusCode)
+	_, err = io.Copy(ctx.writer, resp.Body)
+	return err
+}
+
+func buildWebProxyURL(ctx *webContext, opts *webProxyOptions) *url.URL {
+	out := *opts.target
+	requestPath := ctx.req.URL.Path
+	if opts.stripPrefix != "" {
+		requestPath = stripURLPathPrefix(requestPath, opts.stripPrefix)
+	}
+	if opts.rewritePrefix != "" {
+		requestPath = singleJoiningSlash(opts.rewritePrefix, requestPath)
+	}
+	out.Path = singleJoiningSlash(opts.target.Path, requestPath)
+	out.RawPath = ""
+	if opts.target.RawQuery == "" {
+		out.RawQuery = ctx.req.URL.RawQuery
+	} else if ctx.req.URL.RawQuery == "" {
+		out.RawQuery = opts.target.RawQuery
+	} else {
+		out.RawQuery = opts.target.RawQuery + "&" + ctx.req.URL.RawQuery
+	}
+	return &out
 }
 
 func webHandlersValid(handlers []object.Object) bool {

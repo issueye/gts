@@ -23,4 +23,6 @@ func initWebModule(exports *object.Hash) {
 	setHashMember(exports, "json", &object.Builtin{Name: "web.json", Fn: webJSON})
 	setHashMember(exports, "text", &object.Builtin{Name: "web.text", Fn: webText})
 	setHashMember(exports, "static", &object.Builtin{Name: "web.static", Fn: webStatic})
+	setHashMember(exports, "proxy", &object.Builtin{Name: "web.proxy", Fn: webProxy})
+	setHashMember(exports, "forward", &object.Builtin{Name: "web.forward", Fn: webProxy})
 }

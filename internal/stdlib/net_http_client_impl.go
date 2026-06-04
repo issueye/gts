@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -91,6 +92,9 @@ func httpClientRequest(env *object.Environment, pos ast.Position, args ...object
 		return errObj
 	}
 	client := &http.Client{}
+	if opts.proxyURL != nil {
+		client.Transport = &http.Transport{Proxy: http.ProxyURL(opts.proxyURL)}
+	}
 	if opts.timeoutMs > 0 {
 		client.Timeout = time.Duration(opts.timeoutMs) * time.Millisecond
 	}
@@ -118,6 +122,9 @@ func httpClientStream(env *object.Environment, pos ast.Position, args ...object.
 		return errObj
 	}
 	client := &http.Client{}
+	if opts.proxyURL != nil {
+		client.Transport = &http.Transport{Proxy: http.ProxyURL(opts.proxyURL)}
+	}
 	if opts.timeoutMs > 0 {
 		client.Timeout = time.Duration(opts.timeoutMs) * time.Millisecond
 	}
@@ -186,6 +193,7 @@ type httpRequestOptions struct {
 	body      io.Reader
 	timeoutMs int
 	stream    bool
+	proxyURL  *url.URL
 }
 
 func parseHTTPRequestOptions(pos ast.Position, name string, args []object.Object) (*httpRequestOptions, *object.Error) {
@@ -231,6 +239,13 @@ func parseHTTPRequestOptions(pos ast.Position, name string, args []object.Object
 		}
 		if v, ok := hashValue(h, "responseType"); ok && v.Inspect() == "stream" {
 			opts.stream = true
+		}
+		if v, ok := hashValue(h, "proxy"); ok {
+			proxyURL, err := url.Parse(v.Inspect())
+			if err != nil || proxyURL.Scheme == "" || proxyURL.Host == "" {
+				return nil, object.NewError(pos, "%s: proxy must be an absolute URL", name)
+			}
+			opts.proxyURL = proxyURL
 		}
 	} else {
 		return nil, object.NewError(pos, "%s: first argument must be a string URL or options object", name)
