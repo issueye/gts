@@ -1,9 +1,14 @@
 package object
 
-import "github.com/issueye/goscript/internal/ast"
+import (
+	"sync"
+
+	"github.com/issueye/goscript/internal/ast"
+)
 
 // Environment is a scope for variable bindings.
 type Environment struct {
+	mu               sync.RWMutex
 	store            map[string]Object
 	consts           map[string]bool
 	types            map[string]*ast.TypeAnnotation
@@ -46,14 +51,19 @@ func (e *Environment) ObjectManager() *ObjectManager {
 
 func (e *Environment) Get(name string) (Object, bool) {
 	for env := e; env != nil; env = env.parent {
+		env.mu.RLock()
 		if obj, ok := env.store[name]; ok {
+			env.mu.RUnlock()
 			return obj, true
 		}
+		env.mu.RUnlock()
 	}
 	return e.VM().GetGlobalConst(name)
 }
 
 func (e *Environment) Set(name string, val Object) Object {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.store == nil {
 		e.store = make(map[string]Object)
 	}
@@ -69,6 +79,8 @@ func (e *Environment) Set(name string, val Object) Object {
 }
 
 func (e *Environment) SetConst(name string, val Object) Object {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.store == nil {
 		e.store = make(map[string]Object)
 	}
@@ -84,6 +96,8 @@ func (e *Environment) SetConst(name string, val Object) Object {
 }
 
 func (e *Environment) SetTyped(name string, val Object, anno *ast.TypeAnnotation) Object {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.store == nil {
 		e.store = make(map[string]Object)
 	}
@@ -106,6 +120,8 @@ func (e *Environment) SetTyped(name string, val Object, anno *ast.TypeAnnotation
 }
 
 func (e *Environment) SetTypedConst(name string, val Object, anno *ast.TypeAnnotation) Object {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.store == nil {
 		e.store = make(map[string]Object)
 	}
@@ -129,10 +145,13 @@ func (e *Environment) SetTypedConst(name string, val Object, anno *ast.TypeAnnot
 
 func (e *Environment) TypeOf(name string) (*ast.TypeAnnotation, bool) {
 	for env := e; env != nil; env = env.parent {
+		env.mu.RLock()
 		if _, ok := env.store[name]; ok {
 			anno, typed := env.types[name]
+			env.mu.RUnlock()
 			return anno, typed && anno != nil
 		}
+		env.mu.RUnlock()
 	}
 	return nil, false
 }
@@ -141,15 +160,19 @@ func (e *Environment) TypeOf(name string) (*ast.TypeAnnotation, bool) {
 // creating it in the current scope if not found anywhere.
 func (e *Environment) SetUp(name string, val Object) Object {
 	for env := e; env != nil; env = env.parent {
+		env.mu.Lock()
 		if _, ok := env.store[name]; ok {
 			if env.consts[name] {
+				env.mu.Unlock()
 				return nil
 			}
 			env.store[name] = val
+			env.mu.Unlock()
 			return val
 		}
 		if env.parent == nil {
 			if env.VM().HasGlobalConst(name) {
+				env.mu.Unlock()
 				return nil
 			}
 			if env.store == nil {
@@ -163,21 +186,27 @@ func (e *Environment) SetUp(name string, val Object) Object {
 			if env.types != nil {
 				delete(env.types, name)
 			}
+			env.mu.Unlock()
 			return val
 		}
+		env.mu.Unlock()
 	}
 	return val
 }
 
 func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
 	for env := e; env != nil; env = env.parent {
+		env.mu.Lock()
 		if _, ok := env.store[name]; ok {
 			if env.consts[name] {
+				env.mu.Unlock()
 				return nil, true, true
 			}
 			env.store[name] = val
+			env.mu.Unlock()
 			return val, true, false
 		}
+		env.mu.Unlock()
 	}
 	if e.VM().HasGlobalConst(name) {
 		return nil, true, true
@@ -187,6 +216,8 @@ func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
 
 // SetHere sets only in this environment (not parent).
 func (e *Environment) SetHere(name string, val Object) Object {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if e.store == nil {
 		e.store = make(map[string]Object)
 	}
@@ -204,9 +235,12 @@ func (e *Environment) SetHere(name string, val Object) Object {
 // Has checks if name exists in this environment.
 func (e *Environment) Has(name string) bool {
 	for env := e; env != nil; env = env.parent {
+		env.mu.RLock()
 		if _, ok := env.store[name]; ok {
+			env.mu.RUnlock()
 			return true
 		}
+		env.mu.RUnlock()
 	}
 	return e.VM().HasGlobalConst(name)
 }
@@ -228,6 +262,8 @@ func (e *Environment) Parent() *Environment {
 
 // All returns all keys in this scope (not parent).
 func (e *Environment) Keys() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	keys := make([]string, 0, len(e.store))
 	for k := range e.store {
 		keys = append(keys, k)
