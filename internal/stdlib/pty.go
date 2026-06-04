@@ -112,7 +112,7 @@ func applyPTYOptions(cmd *gopty.Cmd, opts *object.Hash) {
 	if envObj, ok := hashValue(opts, "env"); ok {
 		if h, ok := envObj.(*object.Hash); ok {
 			envVars := os.Environ()
-			for _, pair := range h.Pairs {
+			for _, pair := range h.OrderedPairs() {
 				envVars = upsertEnv(envVars, objectToMapKey(pair.Key), objectToText(pair.Value))
 			}
 			cmd.Env = envVars

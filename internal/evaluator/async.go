@@ -21,16 +21,14 @@ func registerAsync(env *object.Environment) {
 }
 
 func promiseConstructorObject() object.Object {
-	return &object.Hash{
-		Pairs: map[object.HashKey]object.HashPair{
-			hk("__promiseConstructor"): {Key: &object.String{Value: "__promiseConstructor"}, Value: object.TRUE},
-			hk("resolve"):              {Key: &object.String{Value: "resolve"}, Value: &object.Builtin{Name: "Promise.resolve", Fn: builtinPromiseResolve}},
-			hk("reject"):               {Key: &object.String{Value: "reject"}, Value: &object.Builtin{Name: "Promise.reject", Fn: builtinPromiseReject}},
-			hk("all"):                  {Key: &object.String{Value: "all"}, Value: &object.Builtin{Name: "Promise.all", Fn: builtinPromiseAll}},
-			hk("race"):                 {Key: &object.String{Value: "race"}, Value: &object.Builtin{Name: "Promise.race", Fn: builtinPromiseRace}},
-			hk("allSettled"):           {Key: &object.String{Value: "allSettled"}, Value: &object.Builtin{Name: "Promise.allSettled", Fn: builtinPromiseAllSettled}},
-		},
-	}
+	return orderedHash(
+		hashEntry("__promiseConstructor", object.TRUE),
+		hashEntry("resolve", &object.Builtin{Name: "Promise.resolve", Fn: builtinPromiseResolve}),
+		hashEntry("reject", &object.Builtin{Name: "Promise.reject", Fn: builtinPromiseReject}),
+		hashEntry("all", &object.Builtin{Name: "Promise.all", Fn: builtinPromiseAll}),
+		hashEntry("race", &object.Builtin{Name: "Promise.race", Fn: builtinPromiseRace}),
+		hashEntry("allSettled", &object.Builtin{Name: "Promise.allSettled", Fn: builtinPromiseAllSettled}),
+	)
 }
 
 func constructPromise(env *object.Environment, args []object.Object, pos ast.Position) object.Object {
@@ -222,10 +220,9 @@ func builtinPromiseAllSettled(env *object.Environment, pos ast.Position, args ..
 }
 
 func settledResult(env *object.Environment, status, field string, value object.Object) *object.Hash {
-	result := &object.Hash{Pairs: map[object.HashKey]object.HashPair{
-		hk("status"): {Key: &object.String{Value: "status"}, Value: &object.String{Value: status}},
-		hk(field):    {Key: &object.String{Value: field}, Value: value},
-	}}
+	result := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+	result.SetMember(&object.String{Value: "status"}, &object.String{Value: status})
+	result.SetMember(&object.String{Value: field}, value)
 	env.ObjectManager().Register(result)
 	return result
 }

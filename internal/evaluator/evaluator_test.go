@@ -888,6 +888,36 @@ assert([1, 2, 3, 4].copyWithin(1, 2, 4).join(",") === "1,3,4,4", "Array.copyWith
 	testString(t, evaluated, "ok")
 }
 
+func TestEval_NativeToStringForBaseValues(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+
+let text = "hello";
+let yes = true;
+let no = false;
+let obj = { a: 1 };
+let custom = { toString: function() { return "custom"; } };
+
+assert(text.toString() === "hello", "String.toString");
+assert(yes.toString() === "true", "Boolean true toString");
+assert(no.toString() === "false", "Boolean false toString");
+assert(null.toString() === "null", "Null.toString");
+assert(undefined.toString() === "undefined", "Undefined.toString");
+assert([1, "a", true].toString() === "1,a,true", "Array.toString");
+assert(obj.toString() === "{a: 1}", "Object.toString");
+assert(custom.toString() === "custom", "Object own toString");
+assert({ toString: undefined }.toString === undefined, "Object own undefined toString");
+
+"ok";
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "ok")
+}
+
 func TestEval_BuiltinsDocs_PromiseStaticAll(t *testing.T) {
 	input := `
 Promise.all([Promise.resolve(1), 2, Promise.resolve(3)])
@@ -1378,6 +1408,40 @@ assert(new RegExp("a+", "g").global === true, "RegExp.global");
 assert(re.ignoreCase === true, "RegExp.ignoreCase");
 assert(re.source === "a([0-9]+)", "RegExp.source");
 assert(re.flags === "i", "RegExp.flags");
+"ok";
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "ok")
+}
+
+func TestEval_ObjectPropertyInsertionOrder(t *testing.T) {
+	input := `
+function assert(cond, label) {
+  if (!cond) {
+    throw new Error(label);
+  }
+}
+let obj = { first: 1, second: 2 };
+obj.third = 3;
+obj.second = 22;
+let keys = Object.keys(obj);
+assert(keys[0] === "first", "Object.keys first");
+assert(keys[1] === "second", "Object.keys second");
+assert(keys[2] === "third", "Object.keys third");
+let values = Object.values(obj);
+assert(values[0] === 1, "Object.values first");
+assert(values[1] === 22, "Object.values updated");
+assert(values[2] === 3, "Object.values third");
+let entries = Object.entries(obj);
+assert(entries[0][0] === "first", "Object.entries first");
+assert(entries[1][0] === "second", "Object.entries second");
+assert(entries[2][0] === "third", "Object.entries third");
+let seen = "";
+for (let key in obj) {
+  seen = seen + key + ",";
+}
+assert(seen === "first,second,third,", "for-in order");
+assert(JSON.stringify(obj) === "{\"first\":1,\"second\":22,\"third\":3}", "JSON.stringify order");
 "ok";
 `
 	evaluated := waitIfPromise(testEval(input))

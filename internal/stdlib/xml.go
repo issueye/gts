@@ -173,7 +173,7 @@ func objectToXMLNode(value object.Object) (*xmlNode, error) {
 	node := &xmlNode{name: name, attrs: make(map[string]string)}
 	if attrsObj, ok := hashValue(hash, "attributes"); ok {
 		if attrs, ok := attrsObj.(*object.Hash); ok {
-			for _, pair := range attrs.Pairs {
+			for _, pair := range attrs.OrderedPairs() {
 				if s, ok := pair.Value.(*object.String); ok {
 					node.attrs[objectToMapKey(pair.Key)] = s.Value
 				}

@@ -235,7 +235,7 @@ func parseHTTPRequestOptions(pos ast.Position, name string, args []object.Object
 		}
 		if v, ok := hashValue(h, "headers"); ok {
 			if headers, ok := v.(*object.Hash); ok {
-				for _, pair := range headers.Pairs {
+				for _, pair := range headers.OrderedPairs() {
 					opts.headers[pair.Key.Inspect()] = pair.Value.Inspect()
 				}
 			}
@@ -298,7 +298,7 @@ func mergeHTTPClientOptions(pos ast.Position, name string, opts *httpRequestOpti
 }
 
 func mergeHTTPHeaders(opts *httpRequestOptions, headers *object.Hash) {
-	for _, pair := range headers.Pairs {
+	for _, pair := range headers.OrderedPairs() {
 		key := pair.Key.Inspect()
 		if isHTTPClientOptionKey(key) {
 			continue
@@ -331,7 +331,7 @@ func toJSONString(hash *object.Hash) string {
 	var buf bytes.Buffer
 	buf.WriteByte('{')
 	i := 0
-	for _, pair := range hash.Pairs {
+	for _, pair := range hash.OrderedPairs() {
 		if i > 0 {
 			buf.WriteByte(',')
 		}

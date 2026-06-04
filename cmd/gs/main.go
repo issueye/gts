@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -63,12 +64,20 @@ func run(args []string) int {
 	fs.IntVar(&opts.workers, "workers", runtime.NumCPU(), "maximum async worker count")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "maximum script runtime; use 0 to disable")
 	showVersion := fs.Bool("version", false, "print version")
+	apiDoc := fs.String("api_doc", "", "print native module API docs, e.g. @std/web; use all to list modules")
 
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *showVersion {
 		fmt.Fprintln(os.Stdout, "GoScript", version)
+		return 0
+	}
+	if *apiDoc != "" {
+		if err := printAPIDoc(*apiDoc); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
 		return 0
 	}
 	r := newRunner(opts)
@@ -129,6 +138,55 @@ func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "  gs [flags] bundle <entry.gs> [out.gs]\n\n")
 	fmt.Fprintf(fs.Output(), "Flags:\n")
 	fs.PrintDefaults()
+}
+
+func printAPIDoc(path string) error {
+	if path == "all" || path == "list" {
+		fmt.Fprintln(os.Stdout, "Native modules:")
+		for _, p := range module.ListNative() {
+			fmt.Fprintf(os.Stdout, "  %s\n", p)
+		}
+		return nil
+	}
+	env := object.NewEnvironment()
+	evaluator.RegisterBuiltins(env)
+	obj, ok := module.GetNative(path, env)
+	if !ok {
+		return fmt.Errorf("native module %s is not registered", path)
+	}
+	fmt.Fprintf(os.Stdout, "%s\n", path)
+	for _, entry := range apiDocEntries(obj, "") {
+		fmt.Fprintf(os.Stdout, "  %s\n", entry)
+	}
+	return nil
+}
+
+func apiDocEntries(obj object.Object, prefix string) []string {
+	hash, ok := obj.(*object.Hash)
+	if !ok {
+		return nil
+	}
+	entries := make([]string, 0, len(hash.Pairs))
+	for _, pair := range hash.Pairs {
+		name := pair.Key.Inspect()
+		if name == "" || strings.HasPrefix(name, "__") {
+			continue
+		}
+		fullName := name
+		if prefix != "" {
+			fullName = prefix + "." + name
+		}
+		switch value := pair.Value.(type) {
+		case *object.Builtin, *object.Function:
+			entries = append(entries, fullName+"()")
+		case *object.Hash:
+			entries = append(entries, apiDocEntries(value, fullName)...)
+		default:
+			entries = append(entries, fullName)
+		}
+	}
+	sort.Strings(entries)
+	return entries
 }
 
 func initCommand(args []string) error {

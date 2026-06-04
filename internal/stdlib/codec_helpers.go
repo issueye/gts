@@ -99,7 +99,7 @@ func objectToGoValue(value object.Object) interface{} {
 		return out
 	case *object.Hash:
 		out := make(map[string]interface{}, len(v.Pairs))
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			out[objectToMapKey(pair.Key)] = objectToGoValue(pair.Value)
 		}
 		return out

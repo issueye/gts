@@ -126,6 +126,17 @@ JSON.parse('{"a":1}').a;  // 1
 | `Object.getOwnPropertyDescriptor(o, k)` | `...→ object?` | 取属性描述符 |
 | `Object.getOwnPropertyNames(o)` | `...→ string[]` | 自身所有字符串键 |
 
+原生 `toString()` 可用于基础值、数组和普通对象；若对象定义了自有 `toString`，优先调用自有方法。
+
+```javascript
+"hello".toString();        // "hello"
+true.toString();           // "true"
+null.toString();           // "null"
+undefined.toString();      // "undefined"
+[1, "a", true].toString(); // "1,a,true"
+({ a: 1 }).toString();     // "{a: 1}"
+```
+
 ---
 
 ## 6. `Array`
@@ -167,6 +178,7 @@ JSON.parse('{"a":1}').a;  // 1
 | `flatMap(fn)` | 映射后拍平一层 | |
 | `fill(v, start?, end?)` | 填充 | |
 | `copyWithin(target, start, end?)` | 内部复制 | |
+| `toString()` | `() → string` | 等价 `join(",")` 风格输出 |
 
 ---
 
@@ -185,6 +197,7 @@ JSON.parse('{"a":1}').a;  // 1
 | 方法 | 行为 |
 |------|------|
 | `length` | 字符数（Unicode 码点数） |
+| `toString()` | 返回自身字符串 |
 | `charAt(i)` `charCodeAt(i)` `codePointAt(i)` | 取字符/码点 |
 | `concat(...s)` | 拼接 |
 | `indexOf(s, from?)` `lastIndexOf(s)` | 子串位置 |

@@ -106,6 +106,7 @@ type HashPair struct {
 
 type Hash struct {
 	Pairs  map[HashKey]HashPair
+	Order  []HashKey
 	Proto  *Hash
 	Frozen bool
 	Sealed bool
@@ -116,7 +117,7 @@ func (h *Hash) Type() ObjectType { return OBJECT_OBJ }
 func (h *Hash) Inspect() string {
 	var out bytes.Buffer
 	pairs := make([]string, 0, len(h.Pairs))
-	for _, p := range h.Pairs {
+	for _, p := range h.OrderedPairs() {
 		pairs = append(pairs, fmt.Sprintf("%s: %s", p.Key.Inspect(), p.Value.Inspect()))
 	}
 	out.WriteString("{")
@@ -125,10 +126,64 @@ func (h *Hash) Inspect() string {
 	return out.String()
 }
 
+func (h *Hash) Set(key HashKey, pair HashPair) {
+	if h.Pairs == nil {
+		h.Pairs = make(map[HashKey]HashPair)
+	}
+	if _, exists := h.Pairs[key]; !exists {
+		h.Order = append(h.Order, key)
+	}
+	h.Pairs[key] = pair
+}
+
+func (h *Hash) SetMember(key Object, value Object) {
+	h.Set(HashKeyFor(key), HashPair{Key: key, Value: value})
+}
+
+func (h *Hash) OrderedPairs() []HashPair {
+	if len(h.Pairs) == 0 {
+		return nil
+	}
+	pairs := make([]HashPair, 0, len(h.Pairs))
+	seen := make(map[HashKey]bool, len(h.Pairs))
+	for _, key := range h.Order {
+		pair, ok := h.Pairs[key]
+		if !ok {
+			continue
+		}
+		pairs = append(pairs, pair)
+		seen[key] = true
+	}
+	for key, pair := range h.Pairs {
+		if !seen[key] {
+			pairs = append(pairs, pair)
+		}
+	}
+	return pairs
+}
+
 // HashKey is used for map lookups.
 type HashKey struct {
 	Type  ObjectType
 	Value string
+}
+
+func HashKeyFor(o Object) HashKey {
+	switch o := o.(type) {
+	case *String:
+		return HashKey{Type: o.Type(), Value: o.Value}
+	case *Number:
+		return HashKey{Type: o.Type(), Value: fmt.Sprintf("%v", o.Value)}
+	case *Boolean:
+		if o.Value {
+			return HashKey{Type: o.Type(), Value: "true"}
+		}
+		return HashKey{Type: o.Type(), Value: "false"}
+	case *Null:
+		return HashKey{Type: o.Type(), Value: "null"}
+	default:
+		return HashKey{Type: o.Type(), Value: o.Inspect()}
+	}
 }
 
 // --- Map / Set ---

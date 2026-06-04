@@ -1,8 +1,10 @@
 package evaluator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"strings"
@@ -11,20 +13,65 @@ import (
 	"github.com/issueye/goscript/internal/object"
 )
 
+type orderedJSONProperty struct {
+	key   string
+	value interface{}
+}
+
+type orderedJSONValue []orderedJSONProperty
+
+func (v orderedJSONValue) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, prop := range v {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		key, err := json.Marshal(prop.key)
+		if err != nil {
+			return nil, err
+		}
+		value, err := json.Marshal(prop.value)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(key)
+		b.WriteByte(':')
+		b.Write(value)
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
 func registerJSON(env *object.Environment) {
 	env.VM().SetGlobalConst("JSON", jsonObject())
 }
 
 func jsonObject() object.Object {
-	return &object.Hash{
-		Pairs: map[object.HashKey]object.HashPair{
-			hk("stringify"): {Key: &object.String{Value: "stringify"}, Value: &object.Builtin{Name: "JSON.stringify", Fn: builtinJSONStringify}},
-			hk("parse"):     {Key: &object.String{Value: "parse"}, Value: &object.Builtin{Name: "JSON.parse", Fn: builtinJSONParse}},
-		},
-	}
+	return orderedHash(
+		hashEntry("stringify", &object.Builtin{Name: "JSON.stringify", Fn: builtinJSONStringify}),
+		hashEntry("parse", &object.Builtin{Name: "JSON.parse", Fn: builtinJSONParse}),
+	)
 }
 
 func hk(s string) object.HashKey { return hashKey(&object.String{Value: s}) }
+
+type hashInitEntry struct {
+	key   string
+	value object.Object
+}
+
+func hashEntry(key string, value object.Object) hashInitEntry {
+	return hashInitEntry{key: key, value: value}
+}
+
+func orderedHash(entries ...hashInitEntry) *object.Hash {
+	hash := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair, len(entries))}
+	for _, entry := range entries {
+		hash.SetMember(&object.String{Value: entry.key}, entry.value)
+	}
+	return hash
+}
 
 func builtinJSONStringify(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	if len(args) < 1 {
@@ -83,7 +130,7 @@ func toJSON(obj object.Object) string {
 		var b strings.Builder
 		b.WriteByte('{')
 		i := 0
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			if i > 0 {
 				b.WriteByte(',')
 			}
@@ -134,11 +181,14 @@ func toGoJSONValue(obj object.Object) interface{} {
 		}
 		return items
 	case *object.Hash:
-		out := make(map[string]interface{}, len(v.Pairs))
-		for _, pair := range v.Pairs {
-			out[pair.Key.Inspect()] = toGoJSONValue(pair.Value)
+		out := make([]orderedJSONProperty, 0, len(v.Pairs))
+		for _, pair := range v.OrderedPairs() {
+			out = append(out, orderedJSONProperty{
+				key:   pair.Key.Inspect(),
+				value: toGoJSONValue(pair.Value),
+			})
 		}
-		return out
+		return orderedJSONValue(out)
 	case *object.Instance:
 		out := make(map[string]interface{}, len(v.Props))
 		for key, value := range v.Props {
@@ -196,15 +246,15 @@ func applyJSONReplacerTree(env *object.Environment, pos ast.Position, replacer o
 		}
 		value = &object.Array{Elements: elements, Pos: v.Pos}
 	case *object.Hash:
-		pairs := make(map[object.HashKey]object.HashPair, len(v.Pairs))
-		for hk, pair := range v.Pairs {
+		nextHash := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair), Proto: v.Proto, Frozen: v.Frozen, Sealed: v.Sealed, Pos: v.Pos}
+		for _, pair := range v.OrderedPairs() {
 			next := applyJSONReplacerTree(env, pos, replacer, pair.Key, pair.Value)
 			if object.IsRuntimeError(next) {
 				return next
 			}
-			pairs[hk] = object.HashPair{Key: pair.Key, Value: next}
+			nextHash.SetMember(pair.Key, next)
 		}
-		value = &object.Hash{Pairs: pairs, Proto: v.Proto, Frozen: v.Frozen, Sealed: v.Sealed, Pos: v.Pos}
+		value = nextHash
 	case *object.Instance:
 		props := make(map[string]object.Object, len(v.Props))
 		for name, item := range v.Props {
@@ -251,12 +301,12 @@ func applyJSONReviver(env *object.Environment, pos ast.Position, reviver object.
 			v.Elements[i] = next
 		}
 	case *object.Hash:
-		for hk, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			next := applyJSONReviver(env, pos, reviver, pair.Key, pair.Value)
 			if object.IsRuntimeError(next) {
 				return next
 			}
-			v.Pairs[hk] = object.HashPair{Key: pair.Key, Value: next}
+			v.SetMember(pair.Key, next)
 		}
 	}
 	switch reviver.(type) {
@@ -268,67 +318,89 @@ func applyJSONReviver(env *object.Environment, pos ast.Position, reviver object.
 }
 
 func parseJSONValue(s string) (object.Object, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, fmt.Errorf("unexpected end of JSON input")
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.UseNumber()
+	value, err := parseJSONDecodedValue(dec)
+	if err != nil {
+		return nil, err
 	}
-	switch s[0] {
-	case '{':
-		return parseJSONObject(s)
-	case '[':
-		return parseJSONArray(s)
-	case '"':
-		// Use Go's json decoder for strings
-		var str string
-		if err := json.Unmarshal([]byte(s), &str); err != nil {
-			return nil, err
+	if _, err := dec.Token(); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("unexpected trailing JSON input")
 		}
-		return &object.String{Value: str}, nil
-	case 't':
-		if strings.HasPrefix(s, "true") {
-			return object.TRUE, nil
-		}
-	case 'f':
-		if strings.HasPrefix(s, "false") {
-			return object.FALSE, nil
-		}
-	case 'n':
-		if strings.HasPrefix(s, "null") {
-			return object.NULL, nil
-		}
-	default:
-		if s[0] == '-' || (s[0] >= '0' && s[0] <= '9') {
-			// Number
-			f, err := strconv.ParseFloat(s, 64)
+		return nil, err
+	}
+	return value, nil
+}
+
+func parseJSONDecodedValue(dec *json.Decoder) (object.Object, error) {
+	tok, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	switch v := tok.(type) {
+	case json.Delim:
+		switch v {
+		case '{':
+			hash := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+			for dec.More() {
+				keyTok, err := dec.Token()
+				if err != nil {
+					return nil, err
+				}
+				key, ok := keyTok.(string)
+				if !ok {
+					return nil, fmt.Errorf("expected object key")
+				}
+				value, err := parseJSONDecodedValue(dec)
+				if err != nil {
+					return nil, err
+				}
+				hash.SetMember(&object.String{Value: key}, value)
+			}
+			end, err := dec.Token()
 			if err != nil {
 				return nil, err
 			}
-			return &object.Number{Value: f}, nil
+			if end != json.Delim('}') {
+				return nil, fmt.Errorf("expected object end")
+			}
+			return hash, nil
+		case '[':
+			var elements []object.Object
+			for dec.More() {
+				value, err := parseJSONDecodedValue(dec)
+				if err != nil {
+					return nil, err
+				}
+				elements = append(elements, value)
+			}
+			end, err := dec.Token()
+			if err != nil {
+				return nil, err
+			}
+			if end != json.Delim(']') {
+				return nil, fmt.Errorf("expected array end")
+			}
+			return &object.Array{Elements: elements}, nil
+		default:
+			return nil, fmt.Errorf("unexpected delimiter %q", v)
 		}
+	case nil:
+		return object.NULL, nil
+	case bool:
+		return object.NativeBool(v), nil
+	case string:
+		return &object.String{Value: v}, nil
+	case json.Number:
+		f, err := strconv.ParseFloat(v.String(), 64)
+		if err != nil {
+			return nil, err
+		}
+		return &object.Number{Value: f}, nil
+	default:
+		return nil, fmt.Errorf("unexpected JSON token %T", tok)
 	}
-	// Fallback to Go's decoder
-	var raw interface{}
-	if err := json.Unmarshal([]byte(s), &raw); err != nil {
-		return nil, err
-	}
-	return goToObject(raw), nil
-}
-
-func parseJSONObject(s string) (object.Object, error) {
-	// Use Go JSON decoder for simplicity
-	var m map[string]interface{}
-	if err := json.Unmarshal([]byte(s), &m); err != nil {
-		return nil, err
-	}
-	return goToObject(m), nil
-}
-
-func parseJSONArray(s string) (object.Object, error) {
-	var a []interface{}
-	if err := json.Unmarshal([]byte(s), &a); err != nil {
-		return nil, err
-	}
-	return goToObject(a), nil
 }
 
 func goToObject(v interface{}) object.Object {
@@ -345,7 +417,7 @@ func goToObject(v interface{}) object.Object {
 		hash := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 		for k, val := range v {
 			key := &object.String{Value: k}
-			hash.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: goToObject(val)}
+			hash.SetMember(key, goToObject(val))
 		}
 		return hash
 	case []interface{}:

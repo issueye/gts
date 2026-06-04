@@ -105,7 +105,7 @@ func validateObjectSchema(schema, value *object.Hash, path string) []string {
 	if propsObj, ok := hashValue(schema, "properties"); ok {
 		if props, ok := propsObj.(*object.Hash); ok {
 			properties = props
-			for _, pair := range props.Pairs {
+			for _, pair := range props.OrderedPairs() {
 				propSchema, ok := pair.Value.(*object.Hash)
 				if !ok {
 					errs = append(errs, path+"."+pair.Key.Inspect()+" schema must be an object")
@@ -122,7 +122,7 @@ func validateObjectSchema(schema, value *object.Hash, path string) []string {
 
 	if additionalObj, ok := hashValue(schema, "additionalProperties"); ok {
 		if b, ok := additionalObj.(*object.Boolean); ok && !b.Value && properties != nil {
-			for _, pair := range value.Pairs {
+			for _, pair := range value.OrderedPairs() {
 				if _, exists := hashValue(properties, pair.Key.Inspect()); !exists {
 					errs = append(errs, path+"."+pair.Key.Inspect()+" is not allowed")
 				}

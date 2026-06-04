@@ -242,7 +242,7 @@ func consoleRow(obj object.Object) map[string]string {
 	switch v := obj.(type) {
 	case *object.Hash:
 		row := make(map[string]string, len(v.Pairs))
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			row[pair.Key.Inspect()] = pair.Value.Inspect()
 		}
 		return row
@@ -284,7 +284,7 @@ func renderConsoleLine(keys []string, widths map[string]int, row map[string]stri
 
 func sortedHashPairs(hash *object.Hash) []object.HashPair {
 	pairs := make([]object.HashPair, 0, len(hash.Pairs))
-	for _, pair := range hash.Pairs {
+	for _, pair := range hash.OrderedPairs() {
 		pairs = append(pairs, pair)
 	}
 	sort.Slice(pairs, func(i, j int) bool {

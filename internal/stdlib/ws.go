@@ -149,7 +149,7 @@ func wsClientConnect(env *object.Environment, pos ast.Position, args ...object.O
 		h, ok := args[1].(*object.Hash)
 		if ok {
 			headers = make(map[string]string)
-			for _, pair := range h.Pairs {
+			for _, pair := range h.OrderedPairs() {
 				headers[pair.Key.Inspect()] = pair.Value.Inspect()
 			}
 		}

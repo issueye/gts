@@ -272,7 +272,7 @@ func urlSearchParamsValues(pos ast.Position, name string, init object.Object) (u
 		}
 		return parsed, nil
 	case *object.Hash:
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			key, ok := pair.Key.(*object.String)
 			if !ok {
 				continue

@@ -124,44 +124,42 @@ func dateConstructorObject() object.Object {
 }
 
 func mathObject() object.Object {
-	return &object.Hash{
-		Pairs: map[object.HashKey]object.HashPair{
-			hashKey(&object.String{Value: "E"}):       {Key: &object.String{Value: "E"}, Value: &object.Number{Value: math.E}},
-			hashKey(&object.String{Value: "LN2"}):     {Key: &object.String{Value: "LN2"}, Value: &object.Number{Value: math.Ln2}},
-			hashKey(&object.String{Value: "LN10"}):    {Key: &object.String{Value: "LN10"}, Value: &object.Number{Value: math.Ln10}},
-			hashKey(&object.String{Value: "LOG2E"}):   {Key: &object.String{Value: "LOG2E"}, Value: &object.Number{Value: 1 / math.Ln2}},
-			hashKey(&object.String{Value: "LOG10E"}):  {Key: &object.String{Value: "LOG10E"}, Value: &object.Number{Value: 1 / math.Ln10}},
-			hashKey(&object.String{Value: "PI"}):      {Key: &object.String{Value: "PI"}, Value: &object.Number{Value: math.Pi}},
-			hashKey(&object.String{Value: "SQRT2"}):   {Key: &object.String{Value: "SQRT2"}, Value: &object.Number{Value: math.Sqrt2}},
-			hashKey(&object.String{Value: "SQRT1_2"}): {Key: &object.String{Value: "SQRT1_2"}, Value: &object.Number{Value: math.Sqrt(0.5)}},
-			hashKey(&object.String{Value: "abs"}):     {Key: &object.String{Value: "abs"}, Value: &object.Builtin{Name: "Math.abs", Fn: builtinMathAbs}},
-			hashKey(&object.String{Value: "sign"}):    {Key: &object.String{Value: "sign"}, Value: &object.Builtin{Name: "Math.sign", Fn: builtinMathSign}},
-			hashKey(&object.String{Value: "floor"}):   {Key: &object.String{Value: "floor"}, Value: &object.Builtin{Name: "Math.floor", Fn: builtinMathFloor}},
-			hashKey(&object.String{Value: "ceil"}):    {Key: &object.String{Value: "ceil"}, Value: &object.Builtin{Name: "Math.ceil", Fn: builtinMathCeil}},
-			hashKey(&object.String{Value: "round"}):   {Key: &object.String{Value: "round"}, Value: &object.Builtin{Name: "Math.round", Fn: builtinMathRound}},
-			hashKey(&object.String{Value: "trunc"}):   {Key: &object.String{Value: "trunc"}, Value: &object.Builtin{Name: "Math.trunc", Fn: builtinMathTrunc}},
-			hashKey(&object.String{Value: "max"}):     {Key: &object.String{Value: "max"}, Value: &object.Builtin{Name: "Math.max", Fn: builtinMathMax}},
-			hashKey(&object.String{Value: "min"}):     {Key: &object.String{Value: "min"}, Value: &object.Builtin{Name: "Math.min", Fn: builtinMathMin}},
-			hashKey(&object.String{Value: "pow"}):     {Key: &object.String{Value: "pow"}, Value: &object.Builtin{Name: "Math.pow", Fn: builtinMathPow}},
-			hashKey(&object.String{Value: "sqrt"}):    {Key: &object.String{Value: "sqrt"}, Value: &object.Builtin{Name: "Math.sqrt", Fn: builtinMathSqrt}},
-			hashKey(&object.String{Value: "cbrt"}):    {Key: &object.String{Value: "cbrt"}, Value: &object.Builtin{Name: "Math.cbrt", Fn: builtinMathCbrt}},
-			hashKey(&object.String{Value: "exp"}):     {Key: &object.String{Value: "exp"}, Value: &object.Builtin{Name: "Math.exp", Fn: builtinMathExp}},
-			hashKey(&object.String{Value: "log"}):     {Key: &object.String{Value: "log"}, Value: &object.Builtin{Name: "Math.log", Fn: builtinMathLog}},
-			hashKey(&object.String{Value: "log2"}):    {Key: &object.String{Value: "log2"}, Value: &object.Builtin{Name: "Math.log2", Fn: builtinMathLog2}},
-			hashKey(&object.String{Value: "log10"}):   {Key: &object.String{Value: "log10"}, Value: &object.Builtin{Name: "Math.log10", Fn: builtinMathLog10}},
-			hashKey(&object.String{Value: "sin"}):     {Key: &object.String{Value: "sin"}, Value: &object.Builtin{Name: "Math.sin", Fn: builtinMathSin}},
-			hashKey(&object.String{Value: "cos"}):     {Key: &object.String{Value: "cos"}, Value: &object.Builtin{Name: "Math.cos", Fn: builtinMathCos}},
-			hashKey(&object.String{Value: "tan"}):     {Key: &object.String{Value: "tan"}, Value: &object.Builtin{Name: "Math.tan", Fn: builtinMathTan}},
-			hashKey(&object.String{Value: "asin"}):    {Key: &object.String{Value: "asin"}, Value: &object.Builtin{Name: "Math.asin", Fn: builtinMathAsin}},
-			hashKey(&object.String{Value: "acos"}):    {Key: &object.String{Value: "acos"}, Value: &object.Builtin{Name: "Math.acos", Fn: builtinMathAcos}},
-			hashKey(&object.String{Value: "atan"}):    {Key: &object.String{Value: "atan"}, Value: &object.Builtin{Name: "Math.atan", Fn: builtinMathAtan}},
-			hashKey(&object.String{Value: "atan2"}):   {Key: &object.String{Value: "atan2"}, Value: &object.Builtin{Name: "Math.atan2", Fn: builtinMathAtan2}},
-			hashKey(&object.String{Value: "random"}):  {Key: &object.String{Value: "random"}, Value: &object.Builtin{Name: "Math.random", Fn: builtinMathRandom}},
-			hashKey(&object.String{Value: "hypot"}):   {Key: &object.String{Value: "hypot"}, Value: &object.Builtin{Name: "Math.hypot", Fn: builtinMathHypot}},
-			hashKey(&object.String{Value: "clamp"}):   {Key: &object.String{Value: "clamp"}, Value: &object.Builtin{Name: "Math.clamp", Fn: builtinMathClamp}},
-			hashKey(&object.String{Value: "lerp"}):    {Key: &object.String{Value: "lerp"}, Value: &object.Builtin{Name: "Math.lerp", Fn: builtinMathLerp}},
-		},
-	}
+	return orderedHash(
+		hashEntry("E", &object.Number{Value: math.E}),
+		hashEntry("LN2", &object.Number{Value: math.Ln2}),
+		hashEntry("LN10", &object.Number{Value: math.Ln10}),
+		hashEntry("LOG2E", &object.Number{Value: 1 / math.Ln2}),
+		hashEntry("LOG10E", &object.Number{Value: 1 / math.Ln10}),
+		hashEntry("PI", &object.Number{Value: math.Pi}),
+		hashEntry("SQRT2", &object.Number{Value: math.Sqrt2}),
+		hashEntry("SQRT1_2", &object.Number{Value: math.Sqrt(0.5)}),
+		hashEntry("abs", &object.Builtin{Name: "Math.abs", Fn: builtinMathAbs}),
+		hashEntry("sign", &object.Builtin{Name: "Math.sign", Fn: builtinMathSign}),
+		hashEntry("floor", &object.Builtin{Name: "Math.floor", Fn: builtinMathFloor}),
+		hashEntry("ceil", &object.Builtin{Name: "Math.ceil", Fn: builtinMathCeil}),
+		hashEntry("round", &object.Builtin{Name: "Math.round", Fn: builtinMathRound}),
+		hashEntry("trunc", &object.Builtin{Name: "Math.trunc", Fn: builtinMathTrunc}),
+		hashEntry("max", &object.Builtin{Name: "Math.max", Fn: builtinMathMax}),
+		hashEntry("min", &object.Builtin{Name: "Math.min", Fn: builtinMathMin}),
+		hashEntry("pow", &object.Builtin{Name: "Math.pow", Fn: builtinMathPow}),
+		hashEntry("sqrt", &object.Builtin{Name: "Math.sqrt", Fn: builtinMathSqrt}),
+		hashEntry("cbrt", &object.Builtin{Name: "Math.cbrt", Fn: builtinMathCbrt}),
+		hashEntry("exp", &object.Builtin{Name: "Math.exp", Fn: builtinMathExp}),
+		hashEntry("log", &object.Builtin{Name: "Math.log", Fn: builtinMathLog}),
+		hashEntry("log2", &object.Builtin{Name: "Math.log2", Fn: builtinMathLog2}),
+		hashEntry("log10", &object.Builtin{Name: "Math.log10", Fn: builtinMathLog10}),
+		hashEntry("sin", &object.Builtin{Name: "Math.sin", Fn: builtinMathSin}),
+		hashEntry("cos", &object.Builtin{Name: "Math.cos", Fn: builtinMathCos}),
+		hashEntry("tan", &object.Builtin{Name: "Math.tan", Fn: builtinMathTan}),
+		hashEntry("asin", &object.Builtin{Name: "Math.asin", Fn: builtinMathAsin}),
+		hashEntry("acos", &object.Builtin{Name: "Math.acos", Fn: builtinMathAcos}),
+		hashEntry("atan", &object.Builtin{Name: "Math.atan", Fn: builtinMathAtan}),
+		hashEntry("atan2", &object.Builtin{Name: "Math.atan2", Fn: builtinMathAtan2}),
+		hashEntry("random", &object.Builtin{Name: "Math.random", Fn: builtinMathRandom}),
+		hashEntry("hypot", &object.Builtin{Name: "Math.hypot", Fn: builtinMathHypot}),
+		hashEntry("clamp", &object.Builtin{Name: "Math.clamp", Fn: builtinMathClamp}),
+		hashEntry("lerp", &object.Builtin{Name: "Math.lerp", Fn: builtinMathLerp}),
+	)
 }
 
 func builtinPrintln(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -181,15 +179,9 @@ func builtinPrint(env *object.Environment, pos ast.Position, args ...object.Obje
 
 func callableBuiltinObject(name string, fn object.BuiltinFunc, members map[string]object.Object) *object.Hash {
 	obj := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
-	obj.Pairs[hashKey(&object.String{Value: "__call"})] = object.HashPair{
-		Key:   &object.String{Value: "__call"},
-		Value: &object.Builtin{Name: name, Fn: fn},
-	}
+	obj.SetMember(&object.String{Value: "__call"}, &object.Builtin{Name: name, Fn: fn})
 	for key, value := range members {
-		obj.Pairs[hashKey(&object.String{Value: key})] = object.HashPair{
-			Key:   &object.String{Value: key},
-			Value: value,
-		}
+		obj.SetMember(&object.String{Value: key}, value)
 	}
 	return obj
 }

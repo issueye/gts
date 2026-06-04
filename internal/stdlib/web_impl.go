@@ -423,14 +423,14 @@ func parseWebProxyOptions(pos ast.Position, args []object.Object) (*webProxyOpti
 		}
 		if v, ok := hashValue(first, "headers"); ok {
 			if headers, ok := v.(*object.Hash); ok {
-				for _, pair := range headers.Pairs {
+				for _, pair := range headers.OrderedPairs() {
 					opts.requestHeaders[pair.Key.Inspect()] = pair.Value.Inspect()
 				}
 			}
 		}
 		if v, ok := hashValue(first, "responseHeaders"); ok {
 			if headers, ok := v.(*object.Hash); ok {
-				for _, pair := range headers.Pairs {
+				for _, pair := range headers.OrderedPairs() {
 					opts.responseHeaders[pair.Key.Inspect()] = pair.Value.Inspect()
 				}
 			}
@@ -781,7 +781,7 @@ func toGoWebJSONValue(obj object.Object) interface{} {
 		return out
 	case *object.Hash:
 		out := make(map[string]interface{})
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			out[pair.Key.Inspect()] = toGoWebJSONValue(pair.Value)
 		}
 		return out

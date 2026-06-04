@@ -76,7 +76,7 @@ func mimeFormatMediaType(env *object.Environment, pos ast.Position, args ...obje
 		if !ok {
 			return object.NewError(pos, "mime.formatMediaType: params must be an object")
 		}
-		for _, pair := range hash.Pairs {
+		for _, pair := range hash.OrderedPairs() {
 			params[pair.Key.Inspect()] = pair.Value.Inspect()
 		}
 	}

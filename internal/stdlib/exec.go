@@ -350,7 +350,7 @@ func execCommand(env *object.Environment, pos ast.Position, args ...object.Objec
 				return object.NewError(pos, "cmd.setEnv: argument must be an object")
 			}
 			envVars := make([]string, 0, len(h.Pairs))
-			for _, pair := range h.Pairs {
+			for _, pair := range h.OrderedPairs() {
 				envVars = append(envVars, pair.Key.Inspect()+"="+pair.Value.Inspect())
 			}
 			cmd.Env = envVars
@@ -417,7 +417,7 @@ func applyCommandOptions(cmd *exec.Cmd, opts *object.Hash) {
 	if envObj, ok := hashValue(opts, "env"); ok {
 		if h, ok := envObj.(*object.Hash); ok {
 			envVars := os.Environ()
-			for _, pair := range h.Pairs {
+			for _, pair := range h.OrderedPairs() {
 				envVars = upsertEnv(envVars, objectToMapKey(pair.Key), objectToText(pair.Value))
 			}
 			cmd.Env = envVars

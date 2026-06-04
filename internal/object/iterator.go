@@ -61,7 +61,7 @@ func newArrayIterator(arr *Array, kind IterationKind) Iterator {
 
 func newHashIterator(hash *Hash, kind IterationKind) Iterator {
 	values := make([]Object, 0, len(hash.Pairs))
-	for _, pair := range hash.Pairs {
+	for _, pair := range hash.OrderedPairs() {
 		if kind == IterateKeys {
 			values = append(values, pair.Key)
 		} else {

@@ -140,7 +140,7 @@ func mailGetHeader(env *object.Environment, pos ast.Position, args ...object.Obj
 	if errObj != nil {
 		return errObj
 	}
-	for _, pair := range headers.Pairs {
+	for _, pair := range headers.OrderedPairs() {
 		if strings.EqualFold(pair.Key.Inspect(), name) {
 			if arr, ok := pair.Value.(*object.Array); ok {
 				if len(arr.Elements) == 0 {

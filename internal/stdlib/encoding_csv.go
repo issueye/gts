@@ -264,7 +264,7 @@ func csvHeaders(rows *object.Array) []string {
 		if !ok {
 			continue
 		}
-		for _, pair := range row.Pairs {
+		for _, pair := range row.OrderedPairs() {
 			key := pair.Key.Inspect()
 			if !seen[key] {
 				seen[key] = true

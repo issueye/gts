@@ -14,6 +14,7 @@ var stringMethods map[string]object.BuiltinFunc
 
 func init() {
 	stringMethods = map[string]object.BuiltinFunc{
+		"toString":     builtinNativeToString,
 		"charAt":       builtinStrCharAt,
 		"charCodeAt":   builtinStrCharCodeAt,
 		"codePointAt":  builtinStrCodePointAt,

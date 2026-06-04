@@ -10,27 +10,25 @@ func registerObject(env *object.Environment) {
 }
 
 func objectConstructorObject() object.Object {
-	return &object.Hash{
-		Pairs: map[object.HashKey]object.HashPair{
-			hk("create"):                   {Key: &object.String{Value: "create"}, Value: &object.Builtin{Name: "Object.create", Fn: builtinObjCreate}},
-			hk("keys"):                     {Key: &object.String{Value: "keys"}, Value: &object.Builtin{Name: "Object.keys", Fn: builtinObjKeys}},
-			hk("values"):                   {Key: &object.String{Value: "values"}, Value: &object.Builtin{Name: "Object.values", Fn: builtinObjValues}},
-			hk("entries"):                  {Key: &object.String{Value: "entries"}, Value: &object.Builtin{Name: "Object.entries", Fn: builtinObjEntries}},
-			hk("fromEntries"):              {Key: &object.String{Value: "fromEntries"}, Value: &object.Builtin{Name: "Object.fromEntries", Fn: builtinObjFromEntries}},
-			hk("assign"):                   {Key: &object.String{Value: "assign"}, Value: &object.Builtin{Name: "Object.assign", Fn: builtinObjAssign}},
-			hk("freeze"):                   {Key: &object.String{Value: "freeze"}, Value: &object.Builtin{Name: "Object.freeze", Fn: builtinObjFreeze}},
-			hk("isFrozen"):                 {Key: &object.String{Value: "isFrozen"}, Value: &object.Builtin{Name: "Object.isFrozen", Fn: builtinObjIsFrozen}},
-			hk("seal"):                     {Key: &object.String{Value: "seal"}, Value: &object.Builtin{Name: "Object.seal", Fn: builtinObjSeal}},
-			hk("isSealed"):                 {Key: &object.String{Value: "isSealed"}, Value: &object.Builtin{Name: "Object.isSealed", Fn: builtinObjIsSealed}},
-			hk("getPrototypeOf"):           {Key: &object.String{Value: "getPrototypeOf"}, Value: &object.Builtin{Name: "Object.getPrototypeOf", Fn: builtinObjGetPrototypeOf}},
-			hk("setPrototypeOf"):           {Key: &object.String{Value: "setPrototypeOf"}, Value: &object.Builtin{Name: "Object.setPrototypeOf", Fn: builtinObjSetPrototypeOf}},
-			hk("hasOwn"):                   {Key: &object.String{Value: "hasOwn"}, Value: &object.Builtin{Name: "Object.hasOwn", Fn: builtinObjHasOwn}},
-			hk("is"):                       {Key: &object.String{Value: "is"}, Value: &object.Builtin{Name: "Object.is", Fn: builtinObjIs}},
-			hk("defineProperty"):           {Key: &object.String{Value: "defineProperty"}, Value: &object.Builtin{Name: "Object.defineProperty", Fn: builtinObjDefineProperty}},
-			hk("getOwnPropertyDescriptor"): {Key: &object.String{Value: "getOwnPropertyDescriptor"}, Value: &object.Builtin{Name: "Object.getOwnPropertyDescriptor", Fn: builtinObjGetOwnPropertyDescriptor}},
-			hk("getOwnPropertyNames"):      {Key: &object.String{Value: "getOwnPropertyNames"}, Value: &object.Builtin{Name: "Object.getOwnPropertyNames", Fn: builtinObjKeys}},
-		},
-	}
+	return orderedHash(
+		hashEntry("create", &object.Builtin{Name: "Object.create", Fn: builtinObjCreate}),
+		hashEntry("keys", &object.Builtin{Name: "Object.keys", Fn: builtinObjKeys}),
+		hashEntry("values", &object.Builtin{Name: "Object.values", Fn: builtinObjValues}),
+		hashEntry("entries", &object.Builtin{Name: "Object.entries", Fn: builtinObjEntries}),
+		hashEntry("fromEntries", &object.Builtin{Name: "Object.fromEntries", Fn: builtinObjFromEntries}),
+		hashEntry("assign", &object.Builtin{Name: "Object.assign", Fn: builtinObjAssign}),
+		hashEntry("freeze", &object.Builtin{Name: "Object.freeze", Fn: builtinObjFreeze}),
+		hashEntry("isFrozen", &object.Builtin{Name: "Object.isFrozen", Fn: builtinObjIsFrozen}),
+		hashEntry("seal", &object.Builtin{Name: "Object.seal", Fn: builtinObjSeal}),
+		hashEntry("isSealed", &object.Builtin{Name: "Object.isSealed", Fn: builtinObjIsSealed}),
+		hashEntry("getPrototypeOf", &object.Builtin{Name: "Object.getPrototypeOf", Fn: builtinObjGetPrototypeOf}),
+		hashEntry("setPrototypeOf", &object.Builtin{Name: "Object.setPrototypeOf", Fn: builtinObjSetPrototypeOf}),
+		hashEntry("hasOwn", &object.Builtin{Name: "Object.hasOwn", Fn: builtinObjHasOwn}),
+		hashEntry("is", &object.Builtin{Name: "Object.is", Fn: builtinObjIs}),
+		hashEntry("defineProperty", &object.Builtin{Name: "Object.defineProperty", Fn: builtinObjDefineProperty}),
+		hashEntry("getOwnPropertyDescriptor", &object.Builtin{Name: "Object.getOwnPropertyDescriptor", Fn: builtinObjGetOwnPropertyDescriptor}),
+		hashEntry("getOwnPropertyNames", &object.Builtin{Name: "Object.getOwnPropertyNames", Fn: builtinObjKeys}),
+	)
 }
 
 func builtinObjCreate(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -46,11 +44,11 @@ func builtinObjCreate(env *object.Environment, pos ast.Position, args ...object.
 	}
 	if len(args) > 1 {
 		if props, ok := args[1].(*object.Hash); ok {
-			for _, pair := range props.Pairs {
+			for _, pair := range props.OrderedPairs() {
 				name := pair.Key.Inspect()
 				if desc, ok := pair.Value.(*object.Hash); ok {
 					if value := getHashKey(desc, &object.String{Value: "value"}); value != object.UNDEFINED {
-						obj.Pairs[hashKey(&object.String{Value: name})] = object.HashPair{Key: &object.String{Value: name}, Value: value}
+						obj.SetMember(&object.String{Value: name}, value)
 					}
 				}
 			}
@@ -66,7 +64,7 @@ func builtinObjKeys(env *object.Environment, pos ast.Position, args ...object.Ob
 	switch v := args[0].(type) {
 	case *object.Hash:
 		elems := make([]object.Object, 0, len(v.Pairs))
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			elems = append(elems, pair.Key)
 		}
 		return &object.Array{Elements: elems}
@@ -88,7 +86,7 @@ func builtinObjValues(env *object.Environment, pos ast.Position, args ...object.
 	switch v := args[0].(type) {
 	case *object.Hash:
 		elems := make([]object.Object, 0, len(v.Pairs))
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			elems = append(elems, pair.Value)
 		}
 		return &object.Array{Elements: elems}
@@ -110,7 +108,7 @@ func builtinObjEntries(env *object.Environment, pos ast.Position, args ...object
 	switch v := args[0].(type) {
 	case *object.Hash:
 		elems := make([]object.Object, 0, len(v.Pairs))
-		for _, pair := range v.Pairs {
+		for _, pair := range v.OrderedPairs() {
 			entry := &object.Array{Elements: []object.Object{pair.Key, pair.Value}}
 			elems = append(elems, entry)
 		}
@@ -135,7 +133,7 @@ func builtinObjFromEntries(env *object.Environment, pos ast.Position, args ...ob
 			return object.NewError(pos, "TypeError: Object.fromEntries entries must be [key, value] arrays")
 		}
 		key := &object.String{Value: entry.Elements[0].Inspect()}
-		obj.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: entry.Elements[1]}
+		obj.SetMember(key, entry.Elements[1])
 	}
 	return obj
 }
@@ -156,13 +154,14 @@ func builtinObjAssign(env *object.Environment, pos ast.Position, args ...object.
 		if !ok {
 			continue
 		}
-		for k, v := range srcHash.Pairs {
+		for _, pair := range srcHash.OrderedPairs() {
+			k := hashKey(pair.Key)
 			if target.Sealed {
 				if _, ok := target.Pairs[k]; !ok {
 					return object.NewError(pos, "TypeError: cannot add property to sealed object")
 				}
 			}
-			target.Pairs[k] = v
+			target.Set(k, pair)
 		}
 	}
 	return target
@@ -298,7 +297,7 @@ func builtinObjDefineProperty(env *object.Environment, pos ast.Position, args ..
 	if value == object.UNDEFINED {
 		value = object.UNDEFINED
 	}
-	obj.Pairs[hashKey(key)] = object.HashPair{Key: key, Value: value}
+	obj.SetMember(key, value)
 	return obj
 }
 
@@ -316,10 +315,10 @@ func builtinObjGetOwnPropertyDescriptor(env *object.Environment, pos ast.Positio
 		return object.UNDEFINED
 	}
 	desc := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
-	desc.Pairs[hashKey(&object.String{Value: "value"})] = object.HashPair{Key: &object.String{Value: "value"}, Value: pair.Value}
-	desc.Pairs[hashKey(&object.String{Value: "writable"})] = object.HashPair{Key: &object.String{Value: "writable"}, Value: object.NativeBool(!obj.Frozen)}
-	desc.Pairs[hashKey(&object.String{Value: "enumerable"})] = object.HashPair{Key: &object.String{Value: "enumerable"}, Value: object.TRUE}
-	desc.Pairs[hashKey(&object.String{Value: "configurable"})] = object.HashPair{Key: &object.String{Value: "configurable"}, Value: object.NativeBool(!obj.Sealed)}
+	desc.SetMember(&object.String{Value: "value"}, pair.Value)
+	desc.SetMember(&object.String{Value: "writable"}, object.NativeBool(!obj.Frozen))
+	desc.SetMember(&object.String{Value: "enumerable"}, object.TRUE)
+	desc.SetMember(&object.String{Value: "configurable"}, object.NativeBool(!obj.Sealed))
 	return desc
 }
 

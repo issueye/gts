@@ -1,6 +1,7 @@
 package module
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/issueye/goscript/internal/object"
@@ -44,4 +45,16 @@ func HasNative(path string) bool {
 	_, ok := nativeModules[path]
 	nativeMu.RUnlock()
 	return ok
+}
+
+// ListNative returns all registered native module paths in sorted order.
+func ListNative() []string {
+	nativeMu.RLock()
+	paths := make([]string, 0, len(nativeModules))
+	for path := range nativeModules {
+		paths = append(paths, path)
+	}
+	nativeMu.RUnlock()
+	sort.Strings(paths)
+	return paths
 }

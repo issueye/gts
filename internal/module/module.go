@@ -111,9 +111,7 @@ func SetupExports(env *object.Environment) {
 	env.Set("exports", exports)
 	mod := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
 	env.ObjectManager().Register(mod)
-	mod.Pairs[hashKey(&object.String{Value: "exports"})] = object.HashPair{
-		Key: &object.String{Value: "exports"}, Value: exports,
-	}
+	mod.SetMember(&object.String{Value: "exports"}, exports)
 	env.Set("module", mod)
 }
 

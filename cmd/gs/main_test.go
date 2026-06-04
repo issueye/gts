@@ -22,6 +22,40 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunAPIDocNativeModule(t *testing.T) {
+	stdout, stderr, code := captureRunOutput(t, []string{"--api_doc", "@std/web"})
+	if code != 0 {
+		t.Fatalf("want exit code 0, got %d stderr=%q", code, stderr)
+	}
+	for _, want := range []string{"@std/web", "createApp()", "json()", "proxy()", "static()", "text()"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("api doc missing %q in:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunAPIDocListsNativeModules(t *testing.T) {
+	stdout, stderr, code := captureRunOutput(t, []string{"--api_doc", "all"})
+	if code != 0 {
+		t.Fatalf("want exit code 0, got %d stderr=%q", code, stderr)
+	}
+	for _, want := range []string{"Native modules:", "@std/web", "@std/fs"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("api doc list missing %q in:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunAPIDocUnknownNativeModule(t *testing.T) {
+	stdout, stderr, code := captureRunOutput(t, []string{"--api_doc", "@std/missing"})
+	if code != 1 {
+		t.Fatalf("want exit code 1, got %d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "native module @std/missing is not registered") {
+		t.Fatalf("unexpected stderr: %q", stderr)
+	}
+}
+
 func TestRunWithoutArgs(t *testing.T) {
 	if code := run(nil); code != 2 {
 		t.Fatalf("want exit code 2, got %d", code)
@@ -2875,4 +2909,43 @@ func writeTestFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(contents), 0644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func captureRunOutput(t *testing.T, args []string) (string, string, int) {
+	t.Helper()
+
+	oldStdout := os.Stdout
+	oldStderr := os.Stderr
+	stdoutReader, stdoutWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = stdoutWriter
+	os.Stderr = stderrWriter
+	defer func() {
+		os.Stdout = oldStdout
+		os.Stderr = oldStderr
+	}()
+
+	code := run(args)
+
+	if err := stdoutWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stderrWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := io.ReadAll(stdoutReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := io.ReadAll(stderrReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(stdout), string(stderr), code
 }

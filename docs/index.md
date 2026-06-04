@@ -11,6 +11,7 @@
 | [`project-analysis.md`](project-analysis.md) | 当前项目状态、运行链路、模块职责、风险与接手建议 | 新接手维护者、贡献者 |
 | [`design.md`](design.md) | 架构总览、模块划分、关键算法、权衡 | 贡献者、架构师 |
 | [`language-spec.md`](language-spec.md) | 语言规范：词法、类型、表达式、语句、对象 | 脚本作者 |
+| [`ai-usage-guide.md`](ai-usage-guide.md) | 面向 AI 的精简使用指南：语法、原生库、注意事项、任务模板 | AI Agent、脚本作者 |
 | [`grammar.ebnf`](grammar.ebnf) | 形式化 EBNF 语法 | 工具链作者、Parser 维护者 |
 | [`bad-parts-fixed.md`](bad-parts-fixed.md) | **被修复的 JS 缺点一览** | 所有人（强烈推荐阅读） |
 | [`builtins.md`](builtins.md) | 内置对象与标准库 API 参考 | 脚本作者 |

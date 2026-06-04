@@ -5,18 +5,11 @@ import (
 )
 
 func hashKey(o object.Object) object.HashKey {
-	switch o := o.(type) {
-	case *object.String:
-		return object.HashKey{Type: o.Type(), Value: o.Value}
-	default:
-		return object.HashKey{Type: o.Type(), Value: o.Inspect()}
-	}
+	return object.HashKeyFor(o)
 }
 
 func setHashMember(hash *object.Hash, key string, value object.Object) {
-	hash.Pairs[hashKey(&object.String{Value: key})] = object.HashPair{
-		Key: &object.String{Value: key}, Value: value,
-	}
+	hash.SetMember(&object.String{Value: key}, value)
 }
 
 func hashValue(hash *object.Hash, key string) (object.Object, bool) {

@@ -2,7 +2,6 @@ package evaluator
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/object"
@@ -12,32 +11,33 @@ var arrayMethods map[string]object.BuiltinFunc
 
 func init() {
 	arrayMethods = map[string]object.BuiltinFunc{
-	"push":        builtinArrayPush,
-	"pop":         builtinArrayPop,
-	"shift":       builtinArrayShift,
-	"unshift":     builtinArrayUnshift,
-	"map":         builtinArrayMap,
-	"filter":      builtinArrayFilter,
-	"reduce":      builtinArrayReduce,
-	"reduceRight": builtinArrayReduceRight,
-	"forEach":     builtinArrayForEach,
-	"find":        builtinArrayFind,
-	"findIndex":   builtinArrayFindIndex,
-	"some":        builtinArraySome,
-	"every":       builtinArrayEvery,
-	"slice":       builtinArraySlice,
-	"splice":      builtinArraySplice,
-	"concat":      builtinArrayConcat,
-	"join":        builtinArrayJoin,
-	"indexOf":     builtinArrayIndexOf,
-	"lastIndexOf": builtinArrayLastIndexOf,
-	"includes":    builtinArrayIncludes,
-	"sort":        builtinArraySort,
-	"reverse":     builtinArrayReverse,
-	"fill":        builtinArrayFill,
-	"flat":        builtinArrayFlat,
-	"flatMap":     builtinArrayFlatMap,
-	"copyWithin":  builtinArrayCopyWithin,
+		"toString":    builtinNativeToString,
+		"push":        builtinArrayPush,
+		"pop":         builtinArrayPop,
+		"shift":       builtinArrayShift,
+		"unshift":     builtinArrayUnshift,
+		"map":         builtinArrayMap,
+		"filter":      builtinArrayFilter,
+		"reduce":      builtinArrayReduce,
+		"reduceRight": builtinArrayReduceRight,
+		"forEach":     builtinArrayForEach,
+		"find":        builtinArrayFind,
+		"findIndex":   builtinArrayFindIndex,
+		"some":        builtinArraySome,
+		"every":       builtinArrayEvery,
+		"slice":       builtinArraySlice,
+		"splice":      builtinArraySplice,
+		"concat":      builtinArrayConcat,
+		"join":        builtinArrayJoin,
+		"indexOf":     builtinArrayIndexOf,
+		"lastIndexOf": builtinArrayLastIndexOf,
+		"includes":    builtinArrayIncludes,
+		"sort":        builtinArraySort,
+		"reverse":     builtinArrayReverse,
+		"fill":        builtinArrayFill,
+		"flat":        builtinArrayFlat,
+		"flatMap":     builtinArrayFlatMap,
+		"copyWithin":  builtinArrayCopyWithin,
 	}
 }
 
@@ -293,11 +293,7 @@ func builtinArrayJoin(env *object.Environment, pos ast.Position, args ...object.
 			sep = s.Value
 		}
 	}
-	parts := make([]string, len(arr.Elements))
-	for i, e := range arr.Elements {
-		parts[i] = e.Inspect()
-	}
-	return &object.String{Value: strings.Join(parts, sep)}
+	return &object.String{Value: joinArrayElements(arr, sep)}
 }
 
 func builtinArrayIndexOf(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
