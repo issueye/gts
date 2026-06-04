@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
 	"github.com/issueye/goscript/internal/packagefile"
 )
@@ -41,6 +42,49 @@ func TestRunAPIDocNativeModule(t *testing.T) {
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("api doc missing %q in:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunAPIDocAllNativeModulesHaveChineseDocs(t *testing.T) {
+	for _, path := range module.ListNative() {
+		docs, ok := module.GetNativeAPIDoc(path)
+		if !ok {
+			t.Fatalf("%s is missing native API docs", path)
+		}
+		if len(docs) == 0 {
+			t.Fatalf("%s has empty native API docs", path)
+		}
+	}
+}
+
+func TestRunAPIDocNativeModuleParametersAndChineseDescriptions(t *testing.T) {
+	tests := []struct {
+		path string
+		want []string
+	}{
+		{
+			path: "@std/fs",
+			want: []string{"readFileSync(path)", "writeFileSync(path, data)", "读取文件文本"},
+		},
+		{
+			path: "@std/crypto",
+			want: []string{"hmac(algorithm, key, value)", "计算 HMAC 摘要"},
+		},
+		{
+			path: "@std/db",
+			want: []string{"open(driver, dsn) -> conn", "conn.query(query, params?)", "打开数据库连接"},
+		},
+	}
+	for _, tt := range tests {
+		stdout, stderr, code := captureRunOutput(t, []string{"--api_doc", tt.path})
+		if code != 0 {
+			t.Fatalf("%s: want exit code 0, got %d stderr=%q", tt.path, code, stderr)
+		}
+		for _, want := range tt.want {
+			if !strings.Contains(stdout, want) {
+				t.Fatalf("%s api doc missing %q in:\n%s", tt.path, want, stdout)
+			}
 		}
 	}
 }
