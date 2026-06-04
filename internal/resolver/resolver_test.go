@@ -118,3 +118,22 @@ func TestResolveMemberPropertyIsNotIdentifierReference(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveMatchArmBinding(t *testing.T) {
+	result := resolveSource(t, `let label = match status { 200 (val) if val > 0 => val, _ => 0 };`, Options{
+		Predeclared: []string{"status"},
+	})
+	if len(result.Errors) != 0 {
+		t.Fatalf("unexpected errors: %#v", result.Errors)
+	}
+	var found bool
+	for _, binding := range result.Bindings {
+		if binding.Name == "val" && binding.Kind == BindingPattern {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("match arm binding was not recorded: %#v", result.Bindings)
+	}
+}

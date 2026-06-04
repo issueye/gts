@@ -39,10 +39,27 @@ func (p *Parser) parseMatch() ast.Expression {
 
 func (p *Parser) parseMatchArm() *ast.MatchArm {
 	pat := p.parsePattern()
+	var bindingName string
+	var bindingPos ast.Position
+	if p.curTokenIs(lexer.TOKEN_LPAREN) {
+		p.nextToken()
+		if !p.curTokenIs(lexer.TOKEN_IDENT) {
+			p.addError("expected identifier in match arm binding")
+			return nil
+		}
+		bindingName = p.cur.Literal
+		bindingPos = p.pos()
+		p.nextToken()
+		if !p.curTokenIs(lexer.TOKEN_RPAREN) {
+			p.addError("expected ) after match arm binding")
+			return nil
+		}
+		p.nextToken()
+	}
 	var guard ast.Expression
 	if p.curTokenIs(lexer.TOKEN_IF) {
 		p.nextToken()
-		guard = p.parseExpression(PREC_COMMA)
+		guard = p.parseExpression(PREC_ASSIGN)
 	}
 	if !p.curTokenIs(lexer.TOKEN_ARROW) {
 		p.addError("expected => in match arm")
@@ -55,7 +72,7 @@ func (p *Parser) parseMatchArm() *ast.MatchArm {
 	} else {
 		body = p.parseExpression(PREC_COMMA)
 	}
-	return &ast.MatchArm{Pos_: p.pos(), Pattern: pat, Guard: guard, Body: body}
+	return &ast.MatchArm{Pos_: p.pos(), Pattern: pat, BindingName: bindingName, BindingPos: bindingPos, Guard: guard, Body: body}
 }
 
 func (p *Parser) parsePattern() ast.Pattern {

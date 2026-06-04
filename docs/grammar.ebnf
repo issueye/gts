@@ -185,8 +185,9 @@ for-of-statement= "for" , "(" , ( variable-declaration-no-semi | identifier )
 (* 不存在隐式 fall-through；每个 arm 独立匹配。                    *)
 match-statement = "match" , expression , "{" , { match-arm } , "}" ;
 match-expression= "match" , expression , "{" , { match-arm } , "}" ;
-match-arm       = pattern , [ "if" , expression ] , "=>" ,
+match-arm       = pattern , [ match-arm-binding ] , [ "if" , expression ] , "=>" ,
                   ( expression | block-statement ) , "," ;
+match-arm-binding = "(" , identifier , ")" ;
 
 return-statement= "return" , [ expression ] ";" ;
 break-statement = "break" , [ identifier ] ";" ;

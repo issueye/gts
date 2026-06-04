@@ -367,6 +367,9 @@ func (r *Resolver) matchExpr(n *ast.MatchExpr) {
 	for _, arm := range n.Arms {
 		r.push(ScopeMatchArm)
 		r.pattern(arm.Pattern)
+		if arm.BindingName != "" {
+			r.declare(arm.BindingName, BindingPattern, arm.BindingPos)
+		}
 		r.expr(arm.Guard)
 		switch body := arm.Body.(type) {
 		case ast.Expression:

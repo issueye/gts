@@ -483,6 +483,26 @@ func TestParse_MatchInAssign(t *testing.T) {
 	}
 }
 
+func TestParse_MatchArmBinding(t *testing.T) {
+	input := `let label = match status { 200 (val) => "OK", 500..599 (code) => code, _ => "Unknown" };`
+	prog := Parse(input)
+	checkErrors(t, prog)
+	stmt := prog.Body[0].(*ast.LetStmt)
+	m, ok := stmt.Value.(*ast.MatchExpr)
+	if !ok {
+		t.Fatalf("want MatchExpr in assign, got %T", stmt.Value)
+	}
+	if m.Arms[0].BindingName != "val" {
+		t.Fatalf("want first arm binding val, got %q", m.Arms[0].BindingName)
+	}
+	if m.Arms[1].BindingName != "code" {
+		t.Fatalf("want second arm binding code, got %q", m.Arms[1].BindingName)
+	}
+	if m.Arms[2].BindingName != "" {
+		t.Fatalf("wildcard arm should not have binding, got %q", m.Arms[2].BindingName)
+	}
+}
+
 func TestParse_MatchArmWithBlock(t *testing.T) {
 	input := `match cmd { "quit" => { exit(); return; }, _ => {} }`
 	prog := Parse(input)

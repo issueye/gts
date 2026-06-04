@@ -3,16 +3,16 @@
 // 1) 表达式模式：HTTP 状态码
 function httpLabel(code: number): string {
   return match code {
-    200 => "OK",
-    201 => "Created",
-    301 => "Moved Permanently",
-    302 => "Found",
-    304 => "Not Modified",
-    400 => "Bad Request",
-    401 => "Unauthorized",
-    403 => "Forbidden",
-    404 => "Not Found",
-    500..599 => "Server Error",
+    200 (val) => "OK",
+    201 (val) => "Created",
+    301 (val) => "Moved Permanently",
+    302 (val) => "Found",
+    304 (val) => "Not Modified",
+    400 (val) => "Bad Request",
+    401 (val) => "Unauthorized",
+    403 (val) => "Forbidden",
+    404 (val) => "Not Found",
+    500..599 (val) => "Server Error",
     _ => `Unknown (${code})`,
   };
 }

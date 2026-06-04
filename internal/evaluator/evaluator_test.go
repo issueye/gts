@@ -491,6 +491,21 @@ func TestEval_Match(t *testing.T) {
 	testString(t, evaluated, "one")
 }
 
+func TestEval_MatchArmBinding(t *testing.T) {
+	input := `
+let status = 502;
+let label = match status {
+  200 (val) => "OK",
+  404 (val) => "Not Found",
+  500..599 (val) => "Server Error " + val.toString(),
+  _ => "Unknown",
+};
+label;
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "Server Error 502")
+}
+
 func TestEval_TypeError_PlusMixed(t *testing.T) {
 	input := `1 + "1";`
 	evaluated := testEval(input)

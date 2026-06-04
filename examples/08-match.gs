@@ -92,11 +92,11 @@ console.log("");
 console.log("=== 复杂匹配函数 ===");
 function httpStatusLabel(code: number): string {
   return match code {
-    200 => "OK",
-    301 => "Moved Permanently",
-    403 => "Forbidden",
-    404 => "Not Found",
-    500..599 => "Server Error",
+    200 (val) => "OK",
+    301 (val) => "Moved Permanently",
+    403 (val) => "Forbidden",
+    404 (val) => "Not Found",
+    500..599 (val) => "Server Error",
     _ => `Unknown (${code})`,
   };
 }

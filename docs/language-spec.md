@@ -480,13 +480,14 @@ for (let v of Object.values(obj)) { /* v 是值 */ }
 
 ```
 match expr {
-  pattern [if guard] => body,
-  pattern [if guard] => body,
+  pattern [(binding)] [if guard] => body,
+  pattern [(binding)] [if guard] => body,
   ...
 }
 ```
 
 - `body` 可以是**表达式**或**块语句**。
+- `binding` 是可选的 arm 绑定名；当该 arm 匹配时，`(binding)` 会把被匹配值绑定到该名字。
 - 当 `match` 用作表达式时，所有 arm body 都应是表达式（返回该值）。
 - 当 `match` 用作语句时，arm body 可以是块。
 - arm 之间以 `,` 分隔（最后一条 `,` 可省略）。
@@ -508,10 +509,10 @@ match expr {
 ```javascript
 // 1) HTTP 状态码
 let label: string = match status {
-  200 => "OK",
-  301 => "Moved",
-  404 => "Not Found",
-  500..599 => "Server Error",
+  200 (val) => "OK",
+  301 (val) => "Moved",
+  404 (val) => "Not Found",
+  500..599 (val) => "Server Error",
   _ => "Unknown",
 };
 

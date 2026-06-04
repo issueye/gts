@@ -43,6 +43,9 @@ func evalMatch(n *ast.MatchExpr, env *object.Environment) object.Object {
 	for _, arm := range n.Arms {
 		scope := env.NewScope()
 		if matchPattern(arm.Pattern, subject, scope) {
+			if arm.BindingName != "" {
+				scope.Set(arm.BindingName, subject)
+			}
 			if arm.Guard != nil {
 				guard := Eval(arm.Guard, scope)
 				if !object.IsTruthy(guard) {

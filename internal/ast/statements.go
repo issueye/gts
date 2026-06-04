@@ -236,10 +236,12 @@ func (me *MatchExpr) Pos() Position        { return me.Pos_ }
 
 // MatchArm is one arm of a match expression.
 type MatchArm struct {
-	Pos_    Position
-	Pattern Pattern
-	Guard   Expression
-	Body    Node // Expression or *BlockStmt
+	Pos_        Position
+	Pattern     Pattern
+	BindingName string
+	BindingPos  Position
+	Guard       Expression
+	Body        Node // Expression or *BlockStmt
 }
 
 // ClassDecl is a class declaration.
