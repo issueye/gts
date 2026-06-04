@@ -155,7 +155,11 @@ func printAPIDoc(path string) error {
 		return fmt.Errorf("native module %s is not registered", path)
 	}
 	fmt.Fprintf(os.Stdout, "%s\n", path)
-	for _, entry := range apiDocEntries(obj, "") {
+	entries, ok := module.GetNativeAPIDoc(path)
+	if !ok {
+		entries = apiDocEntries(obj, "")
+	}
+	for _, entry := range entries {
 		fmt.Fprintf(os.Stdout, "  %s\n", entry)
 	}
 	return nil

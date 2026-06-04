@@ -13,6 +13,7 @@ type NativeModuleFactory func(env *object.Environment) (object.Object, error)
 var (
 	nativeMu      sync.RWMutex
 	nativeModules = make(map[string]NativeModuleFactory)
+	nativeAPIDocs = make(map[string][]string)
 )
 
 // RegisterNative registers a native Go module under a given import path.
@@ -20,6 +21,13 @@ var (
 func RegisterNative(path string, factory NativeModuleFactory) {
 	nativeMu.Lock()
 	nativeModules[path] = factory
+	nativeMu.Unlock()
+}
+
+// RegisterNativeAPIDoc registers printable API signatures for a native module.
+func RegisterNativeAPIDoc(path string, signatures []string) {
+	nativeMu.Lock()
+	nativeAPIDocs[path] = append([]string{}, signatures...)
 	nativeMu.Unlock()
 }
 
@@ -57,4 +65,17 @@ func ListNative() []string {
 	nativeMu.RUnlock()
 	sort.Strings(paths)
 	return paths
+}
+
+// GetNativeAPIDoc returns printable API signatures for a native module.
+func GetNativeAPIDoc(path string) ([]string, bool) {
+	nativeMu.RLock()
+	signatures, ok := nativeAPIDocs[path]
+	nativeMu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	out := append([]string{}, signatures...)
+	sort.Strings(out)
+	return out, true
 }

@@ -27,7 +27,18 @@ func TestRunAPIDocNativeModule(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("want exit code 0, got %d stderr=%q", code, stderr)
 	}
-	for _, want := range []string{"@std/web", "createApp()", "json()", "proxy()", "static()", "text()"} {
+	for _, want := range []string{
+		"@std/web",
+		"createApp() -> app",
+		"static(root) -> middleware",
+		"proxy(targetOrOptions) -> middleware",
+		"app.get(path, handler, ...handlers)",
+		"app.listen(port?) -> server",
+		"res.json(value)",
+		"创建 Web 应用实例",
+		"解析 JSON 请求体并写入 req.body",
+		"设置响应状态码并返回 res",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("api doc missing %q in:\n%s", want, stdout)
 		}
