@@ -4,16 +4,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"github.com/issueye/goscript/internal/object"
+	"github.com/issueye/goscript/internal/safemap"
 )
 
 // Cache stores loaded modules to avoid re-execution.
 type Cache struct {
-	mu      sync.Mutex
 	vm      *object.VirtualMachine
-	modules map[string]*object.Environment // absolute path → module env
+	modules safemap.SafeSortedMap[string, *object.Environment] // absolute path → module env
 }
 
 func NewCache() *Cache {
@@ -24,29 +23,23 @@ func NewCacheWithVM(vm *object.VirtualMachine) *Cache {
 	if vm == nil {
 		vm = object.NewVirtualMachine()
 	}
-	return &Cache{
-		vm:      vm,
-		modules: make(map[string]*object.Environment),
-	}
+	cache := &Cache{vm: vm}
+	cache.modules.SetLess(func(a, b string) bool { return a < b })
+	return cache
 }
 
 // GetOrCreate returns a cached module env, or nil if not yet loaded.
 func (c *Cache) GetOrCreate(absPath string) *object.Environment {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if mod, ok := c.modules[absPath]; ok {
-		return mod
-	}
-	env := object.NewEnvironmentWithVM(c.vm)
-	c.modules[absPath] = env
+	env, _ := c.modules.GetOrSetFunc(absPath, func() *object.Environment {
+		return object.NewEnvironmentWithVM(c.vm)
+	})
 	return env
 }
 
 // Get returns a cached module env or nil.
 func (c *Cache) Get(absPath string) *object.Environment {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.modules[absPath]
+	mod, _ := c.modules.Get(absPath)
+	return mod
 }
 
 // ResolvePath resolves a module path relative to the base directory.

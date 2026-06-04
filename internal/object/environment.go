@@ -1,17 +1,19 @@
 package object
 
 import (
-	"sync"
-
 	"github.com/issueye/goscript/internal/ast"
+	"github.com/issueye/goscript/internal/safemap"
 )
+
+type envBinding struct {
+	Value Object
+	Const bool
+	Type  *ast.TypeAnnotation
+}
 
 // Environment is a scope for variable bindings.
 type Environment struct {
-	mu               sync.RWMutex
-	store            map[string]Object
-	consts           map[string]bool
-	types            map[string]*ast.TypeAnnotation
+	bindings         safemap.SafeSortedMap[string, envBinding]
 	parent           *Environment
 	vm               *VirtualMachine
 	Extra            Object // bound context for method dispatch (array/string instance)
@@ -29,9 +31,9 @@ func NewEnvironmentWithVM(vm *VirtualMachine) *Environment {
 	if vm == nil {
 		vm = NewVirtualMachine()
 	}
-	return &Environment{
-		vm: vm,
-	}
+	env := &Environment{vm: vm}
+	env.bindings.SetLess(func(a, b string) bool { return a < b })
+	return env
 }
 
 func (e *Environment) VM() *VirtualMachine {
@@ -51,107 +53,38 @@ func (e *Environment) ObjectManager() *ObjectManager {
 
 func (e *Environment) Get(name string) (Object, bool) {
 	for env := e; env != nil; env = env.parent {
-		env.mu.RLock()
-		if obj, ok := env.store[name]; ok {
-			env.mu.RUnlock()
-			return obj, true
+		if binding, ok := env.bindings.Get(name); ok {
+			return binding.Value, true
 		}
-		env.mu.RUnlock()
 	}
 	return e.VM().GetGlobalConst(name)
 }
 
 func (e *Environment) Set(name string, val Object) Object {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.store == nil {
-		e.store = make(map[string]Object)
-	}
-	if e.consts == nil {
-		e.consts = make(map[string]bool)
-	}
-	e.store[name] = val
-	e.consts[name] = false
-	if e.types != nil {
-		delete(e.types, name)
-	}
+	e.bindings.Set(name, envBinding{Value: val})
 	return val
 }
 
 func (e *Environment) SetConst(name string, val Object) Object {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.store == nil {
-		e.store = make(map[string]Object)
-	}
-	if e.consts == nil {
-		e.consts = make(map[string]bool)
-	}
-	e.store[name] = val
-	e.consts[name] = true
-	if e.types != nil {
-		delete(e.types, name)
-	}
+	e.bindings.Set(name, envBinding{Value: val, Const: true})
 	return val
 }
 
 func (e *Environment) SetTyped(name string, val Object, anno *ast.TypeAnnotation) Object {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.store == nil {
-		e.store = make(map[string]Object)
-	}
-	if e.consts == nil {
-		e.consts = make(map[string]bool)
-	}
-	e.store[name] = val
-	e.consts[name] = false
-	if anno == nil {
-		if e.types != nil {
-			delete(e.types, name)
-		}
-		return val
-	}
-	if e.types == nil {
-		e.types = make(map[string]*ast.TypeAnnotation)
-	}
-	e.types[name] = anno
+	e.bindings.Set(name, envBinding{Value: val, Type: anno})
 	return val
 }
 
 func (e *Environment) SetTypedConst(name string, val Object, anno *ast.TypeAnnotation) Object {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.store == nil {
-		e.store = make(map[string]Object)
-	}
-	if e.consts == nil {
-		e.consts = make(map[string]bool)
-	}
-	e.store[name] = val
-	e.consts[name] = true
-	if anno == nil {
-		if e.types != nil {
-			delete(e.types, name)
-		}
-		return val
-	}
-	if e.types == nil {
-		e.types = make(map[string]*ast.TypeAnnotation)
-	}
-	e.types[name] = anno
+	e.bindings.Set(name, envBinding{Value: val, Const: true, Type: anno})
 	return val
 }
 
 func (e *Environment) TypeOf(name string) (*ast.TypeAnnotation, bool) {
 	for env := e; env != nil; env = env.parent {
-		env.mu.RLock()
-		if _, ok := env.store[name]; ok {
-			anno, typed := env.types[name]
-			env.mu.RUnlock()
-			return anno, typed && anno != nil
+		if binding, ok := env.bindings.Get(name); ok {
+			return binding.Type, binding.Type != nil
 		}
-		env.mu.RUnlock()
 	}
 	return nil, false
 }
@@ -160,53 +93,36 @@ func (e *Environment) TypeOf(name string) (*ast.TypeAnnotation, bool) {
 // creating it in the current scope if not found anywhere.
 func (e *Environment) SetUp(name string, val Object) Object {
 	for env := e; env != nil; env = env.parent {
-		env.mu.Lock()
-		if _, ok := env.store[name]; ok {
-			if env.consts[name] {
-				env.mu.Unlock()
+		if binding, ok := env.bindings.Get(name); ok {
+			if binding.Const {
 				return nil
 			}
-			env.store[name] = val
-			env.mu.Unlock()
+			binding.Value = val
+			binding.Type = nil
+			env.bindings.Set(name, binding)
 			return val
 		}
 		if env.parent == nil {
 			if env.VM().HasGlobalConst(name) {
-				env.mu.Unlock()
 				return nil
 			}
-			if env.store == nil {
-				env.store = make(map[string]Object)
-			}
-			if env.consts == nil {
-				env.consts = make(map[string]bool)
-			}
-			env.store[name] = val
-			env.consts[name] = false
-			if env.types != nil {
-				delete(env.types, name)
-			}
-			env.mu.Unlock()
+			env.bindings.Set(name, envBinding{Value: val})
 			return val
 		}
-		env.mu.Unlock()
 	}
 	return val
 }
 
 func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
 	for env := e; env != nil; env = env.parent {
-		env.mu.Lock()
-		if _, ok := env.store[name]; ok {
-			if env.consts[name] {
-				env.mu.Unlock()
+		if binding, ok := env.bindings.Get(name); ok {
+			if binding.Const {
 				return nil, true, true
 			}
-			env.store[name] = val
-			env.mu.Unlock()
+			binding.Value = val
+			env.bindings.Set(name, binding)
 			return val, true, false
 		}
-		env.mu.Unlock()
 	}
 	if e.VM().HasGlobalConst(name) {
 		return nil, true, true
@@ -216,31 +132,16 @@ func (e *Environment) Assign(name string, val Object) (Object, bool, bool) {
 
 // SetHere sets only in this environment (not parent).
 func (e *Environment) SetHere(name string, val Object) Object {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	if e.store == nil {
-		e.store = make(map[string]Object)
-	}
-	if e.consts == nil {
-		e.consts = make(map[string]bool)
-	}
-	e.store[name] = val
-	e.consts[name] = false
-	if e.types != nil {
-		delete(e.types, name)
-	}
+	e.bindings.Set(name, envBinding{Value: val})
 	return val
 }
 
 // Has checks if name exists in this environment.
 func (e *Environment) Has(name string) bool {
 	for env := e; env != nil; env = env.parent {
-		env.mu.RLock()
-		if _, ok := env.store[name]; ok {
-			env.mu.RUnlock()
+		if env.bindings.Has(name) {
 			return true
 		}
-		env.mu.RUnlock()
 	}
 	return e.VM().HasGlobalConst(name)
 }
@@ -262,11 +163,5 @@ func (e *Environment) Parent() *Environment {
 
 // All returns all keys in this scope (not parent).
 func (e *Environment) Keys() []string {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	keys := make([]string, 0, len(e.store))
-	for k := range e.store {
-		keys = append(keys, k)
-	}
-	return keys
+	return e.bindings.SortedKeys()
 }
