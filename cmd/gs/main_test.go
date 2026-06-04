@@ -300,6 +300,76 @@ fs.writeFileSync("__OUT__", process.argv.slice(2).join("|"));
 	}
 }
 
+func TestSplitEmbeddedAppArgsOnlyForEmbeddedExecutable(t *testing.T) {
+	old := hasAppendedPackage
+	defer func() { hasAppendedPackage = old }()
+
+	hasAppendedPackage = func() bool { return false }
+	if split := splitEmbeddedAppArgs([]string{"--", "--self-test"}); split != nil {
+		t.Fatalf("non-embedded executable should not split args: %#v", split)
+	}
+
+	hasAppendedPackage = func() bool { return true }
+	split := splitEmbeddedAppArgs([]string{"--timeout", "1s", "--", "--self-test", "--flag"})
+	if split == nil {
+		t.Fatal("embedded executable should split args after --")
+	}
+	if split.separator != 2 {
+		t.Fatalf("want separator 2, got %d", split.separator)
+	}
+	if strings.Join(split.app, "|") != "--self-test|--flag" {
+		t.Fatalf("unexpected app args: %#v", split.app)
+	}
+}
+
+func TestEmbeddedExecutablePassesArgsAfterDoubleDash(t *testing.T) {
+	if os.Getenv("GOSCRIPT_EMBEDDED_ARGS_HELPER") == "1" {
+		os.Exit(run(os.Args[1:]))
+	}
+
+	root := t.TempDir()
+	outFile := filepath.Join(root, "argv.txt")
+	appSource := strings.ReplaceAll(`
+let fs = require("@std/fs");
+let process = require("@std/process");
+function main() {
+  fs.writeFileSync("__OUT__", process.argv.join("|"));
+}
+`, "__OUT__", strings.ReplaceAll(outFile, `\`, `\\`))
+	writeTestFile(t, filepath.Join(root, "project.toml"), `[project]
+entry = "main.gs"
+`)
+	writeTestFile(t, filepath.Join(root, "main.gs"), appSource)
+	pkgPath := filepath.Join(root, "app.gspkg")
+	if err := packagefile.PackDirectory(root, pkgPath); err != nil {
+		t.Fatal(err)
+	}
+	stub, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exePath := filepath.Join(root, "app.exe")
+	if err := packagefile.AppendPackageToExecutable(stub, pkgPath, exePath); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(exePath, "--", "--self-test", "--flag", "value")
+	cmd.Env = append(os.Environ(), "GOSCRIPT_EMBEDDED_ARGS_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("embedded executable failed: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(data)
+	wantSuffix := "main.gs|--self-test|--flag|value"
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Fatalf("want argv suffix %q, got %q", wantSuffix, got)
+	}
+}
+
 func TestRunInlineCode(t *testing.T) {
 	if code := run([]string{`console.log("ok")`}); code != 0 {
 		t.Fatalf("want exit code 0, got %d", code)

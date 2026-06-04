@@ -30,6 +30,7 @@ const defaultTimeout = 10 * time.Second
 
 var sharedVMPool = object.NewVirtualMachinePool(runtime.NumCPU())
 var cliInput io.Reader = os.Stdin
+var hasAppendedPackage = currentExecutableHasAppendedPackage
 
 type options struct {
 	checkTypes bool
@@ -65,6 +66,11 @@ func main() {
 }
 
 func run(args []string) int {
+	embeddedArgs := splitEmbeddedAppArgs(args)
+	if embeddedArgs != nil {
+		return runWithEmbeddedArgs(args[:embeddedArgs.separator], embeddedArgs.app)
+	}
+
 	fs := flag.NewFlagSet("gs", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 
@@ -78,6 +84,7 @@ func run(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	timeoutExplicit := flagWasSet(fs, "timeout")
 	if *showVersion {
 		fmt.Fprintln(os.Stdout, "GoScript", version)
 		return 0
@@ -92,12 +99,17 @@ func run(args []string) int {
 	r := newRunner(opts)
 	rest := fs.Args()
 	if len(rest) == 0 {
+		originalTimeout := r.opts.timeout
+		if !timeoutExplicit {
+			r.opts.timeout = 0
+		}
 		if err := r.runEmbeddedExecutable(); err == nil {
 			return 0
 		} else if !errors.Is(err, packagefile.ErrNoAppendedPackage) {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
 		}
+		r.opts.timeout = originalTimeout
 		if err := r.runREPL(replConfig{in: cliInput, out: os.Stdout, errOut: os.Stderr, showIntro: true}); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 1
@@ -128,6 +140,89 @@ func run(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+type embeddedAppArgs struct {
+	separator int
+	app       []string
+}
+
+func splitEmbeddedAppArgs(args []string) *embeddedAppArgs {
+	sep := -1
+	for i, arg := range args {
+		if arg == "--" {
+			sep = i
+			break
+		}
+	}
+	if sep < 0 || !hasAppendedPackage() {
+		return nil
+	}
+	return &embeddedAppArgs{
+		separator: sep,
+		app:       append([]string{}, args[sep+1:]...),
+	}
+}
+
+func currentExecutableHasAppendedPackage() bool {
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	_, err = packagefile.ReadAppendedPackage(exe)
+	return err == nil
+}
+
+func runWithEmbeddedArgs(cliArgs, appArgs []string) int {
+	fs := flag.NewFlagSet("gs", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := options{}
+	fs.BoolVar(&opts.checkTypes, "check-types", false, "enable optional type checking")
+	fs.IntVar(&opts.workers, "workers", runtime.NumCPU(), "maximum async worker count")
+	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "maximum script runtime; use 0 to disable")
+	showVersion := fs.Bool("version", false, "print version")
+	apiDoc := fs.String("api_doc", "", "print native module API docs, e.g. @std/web; use all to list modules")
+
+	if err := fs.Parse(cliArgs); err != nil {
+		return 2
+	}
+	timeoutExplicit := flagWasSet(fs, "timeout")
+	if *showVersion {
+		fmt.Fprintln(os.Stdout, "GoScript", version)
+		return 0
+	}
+	if *apiDoc != "" {
+		if err := printAPIDoc(*apiDoc); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+	if len(fs.Args()) > 0 {
+		fmt.Fprintln(os.Stderr, "embedded executable accepts app arguments after --")
+		return 2
+	}
+	if !timeoutExplicit {
+		opts.timeout = 0
+	}
+
+	r := newRunner(opts)
+	if err := r.runEmbeddedExecutable(appArgs...); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	wasSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			wasSet = true
+		}
+	})
+	return wasSet
 }
 
 func newRunner(opts options) *runner {
@@ -429,7 +524,7 @@ func (r *runner) runInline(src string) error {
 	})
 }
 
-func (r *runner) runEmbeddedExecutable() error {
+func (r *runner) runEmbeddedExecutable(args ...string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
@@ -451,7 +546,10 @@ func (r *runner) runEmbeddedExecutable() error {
 	if entry == "" {
 		entry = "main.gs"
 	}
-	return r.runPackageEntryFromExecutable(pkg, exe, entry, os.Args[1:]...)
+	if args == nil {
+		args = os.Args[1:]
+	}
+	return r.runPackageEntryFromExecutable(pkg, exe, entry, args...)
 }
 
 func (r *runner) runFileWithOptions(path string, opts runOptions) error {
