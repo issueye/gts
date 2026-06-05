@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -571,6 +572,44 @@ func TestRunProject(t *testing.T) {
 
 	if code := run([]string{"run"}); code != 0 {
 		t.Fatalf("want exit code 0, got %d", code)
+	}
+}
+
+func TestRunProjectStartsConfiguredGTPPlugin(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "project.toml"), fmt.Sprintf(`[project]
+entry = "app.gs"
+
+[plugins.scheduler]
+command = "go"
+args = ["run", %q]
+cwd = %q
+modules = ["@plugin/scheduler"]
+capabilities = ["call", "event"]
+`, filepath.Join(root, "cmd", "gtp-scheduler"), root))
+	writeTestFile(t, filepath.Join(dir, "app.gs"), `
+let fs = require("@std/fs");
+function main() {
+  const scheduler = require("@plugin/scheduler");
+  let tasks = scheduler.list();
+  fs.writeFileSync("plugin-result.txt", String(tasks.length));
+}
+`)
+	r := newRunner(options{workers: 1, timeout: 5 * time.Second})
+	if err := r.runProject(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "plugin-result.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "0" {
+		t.Fatalf("plugin result = %q, want 0", data)
 	}
 }
 

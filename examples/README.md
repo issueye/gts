@@ -25,6 +25,7 @@
 | 17 | `17-native-stdlib-cookbook.gs` | 原生标准库 Cookbook：编码、配置、事件、流、URL 与校验 |
 | 18 | `18-go-sdk-host/` | Go SDK 宿主程序：注册 `@go/*` 模块并运行 GTS |
 | 19 | `19-gtp-scheduler-client/` | GTP 定时任务插件：独立进程、JSON Lines 调用与事件 |
+| 20 | `20-gtp-plugin-autostart/` | GTS 项目启动读取配置并自动唤醒 GTP 插件 |
 
 ## 运行方式
 
@@ -62,6 +63,10 @@ go run ./examples/18-go-sdk-host
 
 # 运行 GTP 定时任务插件示例
 go run ./examples/19-gtp-scheduler-client
+
+# 运行 GTP 插件自动唤醒示例
+cd examples/20-gtp-plugin-autostart
+go run ../../cmd/gs run
 ```
 
 编号 01-12、16 和 17 的 `.gs` 文件都是独立可执行的脚本；第 13-15 个示例是小项目，需要在示例目录内运行 `gs run`。

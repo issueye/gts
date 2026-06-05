@@ -10,6 +10,29 @@ go run ./cmd/gtp-scheduler
 
 插件通过 stdin/stdout 收发 GTP 帧，stderr 只用于错误日志。
 
+## GTS 项目自动唤醒
+
+在项目 `project.toml` 中配置插件：
+
+```toml
+[plugins.scheduler]
+command = "go"
+args = ["run", "./cmd/gtp-scheduler"]
+cwd = "../.."
+modules = ["@plugin/scheduler"]
+capabilities = ["call", "event"]
+```
+
+运行 `gs run` 时，GTS 会读取 `[plugins]` 配置，自动启动插件进程，发送 `hello` 握手帧并等待 `ready`。脚本中可以直接加载插件模块：
+
+```javascript
+const scheduler = require("@plugin/scheduler");
+let tasks = scheduler.list();
+println(String(tasks.length));
+```
+
+项目结束时，GTS 会关闭插件 stdin/stdout 并清理插件进程。
+
 ## 握手
 
 请求：
@@ -83,4 +106,3 @@ go run ./cmd/gtp-scheduler
 ```bash
 go run ./examples/19-gtp-scheduler-client
 ```
-

@@ -17,6 +17,7 @@ type Config struct {
 	Imports      map[string]string
 	Dependencies map[string]string
 	Bundle       BundleConfig
+	Plugins      map[string]PluginConfig
 }
 
 // PackageConfig holds package metadata from the [package] section.
@@ -33,6 +34,16 @@ type BundleConfig struct {
 	Format     string
 	IncludeStd bool
 	External   []string
+}
+
+// PluginConfig holds one [plugins.<name>] GTP plugin config.
+type PluginConfig struct {
+	Command      string
+	Args         []string
+	Cwd          string
+	AutoStart    bool
+	Capabilities []string
+	Modules      []string
 }
 
 // Load reads a project.toml file and returns parsed config.
@@ -75,12 +86,13 @@ func Parse(src, name string) (*Config, error) {
 }
 
 type manifestFile struct {
-	Project      projectSection    `toml:"project"`
-	Package      packageSection    `toml:"package"`
-	Exports      map[string]string `toml:"exports"`
-	Imports      map[string]string `toml:"imports"`
-	Dependencies map[string]string `toml:"dependencies"`
-	Bundle       bundleSection     `toml:"bundle"`
+	Project      projectSection           `toml:"project"`
+	Package      packageSection           `toml:"package"`
+	Exports      map[string]string        `toml:"exports"`
+	Imports      map[string]string        `toml:"imports"`
+	Dependencies map[string]string        `toml:"dependencies"`
+	Bundle       bundleSection            `toml:"bundle"`
+	Plugins      map[string]pluginSection `toml:"plugins"`
 }
 
 type projectSection struct {
@@ -101,6 +113,15 @@ type bundleSection struct {
 	Format     string   `toml:"format"`
 	IncludeStd bool     `toml:"includeStd"`
 	External   []string `toml:"external"`
+}
+
+type pluginSection struct {
+	Command      string   `toml:"command"`
+	Args         []string `toml:"args"`
+	Cwd          string   `toml:"cwd"`
+	AutoStart    *bool    `toml:"autoStart"`
+	Capabilities []string `toml:"capabilities"`
+	Modules      []string `toml:"modules"`
 }
 
 func (cfg *Config) applyManifest(m manifestFile) {
@@ -127,5 +148,22 @@ func (cfg *Config) applyManifest(m manifestFile) {
 		Format:     m.Bundle.Format,
 		IncludeStd: m.Bundle.IncludeStd,
 		External:   m.Bundle.External,
+	}
+	if len(m.Plugins) > 0 {
+		cfg.Plugins = make(map[string]PluginConfig, len(m.Plugins))
+		for name, plugin := range m.Plugins {
+			autoStart := true
+			if plugin.AutoStart != nil {
+				autoStart = *plugin.AutoStart
+			}
+			cfg.Plugins[name] = PluginConfig{
+				Command:      plugin.Command,
+				Args:         plugin.Args,
+				Cwd:          plugin.Cwd,
+				AutoStart:    autoStart,
+				Capabilities: plugin.Capabilities,
+				Modules:      plugin.Modules,
+			}
+		}
 	}
 }

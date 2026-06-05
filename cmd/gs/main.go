@@ -16,6 +16,7 @@ import (
 	"github.com/issueye/goscript/internal/async"
 	"github.com/issueye/goscript/internal/bundle"
 	"github.com/issueye/goscript/internal/evaluator"
+	"github.com/issueye/goscript/internal/gtp/pluginhost"
 	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
@@ -44,6 +45,7 @@ type runner struct {
 	cache    *module.Cache
 	vm       *object.VirtualMachine
 	resolver *module.Resolver
+	plugins  *pluginhost.Host
 	rootDir  string
 }
 
@@ -526,6 +528,14 @@ func (r *runner) runProject(dir string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	r.plugins = pluginhost.New(absDir)
+	if err := r.plugins.StartConfigured(cfg.Plugins); err != nil {
+		return err
+	}
+	defer func() {
+		r.plugins.Close()
+		r.plugins = nil
+	}()
 	entry := filepath.Join(absDir, cfg.Entry)
 	return r.runFileWithOptions(entry, runOptions{autoMain: true, workingDir: absDir, argv: scriptArgv(entry, args)})
 }
@@ -942,6 +952,11 @@ func (r *runner) requireFrom(env *object.Environment, path string) (object.Objec
 		return nil, err
 	}
 	if resolved.Kind == module.ModuleKindNative {
+		if r.plugins != nil {
+			if native, ok := r.plugins.NativeModule(path, env); ok {
+				return native, nil
+			}
+		}
 		native, ok := module.GetNative(path, env)
 		if !ok {
 			return nil, fmt.Errorf("native module %s is not registered", path)
