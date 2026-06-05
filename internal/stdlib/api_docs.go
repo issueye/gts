@@ -133,6 +133,12 @@ func init() {
 			"adler32Number(value)  返回 Adler-32 数字",
 			"crc32Number(value)  返回 CRC-32 数字",
 		},
+		"@std/highlight": {
+			"terminal(code, options?)  轻量代码高亮，返回 lines/text/lang",
+			"options.lang  语言：json/diff/shell/gs/js/toml",
+			"options.width  按终端宽度换行",
+			"options.color  是否输出 ANSI 颜色",
+		},
 		"@std/log": {
 			"createFileLogger(path, options?) -> logger  创建文件日志器",
 			"logger.debug(...values)  写入 debug 日志",
@@ -141,6 +147,14 @@ func init() {
 			"logger.error(...values)  写入 error 日志",
 			"logger.log(...values)  写入 info 日志",
 			"logger.close()  关闭日志文件",
+		},
+		"@std/markdown": {
+			"parse(source)  解析 Markdown，返回 block/inline AST 和 diagnostics",
+			"renderTerminal(source, options?)  渲染 Markdown 为终端行，支持 options.width",
+			"createStream(options?)  创建流式 Markdown 预览器，支持 append/snapshot/finalize",
+			"fromHTML(html, options?)  将基础 HTML 转为 Markdown，支持 baseUrl/includeLinks/maxChars",
+			"Block: document/paragraph/heading/code/list/list_item/blockquote/hr",
+			"Inline: text/strong/em/code/link/softbreak/hardbreak",
 		},
 		"@std/mail": {
 			"parseAddress(address)  解析单个邮件地址",
@@ -314,12 +328,19 @@ func init() {
 			"renderFileSync(path, data?, options?)  读取文件并渲染模板",
 			"escapeHTML(value)  HTML 转义",
 		},
+		"@std/table": {
+			"layout(rows, options?)  按终端宽度布局表格，返回 lines/widths",
+			"options.width  表格总宽度",
+			"options.minColWidth  最小列宽",
+			"options.wrap  是否按列宽换行",
+		},
 		"@std/text": {
 			"chars(value)  返回剥离 ANSI 后的可见字符数组",
 			"runes(value)  chars 的别名",
 			"width(value)  计算剥离 ANSI 后的终端显示宽度",
 			"truncateWidth(value, width)  按终端显示宽度截断文本",
 			"padRightWidth(value, width)  按终端显示宽度右侧补空格",
+			"wrapWidth(value, width)  按终端显示宽度换行，返回行数组",
 			"stripAnsi(value)  移除 ANSI escape 序列",
 		},
 		"@std/terminal": {
@@ -342,6 +363,8 @@ func init() {
 			"clearScreen()/clearLine()/clearFromCursor()  清理终端内容",
 			"moveTo(row, col)/moveBy(rows, cols)  移动光标",
 			"setTitle(title)  设置终端标题",
+			"style(text, options?)  返回 ANSI 样式文本，支持 bold/dim/underline/inverse/fg/bg/color",
+			"hyperlink(label, url, options?)  生成 OSC 8 终端链接，禁用时降级为 label <url>",
 			"enterAlternateScreen()/leaveAlternateScreen()  切换备用屏",
 			"enableMouse()/disableMouse()  切换鼠标事件上报",
 			"enableBracketedPaste()/disableBracketedPaste()  切换 Bracketed Paste",

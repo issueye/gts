@@ -17,8 +17,10 @@
 | [`builtins.md`](builtins.md) | 内置对象与标准库 API 参考 | 脚本作者 |
 | [`async-model.md`](async-model.md) | Promise / async-await / 事件循环 | 高级用户、嵌入式使用 |
 | [`package-module-design.md`](package-module-design.md) | 包模块打包、引用解析、依赖锁定与分发设计 | 运行时/工具链维护者 |
+| [`gts-go-interop-protocol.md`](gts-go-interop-protocol.md) | GTS 与 Go 程序交互协议、原生模块 ABI、进程间 GTP 帧协议 | 运行时/宿主集成维护者 |
 | [`roadmap.md`](roadmap.md) | 实施路线图与里程碑 | 贡献者、PM |
 | [`examples/`](examples/) | 示例脚本合集 | 脚本作者 |
+| [`examples/markdown-tui-support.md`](examples/markdown-tui-support.md) | Markdown / TUI 标准库脚本组合示例 | Agent、TUI 脚本作者 |
 
 ## 文档状态
 

@@ -24,6 +24,7 @@ func initTextModule(exports *object.Hash) {
 	setHashMember(exports, "width", &object.Builtin{Name: "text.width", Fn: textWidth})
 	setHashMember(exports, "truncateWidth", &object.Builtin{Name: "text.truncateWidth", Fn: textTruncateWidth})
 	setHashMember(exports, "padRightWidth", &object.Builtin{Name: "text.padRightWidth", Fn: textPadRightWidth})
+	setHashMember(exports, "wrapWidth", &object.Builtin{Name: "text.wrapWidth", Fn: textWrapWidth})
 	setHashMember(exports, "stripAnsi", &object.Builtin{Name: "text.stripAnsi", Fn: textStripAnsi})
 }
 
@@ -79,6 +80,23 @@ func textPadRightWidth(env *object.Environment, pos ast.Position, args ...object
 	return &object.String{Value: out}
 }
 
+func textWrapWidth(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	value, errObj := requiredString(pos, "text.wrapWidth", args, 0, "value")
+	if errObj != nil {
+		return errObj
+	}
+	width, errObj := requiredNumber(pos, "text.wrapWidth", args, 1, "width")
+	if errObj != nil {
+		return errObj
+	}
+	lines := textWrapToWidth(value, int(width))
+	elements := make([]object.Object, len(lines))
+	for i, line := range lines {
+		elements[i] = &object.String{Value: line}
+	}
+	return &object.Array{Elements: elements}
+}
+
 func textStripAnsi(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	value, errObj := requiredString(pos, "text.stripAnsi", args, 0, "value")
 	if errObj != nil {
@@ -131,6 +149,35 @@ func textTruncateToWidth(value string, limit int) string {
 		width += chWidth
 	}
 	return out.String()
+}
+
+func textWrapToWidth(value string, limit int) []string {
+	if limit <= 0 {
+		return []string{""}
+	}
+	rawLines := strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, raw := range rawLines {
+		chars := textVisibleChars(raw)
+		if len(chars) == 0 {
+			lines = append(lines, "")
+			continue
+		}
+		var out strings.Builder
+		width := 0
+		for _, ch := range chars {
+			chWidth := textCharWidth(ch)
+			if width > 0 && width+chWidth > limit {
+				lines = append(lines, out.String())
+				out.Reset()
+				width = 0
+			}
+			out.WriteString(ch)
+			width += chWidth
+		}
+		lines = append(lines, out.String())
+	}
+	return lines
 }
 
 func textCharWidth(ch string) int {

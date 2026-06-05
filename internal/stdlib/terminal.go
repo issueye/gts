@@ -81,6 +81,8 @@ func initTerminalModule(exports *object.Hash) {
 	setHashMember(exports, "moveTo", &object.Builtin{Name: "terminal.moveTo", Fn: terminalMoveTo})
 	setHashMember(exports, "moveBy", &object.Builtin{Name: "terminal.moveBy", Fn: terminalMoveBy})
 	setHashMember(exports, "setTitle", &object.Builtin{Name: "terminal.setTitle", Fn: terminalSetTitle})
+	setHashMember(exports, "style", &object.Builtin{Name: "terminal.style", Fn: terminalStyle})
+	setHashMember(exports, "hyperlink", &object.Builtin{Name: "terminal.hyperlink", Fn: terminalHyperlink})
 	setHashMember(exports, "enterAlternateScreen", &object.Builtin{Name: "terminal.enterAlternateScreen", Fn: terminalEnterAlternateScreen})
 	setHashMember(exports, "leaveAlternateScreen", &object.Builtin{Name: "terminal.leaveAlternateScreen", Fn: terminalLeaveAlternateScreen})
 	setHashMember(exports, "enableMouse", &object.Builtin{Name: "terminal.enableMouse", Fn: terminalEnableMouse})
@@ -733,6 +735,168 @@ func terminalSetTitle(env *object.Environment, pos ast.Position, args ...object.
 		return object.NewError(pos, "terminal.setTitle requires title")
 	}
 	return terminalWriteANSI(pos, "\x1b]0;"+objectToText(args[0])+"\x07")
+}
+
+type terminalStyleOptions struct {
+	bold      bool
+	dim       bool
+	underline bool
+	inverse   bool
+	fg        string
+	bg        string
+	color     bool
+}
+
+func terminalStyle(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	if len(args) < 1 {
+		return object.NewError(pos, "terminal.style requires text")
+	}
+	opts := terminalStyleOptions{color: true}
+	if len(args) >= 2 && args[1] != object.UNDEFINED && args[1] != object.NULL {
+		hash, ok := args[1].(*object.Hash)
+		if !ok {
+			return object.NewError(pos, "terminal.style: options must be an object")
+		}
+		var errObj *object.Error
+		if opts.bold, errObj = terminalStyleBool(pos, hash, "bold", opts.bold); errObj != nil {
+			return errObj
+		}
+		if opts.dim, errObj = terminalStyleBool(pos, hash, "dim", opts.dim); errObj != nil {
+			return errObj
+		}
+		if opts.underline, errObj = terminalStyleBool(pos, hash, "underline", opts.underline); errObj != nil {
+			return errObj
+		}
+		if opts.inverse, errObj = terminalStyleBool(pos, hash, "inverse", opts.inverse); errObj != nil {
+			return errObj
+		}
+		if opts.color, errObj = terminalStyleBool(pos, hash, "color", opts.color); errObj != nil {
+			return errObj
+		}
+		if opts.fg, errObj = terminalStyleStringOption(pos, hash, "fg"); errObj != nil {
+			return errObj
+		}
+		if opts.bg, errObj = terminalStyleStringOption(pos, hash, "bg"); errObj != nil {
+			return errObj
+		}
+	}
+	return &object.String{Value: terminalStyleString(objectToText(args[0]), opts)}
+}
+
+func terminalHyperlink(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	label, errObj := requiredString(pos, "terminal.hyperlink", args, 0, "label")
+	if errObj != nil {
+		return errObj
+	}
+	url, errObj := requiredString(pos, "terminal.hyperlink", args, 1, "url")
+	if errObj != nil {
+		return errObj
+	}
+	enabled := true
+	if len(args) >= 3 && args[2] != object.UNDEFINED && args[2] != object.NULL {
+		opts, ok := args[2].(*object.Hash)
+		if !ok {
+			return object.NewError(pos, "terminal.hyperlink: options must be an object")
+		}
+		if value, ok := hashValue(opts, "enabled"); ok && value != object.UNDEFINED && value != object.NULL {
+			b, ok := value.(*object.Boolean)
+			if !ok {
+				return object.NewError(pos, "terminal.hyperlink: enabled must be a boolean")
+			}
+			enabled = b.Value
+		}
+	}
+	if !enabled {
+		return &object.String{Value: label + " <" + url + ">"}
+	}
+	return &object.String{Value: "\x1b]8;;" + url + "\x1b\\" + label + "\x1b]8;;\x1b\\"}
+}
+
+func terminalStyleBool(pos ast.Position, hash *object.Hash, key string, fallback bool) (bool, *object.Error) {
+	value, ok := hashValue(hash, key)
+	if !ok || value == object.UNDEFINED || value == object.NULL {
+		return fallback, nil
+	}
+	b, ok := value.(*object.Boolean)
+	if !ok {
+		return false, object.NewError(pos, "terminal.style: %s must be a boolean", key)
+	}
+	return b.Value, nil
+}
+
+func terminalStyleStringOption(pos ast.Position, hash *object.Hash, key string) (string, *object.Error) {
+	value, ok := hashValue(hash, key)
+	if !ok || value == object.UNDEFINED || value == object.NULL {
+		return "", nil
+	}
+	s, ok := value.(*object.String)
+	if !ok {
+		return "", object.NewError(pos, "terminal.style: %s must be a string", key)
+	}
+	return s.Value, nil
+}
+
+func terminalStyleString(text string, opts terminalStyleOptions) string {
+	if !opts.color {
+		return text
+	}
+	var codes []string
+	if opts.bold {
+		codes = append(codes, "1")
+	}
+	if opts.dim {
+		codes = append(codes, "2")
+	}
+	if opts.underline {
+		codes = append(codes, "4")
+	}
+	if opts.inverse {
+		codes = append(codes, "7")
+	}
+	if code := terminalColorCode(opts.fg, false); code != "" {
+		codes = append(codes, code)
+	}
+	if code := terminalColorCode(opts.bg, true); code != "" {
+		codes = append(codes, code)
+	}
+	if len(codes) == 0 {
+		return text
+	}
+	return "\x1b[" + strings.Join(codes, ";") + "m" + text + "\x1b[0m"
+}
+
+func terminalColorCode(name string, background bool) string {
+	if name == "" {
+		return ""
+	}
+	colors := map[string]int{
+		"black":   30,
+		"red":     31,
+		"green":   32,
+		"yellow":  33,
+		"blue":    34,
+		"magenta": 35,
+		"cyan":    36,
+		"white":   37,
+		"gray":    90,
+		"grey":    90,
+		"muted":   90,
+		"accent":  36,
+		"error":   31,
+		"success": 32,
+		"warning": 33,
+	}
+	code, ok := colors[strings.ToLower(name)]
+	if !ok {
+		return ""
+	}
+	if background {
+		if code >= 90 {
+			return fmt.Sprintf("%d", code+10)
+		}
+		return fmt.Sprintf("%d", code+10)
+	}
+	return fmt.Sprintf("%d", code)
 }
 
 func terminalEnterAlternateScreen(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

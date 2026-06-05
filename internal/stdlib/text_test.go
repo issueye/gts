@@ -24,6 +24,19 @@ func TestTextTruncateAndPadWidth(t *testing.T) {
 	assertString(t, textPadRightWidth(env, pos, &object.String{Value: "你"}, &object.Number{Value: 4}), "你  ")
 }
 
+func TestTextWrapWidth(t *testing.T) {
+	result := textWrapWidth(object.NewEnvironment(), ast.Position{}, &object.String{Value: "你好世界"}, &object.Number{Value: 4})
+	arr, ok := result.(*object.Array)
+	if !ok {
+		t.Fatalf("want array, got %T: %s", result, result.Inspect())
+	}
+	if len(arr.Elements) != 2 {
+		t.Fatalf("want 2 lines, got %d", len(arr.Elements))
+	}
+	assertString(t, arr.Elements[0], "你好")
+	assertString(t, arr.Elements[1], "世界")
+}
+
 func TestTextCharsStripsANSI(t *testing.T) {
 	result := textChars(object.NewEnvironment(), ast.Position{}, &object.String{Value: "\x1b[1m你a\x1b[0m"})
 	arr, ok := result.(*object.Array)
