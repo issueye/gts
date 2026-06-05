@@ -82,7 +82,9 @@ func main() {
 
 ### 4.4 GTP 进程间协议
 
-- 实现 JSON Lines transport。
+- 已新增 `internal/gtp` GTP 帧和值编码基础包。
+- 已新增 GTP JSON Lines 编解码与性能基线测试。
+- 实现 JSON Lines transport 的真实进程/pipe 版本。
 - 实现 hello/ready/call/result/cancel 基础帧。
 - 实现外部服务代理模块。
 - 实现 resource 代理和 VM 结束清理。

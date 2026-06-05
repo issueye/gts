@@ -19,6 +19,8 @@
 | [`package-module-design.md`](package-module-design.md) | 包模块打包、引用解析、依赖锁定与分发设计 | 运行时/工具链维护者 |
 | [`gts-go-interop-protocol.md`](gts-go-interop-protocol.md) | GTS 与 Go 程序交互协议、原生模块 ABI、进程间 GTP 帧协议 | 运行时/宿主集成维护者 |
 | [`gts-go-interop-development-plan.md`](gts-go-interop-development-plan.md) | GTS/Go 互操作开发计划和 Go SDK 使用示例 | 运行时/宿主集成维护者 |
+| [`gtp-performance-baseline.md`](gtp-performance-baseline.md) | GTP JSON Lines 帧协议性能基线和后续优化方向 | 运行时/宿主集成维护者 |
+| [`gtp-scheduler-plugin.md`](gtp-scheduler-plugin.md) | GTP 定时任务插件协议、方法和示例帧 | 运行时/插件开发者 |
 | [`roadmap.md`](roadmap.md) | 实施路线图与里程碑 | 贡献者、PM |
 | [`examples/`](examples/) | 示例脚本合集 | 脚本作者 |
 | [`examples/markdown-tui-support.md`](examples/markdown-tui-support.md) | Markdown / TUI 标准库脚本组合示例 | Agent、TUI 脚本作者 |
