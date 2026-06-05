@@ -125,12 +125,12 @@ func (r *Resolver) resolveUncached(specifier, baseDir, projectRoot string) (Reso
 		if resolved, ok, err := tryResolvePackageFileImportAlias(specifier, pkgPath); ok || err != nil {
 			return resolved, err
 		}
-		if !strings.HasPrefix(specifier, "@std/") && !strings.HasPrefix(specifier, "@agent/") {
+		if !IsNativeSpecifier(specifier) && !strings.HasPrefix(specifier, "@agent/") {
 			return r.resolvePackageFromPackageFile(specifier, pkgPath, projectRoot)
 		}
 	}
 
-	if strings.HasPrefix(specifier, "@std/") {
+	if IsNativeSpecifier(specifier) {
 		return ResolvedModule{
 			ID:        "native:" + specifier,
 			Kind:      ModuleKindNative,
@@ -168,6 +168,15 @@ func (r *Resolver) resolveUncached(specifier, baseDir, projectRoot string) (Reso
 	}
 
 	return r.resolvePackage(specifier, baseDir, projectRoot)
+}
+
+// IsNativeSpecifier reports whether a module specifier is reserved for a Go
+// native module registered by the runtime or host application.
+func IsNativeSpecifier(specifier string) bool {
+	return strings.HasPrefix(specifier, "@std/") ||
+		strings.HasPrefix(specifier, "@go/") ||
+		strings.HasPrefix(specifier, "@host/") ||
+		strings.HasPrefix(specifier, "@plugin/")
 }
 
 func (r *Resolver) cachedResolution(key resolveCacheKey) (ResolvedModule, bool, error) {

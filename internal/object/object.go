@@ -375,7 +375,7 @@ func (b *BooleanObject) Inspect() string {
 func NewError(pos ast.Position, format string, args ...interface{}) *Error {
 	name := "Error"
 	message := fmt.Sprintf(format, args...)
-	for _, prefix := range []string{"TypeError", "RangeError", "ReferenceError", "SyntaxError", "ImportError", "ExportError", "MatchError"} {
+	for _, prefix := range []string{"TypeError", "RangeError", "ReferenceError", "SyntaxError", "ImportError", "ExportError", "MatchError", "PermissionError", "TimeoutError", "HostError"} {
 		if strings.HasPrefix(message, prefix+": ") {
 			name = prefix
 			message = strings.TrimPrefix(message, prefix+": ")

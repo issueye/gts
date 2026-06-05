@@ -134,7 +134,10 @@ func getExport(exports object.Object, name string) object.Object {
 }
 
 func isNativeModulePath(path string) bool {
-	return strings.HasPrefix(path, "@std/")
+	return strings.HasPrefix(path, "@std/") ||
+		strings.HasPrefix(path, "@go/") ||
+		strings.HasPrefix(path, "@host/") ||
+		strings.HasPrefix(path, "@plugin/")
 }
 
 func unquoteModulePath(path string) string {

@@ -1,0 +1,107 @@
+# GTS 与 Go 交互开发计划
+
+> 本计划承接 [`gts-go-interop-protocol.md`](gts-go-interop-protocol.md)，目标是先提供可用的 Go SDK，再逐步实现独立进程 GTP。
+
+## 1. 当前目标
+
+第一阶段先完成进程内互操作：
+
+1. GTS 能解析 `@go/*`、`@host/*`、`@plugin/*` 原生模块。
+2. Go 程序能通过公开 SDK 注册模块和方法。
+3. Go 程序能通过 SDK 运行源码、文件和项目。
+4. SDK 提供基础值转换、参数读取、错误构造。
+5. 有测试证明 GTS 可以调用 Go 注册的方法。
+
+## 2. 已完成
+
+- 新增 `sdk` 公开包。
+- 新增 `sdk.Runtime`，支持 `RunSource`、`RunFile`、`RunProject`。
+- 新增 `sdk.RegisterModule`，支持注册 `@go/*`、`@host/*`、`@plugin/*` 模块。
+- 新增 `sdk.Value`、`ToValue`、`FromValue`、`AsString`、`AsNumber`、`AsBool`、`AsObject`、`AsArray` 等辅助 API。
+- 扩展 native module resolver，使 `@go/*`、`@host/*`、`@plugin/*` 与 `@std/*` 一样走 Go 原生模块注册表。
+
+## 3. Go SDK 使用示例
+
+```go
+package main
+
+import (
+    "fmt"
+    "time"
+
+    "github.com/issueye/goscript/sdk"
+)
+
+func main() {
+    _ = sdk.RegisterModule(sdk.Module{
+        Name: "@go/math",
+        Methods: map[string]sdk.Method{
+            "add": func(ctx sdk.CallContext, args []sdk.Value) (sdk.Value, error) {
+                a, _ := sdk.AsNumber(args[0])
+                b, _ := sdk.AsNumber(args[1])
+                return sdk.Number(a + b), nil
+            },
+        },
+    })
+
+    rt := sdk.NewRuntime(sdk.Options{Timeout: 5 * time.Second})
+    defer rt.Close()
+
+    result, err := rt.RunSource(`
+        const math = require("@go/math");
+        math.add(2, 3);
+    `, "main.gs")
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println(sdk.FromValue(result))
+}
+```
+
+## 4. 下一阶段任务
+
+### 4.1 SDK 稳定化
+
+- 增加 `Arg` 辅助函数，支持带名称和默认值的参数校验。
+- 支持 Go 方法返回 `any`，由 SDK 自动 `ToValue`。
+- 支持每个 `Runtime` 注册局部模块，避免全局注册表在测试或多租户宿主中冲突。
+- 增加 `CallExport(path, exportName, args...)`，方便 Go 直接调用 GTS 模块导出函数。
+- 增加 SDK 文档和更多示例。
+
+### 4.2 错误模型
+
+- 在 `object.NewError` 中识别 `PermissionError`、`TimeoutError`、`HostError`。
+- SDK 中提供 `TypeError`、`RangeError`、`HostError`、`PermissionError` 便捷构造函数。
+- 错误对象保留 Go 错误链的可读信息，但不泄露敏感数据。
+
+### 4.3 权限能力
+
+- 新增 host capability 配置。
+- 每个模块可声明需要的权限。
+- SDK 在模块导入和方法调用时执行权限检查。
+
+### 4.4 GTP 进程间协议
+
+- 实现 JSON Lines transport。
+- 实现 hello/ready/call/result/cancel 基础帧。
+- 实现外部服务代理模块。
+- 实现 resource 代理和 VM 结束清理。
+- 增加 stream resource。
+
+## 5. 验收标准
+
+短期验收：
+
+1. `go test ./sdk` 通过。
+2. 外部 Go 程序可以 import `github.com/issueye/goscript/sdk`。
+3. GTS 脚本可以 `require("@go/demo")` 调用 Go 方法。
+4. `import demo from "@go/demo"` 对原生模块可用。
+5. Go 方法错误能变成 GTS 运行时错误。
+
+长期验收：
+
+1. 同一脚本 API 可在进程内 ABI 和进程间 GTP 之间切换。
+2. 权限默认关闭，宿主显式授权。
+3. 资源句柄有明确生命周期。
+4. SDK API 在 v1 前保持最小破坏。
+
