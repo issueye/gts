@@ -261,8 +261,9 @@ func init() {
 		},
 		"@std/runtime": {
 			"runScript(path, options?)  在独立 VM 中执行外部 GoScript 文件并返回 exports",
-			"runTool(path, input?, options?)  执行外部工具脚本的 exports.run(input)",
-			"options.cwd  工具执行工作目录，默认继承当前进程 cwd",
+			"callScript(path, exportName, args?, options?)  执行外部脚本并调用指定导出函数",
+			"runTool(path, input?, options?)  callScript(path, \"run\", [input], options) 的便捷封装",
+			"options.cwd  动态脚本执行工作目录，默认继承当前进程 cwd",
 			"options.argv  设置外部脚本 process.argv",
 			"options.autoMain  runScript 后自动调用 main()",
 		},

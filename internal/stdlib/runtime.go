@@ -27,6 +27,7 @@ func init() {
 
 func initRuntimeModule(exports *object.Hash) {
 	setHashMember(exports, "runScript", &object.Builtin{Name: "runtime.runScript", Fn: runtimeRunScript})
+	setHashMember(exports, "callScript", &object.Builtin{Name: "runtime.callScript", Fn: runtimeCallScript})
 	setHashMember(exports, "runTool", &object.Builtin{Name: "runtime.runTool", Fn: runtimeRunTool})
 }
 
@@ -71,17 +72,45 @@ func runtimeRunTool(env *object.Environment, pos ast.Position, args ...object.Ob
 	if errObj != nil {
 		return errObj
 	}
+	return runtimeCallScriptExport(env, pos, "runtime.runTool", path, "run", []object.Object{input}, opts)
+}
+
+func runtimeCallScript(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	path, errObj := requiredString(pos, "runtime.callScript", args, 0, "path")
+	if errObj != nil {
+		return errObj
+	}
+	name, errObj := requiredString(pos, "runtime.callScript", args, 1, "exportName")
+	if errObj != nil {
+		return errObj
+	}
+	var callArgs []object.Object
+	if len(args) >= 3 && args[2] != object.UNDEFINED && args[2] != object.NULL {
+		arr, ok := args[2].(*object.Array)
+		if !ok {
+			return object.NewError(pos, "runtime.callScript: args must be an array")
+		}
+		callArgs = append([]object.Object{}, arr.Elements...)
+	}
+	opts, errObj := runtimeOptions(pos, "runtime.callScript", args, 3)
+	if errObj != nil {
+		return errObj
+	}
+	return runtimeCallScriptExport(env, pos, "runtime.callScript", path, name, callArgs, opts)
+}
+
+func runtimeCallScriptExport(env *object.Environment, pos ast.Position, apiName, path, exportName string, callArgs []object.Object, opts runtimeScriptOptions) object.Object {
 	exec, errObj := runtimeExecuteScript(env, pos, path, opts)
 	if errObj != nil {
 		return errObj
 	}
 	exports, ok := exec.exports.(*object.Hash)
 	if !ok {
-		return object.NewError(pos, "runtime.runTool: %s exports must be an object", path)
+		return object.NewError(pos, "%s: %s exports must be an object", apiName, path)
 	}
-	runFn, ok := hashValue(exports, "run")
-	if !ok || runFn == object.UNDEFINED || runFn == object.NULL {
-		return object.NewError(pos, "runtime.runTool: %s must export run(input)", path)
+	fn, ok := hashValue(exports, exportName)
+	if !ok || fn == object.UNDEFINED || fn == object.NULL {
+		return object.NewError(pos, "%s: %s must export %s(...)", apiName, path, exportName)
 	}
 	runCwd := opts.cwd
 	if runCwd == "" {
@@ -89,10 +118,10 @@ func runtimeRunTool(env *object.Environment, pos ast.Position, args ...object.Ob
 	}
 	restore, err := runtimeEnterWorkingDir(runCwd)
 	if err != nil {
-		return object.NewError(pos, "runtime.runTool: %v", err)
+		return object.NewError(pos, "%s: %v", apiName, err)
 	}
 	defer restore()
-	result := callRuntimeFunction(runFn, exec.env, []object.Object{input}, pos)
+	result := callRuntimeFunction(fn, exec.env, callArgs, pos)
 	if promise, ok := result.(*object.Promise); ok {
 		result = promise.Wait()
 	}

@@ -60,6 +60,27 @@ exports.run = function(input) {
 	assertString(t, result, "tool-lib:ok")
 }
 
+func TestRuntimeCallScriptCallsNamedExport(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "script.gs")
+	if err := os.WriteFile(script, []byte(`
+exports.convert = function(input, suffix) {
+  return input.name + ":" + suffix;
+};
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	input := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+	setHashMember(input, "name", &object.String{Value: "dynamic-script"})
+	args := &object.Array{Elements: []object.Object{
+		input,
+		&object.String{Value: "ok"},
+	}}
+
+	result := runtimeCallScript(object.NewEnvironment(), ast.Position{}, &object.String{Value: script}, &object.String{Value: "convert"}, args)
+	assertString(t, result, "dynamic-script:ok")
+}
+
 func TestRuntimeRunToolOptionsCwdAndArgv(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "data.txt"), []byte("cwd-data"), 0644); err != nil {
