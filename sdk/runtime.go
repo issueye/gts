@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/issueye/goscript/internal/async"
@@ -36,6 +37,9 @@ type Runtime struct {
 	cache    *module.Cache
 	resolver *module.Resolver
 	rootDir  string
+
+	modulesMu sync.RWMutex
+	modules   map[string]Module
 }
 
 // NewRuntime creates a runtime. Call Close when the host is done with it.
@@ -48,9 +52,10 @@ func NewRuntime(opts Options) *Runtime {
 	pool := async.NewPool(opts.Workers)
 	vm.SetSpawner(pool.Go)
 	return &Runtime{
-		opts: opts,
-		vm:   vm,
-		pool: pool,
+		opts:    opts,
+		vm:      vm,
+		pool:    pool,
+		modules: make(map[string]Module),
 	}
 }
 
@@ -154,6 +159,49 @@ func (r *Runtime) RunProject(dir string) (Value, error) {
 	return r.RunFile(filepath.Join(absDir, cfg.Entry), true)
 }
 
+// CallExport loads a script file, reads one exported function, and calls it
+// with the provided arguments.
+func (r *Runtime) CallExport(path, exportName string, args ...Value) (Value, error) {
+	if exportName == "" {
+		return nil, fmt.Errorf("export name is required")
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	source, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, err
+	}
+	return r.withTimeout("script execution", func() (Value, error) {
+		restore, err := enterWorkingDir(r.opts.WorkingDir)
+		if err != nil {
+			return nil, err
+		}
+		defer restore()
+		baseDir := filepath.Dir(absPath)
+		r.configure(baseDir)
+		env := r.vm.NewEnvironment()
+		module.SetupExports(env)
+		r.configureModuleLoaders(env, baseDir)
+		if _, err := r.evalSource(string(source), absPath, env); err != nil {
+			return nil, err
+		}
+		fn, err := exportedValue(module.GetExports(env), exportName)
+		if err != nil {
+			return nil, err
+		}
+		result, err := r.callValue(fn, env, args, absPath)
+		if err != nil {
+			return nil, err
+		}
+		if err := r.drain(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	})
+}
+
 func (r *Runtime) configure(baseDir string) {
 	if r.vm == nil {
 		r.vm = object.NewVirtualMachine()
@@ -208,6 +256,9 @@ func (r *Runtime) configureModuleLoaders(env *object.Environment, baseDir string
 			return nil, err
 		}
 		if resolved.Kind == module.ModuleKindNative {
+			if native, ok, err := r.localNativeModule(specifier, loadEnv); ok || err != nil {
+				return native, err
+			}
 			native, ok := module.GetNative(specifier, loadEnv)
 			if !ok {
 				return nil, fmt.Errorf("native module %s is not registered", specifier)
@@ -222,6 +273,20 @@ func (r *Runtime) configureModuleLoaders(env *object.Environment, baseDir string
 	env.VM().SetImportFunc(func(importEnv *object.Environment, specifier string) (object.Object, error) {
 		return requireFromEnv(importEnv, specifier)
 	})
+}
+
+func (r *Runtime) localNativeModule(specifier string, env *object.Environment) (object.Object, bool, error) {
+	r.modulesMu.RLock()
+	mod, ok := r.modules[specifier]
+	r.modulesMu.RUnlock()
+	if !ok {
+		return nil, false, nil
+	}
+	exports, err := moduleExports(r, mod, env)
+	if err != nil {
+		return nil, true, err
+	}
+	return exports, true, nil
 }
 
 func (r *Runtime) requireResolved(resolved module.ResolvedModule) (object.Object, error) {

@@ -16,8 +16,12 @@
 
 - 新增 `sdk` 公开包。
 - 新增 `sdk.Runtime`，支持 `RunSource`、`RunFile`、`RunProject`。
+- 新增 `Runtime.CallExport`，支持 Go 直接调用 GTS 模块导出函数。
 - 新增 `sdk.RegisterModule`，支持注册 `@go/*`、`@host/*`、`@plugin/*` 模块。
+- 新增 `Runtime.RegisterModule`，支持运行时局部模块注册，避免污染全局原生模块注册表。
 - 新增 `sdk.Value`、`ToValue`、`FromValue`、`AsString`、`AsNumber`、`AsBool`、`AsObject`、`AsArray` 等辅助 API。
+- 新增 `sdk.AnyMethod` / `Module.MethodsAny`，支持 Go 方法返回普通 Go 值并自动转换为 GTS 值。
+- 新增 `sdk.Args` / `NewArgs`，支持带名称的参数读取和类型错误。
 - 扩展 native module resolver，使 `@go/*`、`@host/*`、`@plugin/*` 与 `@std/*` 一样走 Go 原生模块注册表。
 
 ## 3. Go SDK 使用示例
@@ -62,10 +66,6 @@ func main() {
 
 ### 4.1 SDK 稳定化
 
-- 增加 `Arg` 辅助函数，支持带名称和默认值的参数校验。
-- 支持 Go 方法返回 `any`，由 SDK 自动 `ToValue`。
-- 支持每个 `Runtime` 注册局部模块，避免全局注册表在测试或多租户宿主中冲突。
-- 增加 `CallExport(path, exportName, args...)`，方便 Go 直接调用 GTS 模块导出函数。
 - 增加 SDK 文档和更多示例。
 
 ### 4.2 错误模型
@@ -104,4 +104,3 @@ func main() {
 2. 权限默认关闭，宿主显式授权。
 3. 资源句柄有明确生命周期。
 4. SDK API 在 v1 前保持最小破坏。
-

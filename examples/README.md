@@ -23,6 +23,7 @@
 | 15 | `15-gs-agent/` | AI Agent：provider、工具注册表、session 与 Anthropic 接入 |
 | 16 | `16-native-stdlib.gs` | 原生标准库：文件、路径、系统信息与加密 |
 | 17 | `17-native-stdlib-cookbook.gs` | 原生标准库 Cookbook：编码、配置、事件、流、URL 与校验 |
+| 18 | `18-go-sdk-host/` | Go SDK 宿主程序：注册 `@go/*` 模块并运行 GTS |
 
 ## 运行方式
 
@@ -53,6 +54,10 @@ go run ../../cmd/gs run
 # 运行 AI Agent 示例
 cd ../15-gs-agent
 go run ../../cmd/gs run
+
+# 运行 Go SDK 宿主程序示例
+cd ../..
+go run ./examples/18-go-sdk-host
 ```
 
 编号 01-12、16 和 17 的 `.gs` 文件都是独立可执行的脚本；第 13-15 个示例是小项目，需要在示例目录内运行 `gs run`。
@@ -74,6 +79,7 @@ go run ../../cmd/gs run
 | 稳定回归 | `examples/13-package-modules` |
 | 稳定回归 | `examples/14-nested-gspkg` |
 | 稳定回归 | `examples/15-gs-agent` |
+| 稳定回归 | `examples/18-go-sdk-host` |
 
 其余示例目前保留为教学/目标行为示例，暂不纳入自动测试。主要原因是部分示例使用了尚未完整支持的语法、类型检查能力，或包含异步、网络、长时间运行行为。后续每修复一类能力，再把对应示例移动到稳定回归清单。
 
