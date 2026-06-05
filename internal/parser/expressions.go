@@ -40,7 +40,10 @@ func (p *Parser) parseIdent() ast.Expression {
 
 func (p *Parser) parseNumber() ast.Expression {
 	lit := p.cur.Literal
-	val, _ := strconv.ParseFloat(lit, 64)
+	val, err := parseNumberLiteralValue(lit)
+	if err != nil {
+		p.addError(fmt.Sprintf("invalid number literal %q", lit))
+	}
 	isInt := true
 	for _, c := range lit {
 		if c == '.' || c == 'e' || c == 'E' {
@@ -49,6 +52,23 @@ func (p *Parser) parseNumber() ast.Expression {
 		}
 	}
 	return &ast.NumberLit{Pos_: p.pos(), TokenLit: lit, Value: val, IsInt: isInt}
+}
+
+func parseNumberLiteralValue(lit string) (float64, error) {
+	if len(lit) >= 3 && lit[0] == '0' {
+		switch lit[1] {
+		case 'x', 'X':
+			value, err := strconv.ParseUint(lit[2:], 16, 64)
+			return float64(value), err
+		case 'b', 'B':
+			value, err := strconv.ParseUint(lit[2:], 2, 64)
+			return float64(value), err
+		case 'o', 'O':
+			value, err := strconv.ParseUint(lit[2:], 8, 64)
+			return float64(value), err
+		}
+	}
+	return strconv.ParseFloat(lit, 64)
 }
 
 func (p *Parser) parseString() ast.Expression {

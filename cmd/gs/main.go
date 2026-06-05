@@ -66,9 +66,19 @@ func main() {
 }
 
 func run(args []string) int {
+	embedded := hasAppendedPackage()
+	if embedded && len(args) > 0 && args[0] == "run-script" {
+		return runEmbeddedScriptCommand(args[1:])
+	}
 	embeddedArgs := splitEmbeddedAppArgs(args)
 	if embeddedArgs != nil {
 		return runWithEmbeddedArgs(args[:embeddedArgs.separator], embeddedArgs.app)
+	}
+	if embedded {
+		embeddedArgs = splitDirectEmbeddedAppArgs(args)
+		if embeddedArgs != nil {
+			return runWithEmbeddedArgs(args[:embeddedArgs.separator], embeddedArgs.app)
+		}
 	}
 
 	fs := flag.NewFlagSet("gs", flag.ContinueOnError)
@@ -123,6 +133,8 @@ func run(args []string) int {
 		err = initCommand(rest[1:])
 	case "run":
 		err = r.runProject(".", scriptArgs(rest[1:])...)
+	case "run-script":
+		err = r.runScriptCommand(rest[1:])
 	case "pack":
 		err = packCommand(rest[1:])
 	case "dist":
@@ -162,6 +174,44 @@ func splitEmbeddedAppArgs(args []string) *embeddedAppArgs {
 		separator: sep,
 		app:       append([]string{}, args[sep+1:]...),
 	}
+}
+
+func splitDirectEmbeddedAppArgs(args []string) *embeddedAppArgs {
+	for i, arg := range args {
+		if arg == "--" {
+			return nil
+		}
+		if isKnownCLIFlagValue(args, i) {
+			continue
+		}
+		if strings.HasPrefix(arg, "--") && !isKnownCLIFlag(arg) {
+			return &embeddedAppArgs{
+				separator: i,
+				app:       append([]string{}, args[i:]...),
+			}
+		}
+	}
+	return nil
+}
+
+func isKnownCLIFlag(arg string) bool {
+	name := strings.TrimPrefix(arg, "-")
+	name = strings.TrimPrefix(name, "-")
+	if eq := strings.Index(name, "="); eq >= 0 {
+		name = name[:eq]
+	}
+	return name == "check-types" || name == "workers" || name == "timeout" || name == "version" || name == "api_doc" || name == "h" || name == "help"
+}
+
+func isKnownCLIFlagValue(args []string, index int) bool {
+	if index == 0 {
+		return false
+	}
+	prev := args[index-1]
+	if strings.Contains(prev, "=") {
+		return false
+	}
+	return prev == "--workers" || prev == "-workers" || prev == "--timeout" || prev == "-timeout" || prev == "--api_doc" || prev == "-api_doc"
 }
 
 func currentExecutableHasAppendedPackage() bool {
@@ -215,6 +265,26 @@ func runWithEmbeddedArgs(cliArgs, appArgs []string) int {
 	return 0
 }
 
+func runEmbeddedScriptCommand(args []string) int {
+	fs := flag.NewFlagSet("gs", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	opts := options{}
+	fs.BoolVar(&opts.checkTypes, "check-types", false, "enable optional type checking")
+	fs.IntVar(&opts.workers, "workers", runtime.NumCPU(), "maximum async worker count")
+	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "maximum script runtime; use 0 to disable")
+
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	r := newRunner(opts)
+	if err := r.runScriptCommand(fs.Args()); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
 func flagWasSet(fs *flag.FlagSet, name string) bool {
 	wasSet := false
 	fs.Visit(func(f *flag.Flag) {
@@ -240,6 +310,7 @@ func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "  gs [flags] <code>\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] init [dir]\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] run\n\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] run-script <script.gs> [args...]\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] pack [dir] [out.gspkg]\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] dist [dir] [out]\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] bundle <entry.gs> [out.gs]\n\n")
@@ -457,6 +528,17 @@ func (r *runner) runProject(dir string, args ...string) error {
 	}
 	entry := filepath.Join(absDir, cfg.Entry)
 	return r.runFileWithOptions(entry, runOptions{autoMain: true, workingDir: absDir, argv: scriptArgv(entry, args)})
+}
+
+func (r *runner) runScriptCommand(args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("run-script expects: <script.gs> [args...]")
+	}
+	script := args[0]
+	return r.runFileWithOptions(script, runOptions{
+		autoMain: true,
+		argv:     scriptArgv(script, scriptArgs(args[1:])),
+	})
 }
 
 func (r *runner) runFile(path string, args []string) error {

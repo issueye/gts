@@ -24,9 +24,14 @@ type terminalSession struct {
 	vm              *object.VirtualMachine
 	raw             *terminalRawMode
 	bracketedPaste  bool
+	mouse           bool
+	alternateScreen bool
 	cursorHidden    bool
 	onInput         *object.Function
 	onResize        *object.Function
+	onError         *object.Function
+	restoreOnError  bool
+	restoreOnExit   bool
 	moduleEvent     string
 	events          chan terminalEvent
 	stop            chan struct{}
@@ -76,6 +81,10 @@ func initTerminalModule(exports *object.Hash) {
 	setHashMember(exports, "moveTo", &object.Builtin{Name: "terminal.moveTo", Fn: terminalMoveTo})
 	setHashMember(exports, "moveBy", &object.Builtin{Name: "terminal.moveBy", Fn: terminalMoveBy})
 	setHashMember(exports, "setTitle", &object.Builtin{Name: "terminal.setTitle", Fn: terminalSetTitle})
+	setHashMember(exports, "enterAlternateScreen", &object.Builtin{Name: "terminal.enterAlternateScreen", Fn: terminalEnterAlternateScreen})
+	setHashMember(exports, "leaveAlternateScreen", &object.Builtin{Name: "terminal.leaveAlternateScreen", Fn: terminalLeaveAlternateScreen})
+	setHashMember(exports, "enableMouse", &object.Builtin{Name: "terminal.enableMouse", Fn: terminalEnableMouse})
+	setHashMember(exports, "disableMouse", &object.Builtin{Name: "terminal.disableMouse", Fn: terminalDisableMouse})
 	setHashMember(exports, "enableBracketedPaste", &object.Builtin{Name: "terminal.enableBracketedPaste", Fn: terminalEnableBracketedPaste})
 	setHashMember(exports, "disableBracketedPaste", &object.Builtin{Name: "terminal.disableBracketedPaste", Fn: terminalDisableBracketedPaste})
 }
@@ -178,12 +187,15 @@ func terminalStart(env *object.Environment, pos ast.Position, args ...object.Obj
 
 func terminalStartSession(env *object.Environment, pos ast.Position, opts terminalOptions, moduleEvent string) object.Object {
 	session := &terminalSession{
-		vm:          env.VM(),
-		onInput:     opts.onInput,
-		onResize:    opts.onResize,
-		moduleEvent: moduleEvent,
-		events:      make(chan terminalEvent, 256),
-		stop:        make(chan struct{}),
+		vm:             env.VM(),
+		onInput:        opts.onInput,
+		onResize:       opts.onResize,
+		onError:        opts.onError,
+		restoreOnError: opts.restoreOnError,
+		restoreOnExit:  opts.restoreOnExit,
+		moduleEvent:    moduleEvent,
+		events:         make(chan terminalEvent, 256),
+		stop:           make(chan struct{}),
 	}
 	session.lastCols, session.lastRows = terminalGetSize()
 
@@ -201,6 +213,27 @@ func terminalStartSession(env *object.Environment, pos ast.Position, opts termin
 		}
 		session.bracketedPaste = true
 	}
+	if opts.mouse {
+		if _, err := os.Stdout.Write([]byte("\x1b[?1000h\x1b[?1002h\x1b[?1006h")); err != nil {
+			session.restore()
+			return object.NewError(pos, "terminal.start: %v", err)
+		}
+		session.mouse = true
+	}
+	if opts.alternateScreen {
+		if _, err := os.Stdout.Write([]byte("\x1b[?1049h")); err != nil {
+			session.restore()
+			return object.NewError(pos, "terminal.start: %v", err)
+		}
+		session.alternateScreen = true
+	}
+	if opts.hideCursor {
+		if _, err := os.Stdout.Write([]byte("\x1b[?25l")); err != nil {
+			session.restore()
+			return object.NewError(pos, "terminal.start: %v", err)
+		}
+		session.cursorHidden = true
+	}
 
 	registerTerminalSession(session)
 	if session.onInput != nil || session.onResize != nil {
@@ -217,7 +250,9 @@ func terminalOnInput(env *object.Environment, pos ast.Position, args ...object.O
 	if !ok {
 		return object.NewError(pos, "terminal.onInput: listener must be a function")
 	}
-	return terminalStartSession(env, pos, terminalOptions{onInput: fn}, "input")
+	opts := terminalDefaultOptions()
+	opts.onInput = fn
+	return terminalStartSession(env, pos, opts, "input")
 }
 
 func terminalOffInput(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -239,7 +274,9 @@ func terminalOnResize(env *object.Environment, pos ast.Position, args ...object.
 	if !ok {
 		return object.NewError(pos, "terminal.onResize: listener must be a function")
 	}
-	return terminalStartSession(env, pos, terminalOptions{onResize: fn}, "resize")
+	opts := terminalDefaultOptions()
+	opts.onResize = fn
+	return terminalStartSession(env, pos, opts, "resize")
 }
 
 func terminalOffResize(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -254,14 +291,20 @@ func terminalOffResize(env *object.Environment, pos ast.Position, args ...object
 }
 
 type terminalOptions struct {
-	raw            bool
-	bracketedPaste bool
-	onInput        *object.Function
-	onResize       *object.Function
+	raw             bool
+	bracketedPaste  bool
+	mouse           bool
+	alternateScreen bool
+	hideCursor      bool
+	onInput         *object.Function
+	onResize        *object.Function
+	onError         *object.Function
+	restoreOnError  bool
+	restoreOnExit   bool
 }
 
 func terminalStartOptions(pos ast.Position, args []object.Object) (terminalOptions, *object.Error) {
-	opts := terminalOptions{}
+	opts := terminalDefaultOptions()
 	if len(args) == 0 || args[0] == object.UNDEFINED || args[0] == object.NULL {
 		return opts, nil
 	}
@@ -283,6 +326,27 @@ func terminalStartOptions(pos ast.Position, args []object.Object) (terminalOptio
 		}
 		opts.bracketedPaste = paste.Value
 	}
+	if mouseObj, ok := hashValue(hash, "mouse"); ok && mouseObj != object.UNDEFINED && mouseObj != object.NULL {
+		mouse, ok := mouseObj.(*object.Boolean)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: mouse must be a boolean")
+		}
+		opts.mouse = mouse.Value
+	}
+	if screenObj, ok := hashValue(hash, "alternateScreen"); ok && screenObj != object.UNDEFINED && screenObj != object.NULL {
+		screen, ok := screenObj.(*object.Boolean)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: alternateScreen must be a boolean")
+		}
+		opts.alternateScreen = screen.Value
+	}
+	if cursorObj, ok := hashValue(hash, "hideCursor"); ok && cursorObj != object.UNDEFINED && cursorObj != object.NULL {
+		cursor, ok := cursorObj.(*object.Boolean)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: hideCursor must be a boolean")
+		}
+		opts.hideCursor = cursor.Value
+	}
 	if fnObj, ok := hashValue(hash, "onInput"); ok && fnObj != object.UNDEFINED && fnObj != object.NULL {
 		fn, ok := fnObj.(*object.Function)
 		if !ok {
@@ -297,7 +361,32 @@ func terminalStartOptions(pos ast.Position, args []object.Object) (terminalOptio
 		}
 		opts.onResize = fn
 	}
+	if fnObj, ok := hashValue(hash, "onError"); ok && fnObj != object.UNDEFINED && fnObj != object.NULL {
+		fn, ok := fnObj.(*object.Function)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: onError must be a function")
+		}
+		opts.onError = fn
+	}
+	if restoreObj, ok := hashValue(hash, "restoreOnError"); ok && restoreObj != object.UNDEFINED && restoreObj != object.NULL {
+		restore, ok := restoreObj.(*object.Boolean)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: restoreOnError must be a boolean")
+		}
+		opts.restoreOnError = restore.Value
+	}
+	if restoreObj, ok := hashValue(hash, "restoreOnExit"); ok && restoreObj != object.UNDEFINED && restoreObj != object.NULL {
+		restore, ok := restoreObj.(*object.Boolean)
+		if !ok {
+			return opts, object.NewError(pos, "terminal.start: restoreOnExit must be a boolean")
+		}
+		opts.restoreOnExit = restore.Value
+	}
 	return opts, nil
+}
+
+func terminalDefaultOptions() terminalOptions {
+	return terminalOptions{restoreOnError: true, restoreOnExit: true}
 }
 
 func terminalSessionObject(session *terminalSession) *object.Hash {
@@ -308,6 +397,7 @@ func terminalSessionObject(session *terminalSession) *object.Hash {
 	setHashMember(obj, "writeln", &object.Builtin{Name: "terminal.session.writeln", Fn: terminalSessionWriteln, Extra: extra})
 	setHashMember(obj, "size", &object.Builtin{Name: "terminal.session.size", Fn: terminalSessionSize, Extra: extra})
 	setHashMember(obj, "setRawMode", &object.Builtin{Name: "terminal.session.setRawMode", Fn: terminalSessionSetRawMode, Extra: extra})
+	setHashMember(obj, "restore", &object.Builtin{Name: "terminal.session.restore", Fn: terminalSessionRestore, Extra: extra})
 	setHashMember(obj, "stop", &object.Builtin{Name: "terminal.session.stop", Fn: terminalSessionStop, Extra: extra})
 	setHashMember(obj, "drainInput", &object.Builtin{Name: "terminal.session.drainInput", Fn: terminalSessionDrainInput, Extra: extra})
 	setHashMember(obj, "hideCursor", &object.Builtin{Name: "terminal.session.hideCursor", Fn: terminalSessionHideCursor, Extra: extra})
@@ -318,6 +408,10 @@ func terminalSessionObject(session *terminalSession) *object.Hash {
 	setHashMember(obj, "moveTo", &object.Builtin{Name: "terminal.session.moveTo", Fn: terminalMoveTo})
 	setHashMember(obj, "moveBy", &object.Builtin{Name: "terminal.session.moveBy", Fn: terminalMoveBy})
 	setHashMember(obj, "setTitle", &object.Builtin{Name: "terminal.session.setTitle", Fn: terminalSetTitle})
+	setHashMember(obj, "enterAlternateScreen", &object.Builtin{Name: "terminal.session.enterAlternateScreen", Fn: terminalSessionEnterAlternateScreen, Extra: extra})
+	setHashMember(obj, "leaveAlternateScreen", &object.Builtin{Name: "terminal.session.leaveAlternateScreen", Fn: terminalSessionLeaveAlternateScreen, Extra: extra})
+	setHashMember(obj, "enableMouse", &object.Builtin{Name: "terminal.session.enableMouse", Fn: terminalSessionEnableMouse, Extra: extra})
+	setHashMember(obj, "disableMouse", &object.Builtin{Name: "terminal.session.disableMouse", Fn: terminalSessionDisableMouse, Extra: extra})
 	setHashMember(obj, "enableBracketedPaste", &object.Builtin{Name: "terminal.session.enableBracketedPaste", Fn: terminalSessionEnableBracketedPaste, Extra: extra})
 	setHashMember(obj, "disableBracketedPaste", &object.Builtin{Name: "terminal.session.disableBracketedPaste", Fn: terminalSessionDisableBracketedPaste, Extra: extra})
 	return obj
@@ -369,6 +463,17 @@ func terminalSessionSetRawMode(env *object.Environment, pos ast.Position, args .
 	}
 	if err := session.setRawMode(enabled); err != nil {
 		return object.NewError(pos, "terminal.session.setRawMode: %v", err)
+	}
+	return object.UNDEFINED
+}
+
+func terminalSessionRestore(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.restore")
+	if errObj != nil {
+		return errObj
+	}
+	if err := session.restore(); err != nil {
+		return object.NewError(pos, "terminal.session.restore: %v", err)
 	}
 	return object.UNDEFINED
 }
@@ -498,6 +603,62 @@ func terminalSessionDisableBracketedPaste(env *object.Environment, pos ast.Posit
 	return object.UNDEFINED
 }
 
+func terminalSessionEnterAlternateScreen(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.enterAlternateScreen")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalEnterAlternateScreen(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.alternateScreen = true
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
+func terminalSessionLeaveAlternateScreen(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.leaveAlternateScreen")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalLeaveAlternateScreen(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.alternateScreen = false
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
+func terminalSessionEnableMouse(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.enableMouse")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalEnableMouse(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.mouse = true
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
+func terminalSessionDisableMouse(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	session, errObj := boundTerminalSession(pos, env, "terminal.session.disableMouse")
+	if errObj != nil {
+		return errObj
+	}
+	if result := terminalDisableMouse(env, pos, args...); object.IsRuntimeError(result) {
+		return result
+	}
+	session.mu.Lock()
+	session.mouse = false
+	session.mu.Unlock()
+	return object.UNDEFINED
+}
+
 func terminalHideCursor(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	return terminalWriteANSI(pos, "\x1b[?25l")
 }
@@ -574,6 +735,22 @@ func terminalSetTitle(env *object.Environment, pos ast.Position, args ...object.
 	return terminalWriteANSI(pos, "\x1b]0;"+objectToText(args[0])+"\x07")
 }
 
+func terminalEnterAlternateScreen(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?1049h")
+}
+
+func terminalLeaveAlternateScreen(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?1049l")
+}
+
+func terminalEnableMouse(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?1000h\x1b[?1002h\x1b[?1006h")
+}
+
+func terminalDisableMouse(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	return terminalWriteANSI(pos, "\x1b[?1006l\x1b[?1002l\x1b[?1000l")
+}
+
 func terminalEnableBracketedPaste(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 	return terminalWriteANSI(pos, "\x1b[?2004h")
 }
@@ -635,7 +812,8 @@ func (s *terminalSession) eventLoop() {
 				if s.onInput != nil {
 					result := callTerminalFunction(s.onInput, nil, []object.Object{&object.String{Value: event.data}})
 					if object.IsRuntimeError(result) {
-						fmt.Fprintln(os.Stderr, result.Inspect())
+						s.handleCallbackError(result)
+						return
 					}
 				}
 			case "resize":
@@ -643,7 +821,8 @@ func (s *terminalSession) eventLoop() {
 					size := terminalSizeObject(event.cols, event.rows)
 					result := callTerminalFunction(s.onResize, nil, []object.Object{size})
 					if object.IsRuntimeError(result) {
-						fmt.Fprintln(os.Stderr, result.Inspect())
+						s.handleCallbackError(result)
+						return
 					}
 				}
 			}
@@ -744,7 +923,10 @@ func (s *terminalSession) stopSession() error {
 	}
 	s.stopped = true
 	close(s.stop)
-	err := s.restoreLocked()
+	var err error
+	if s.restoreOnExit {
+		err = s.restoreLocked()
+	}
 	s.mu.Unlock()
 	unregisterTerminalSession(s)
 	return err
@@ -764,11 +946,23 @@ func (s *terminalSession) restoreLocked() error {
 		}
 		s.cursorHidden = false
 	}
+	if s.mouse {
+		if _, err := os.Stdout.Write([]byte("\x1b[?1006l\x1b[?1002l\x1b[?1000l")); err != nil {
+			errs = append(errs, err.Error())
+		}
+		s.mouse = false
+	}
 	if s.bracketedPaste {
 		if _, err := os.Stdout.Write([]byte("\x1b[?2004l")); err != nil {
 			errs = append(errs, err.Error())
 		}
 		s.bracketedPaste = false
+	}
+	if s.alternateScreen {
+		if _, err := os.Stdout.Write([]byte("\x1b[?1049l")); err != nil {
+			errs = append(errs, err.Error())
+		}
+		s.alternateScreen = false
 	}
 	if err := s.restoreRawLocked(); err != nil {
 		errs = append(errs, err.Error())
@@ -776,6 +970,37 @@ func (s *terminalSession) restoreLocked() error {
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))
 	}
+	return nil
+}
+
+func (s *terminalSession) handleCallbackError(result object.Object) {
+	if s.restoreOnError {
+		_ = s.restore()
+		_ = s.stopWithoutRestore()
+	} else {
+		_ = s.stopWithoutRestore()
+	}
+	if s.onError != nil {
+		errorObj := result
+		callbackResult := callTerminalFunction(s.onError, nil, []object.Object{errorObj, terminalSessionObject(s)})
+		if object.IsRuntimeError(callbackResult) {
+			fmt.Fprintln(os.Stderr, callbackResult.Inspect())
+		}
+		return
+	}
+	fmt.Fprintln(os.Stderr, result.Inspect())
+}
+
+func (s *terminalSession) stopWithoutRestore() error {
+	s.mu.Lock()
+	if s.stopped {
+		s.mu.Unlock()
+		return nil
+	}
+	s.stopped = true
+	close(s.stop)
+	s.mu.Unlock()
+	unregisterTerminalSession(s)
 	return nil
 }
 

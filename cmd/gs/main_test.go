@@ -300,6 +300,83 @@ fs.writeFileSync("__OUT__", process.argv.slice(2).join("|"));
 	}
 }
 
+func TestRunScriptCommandRunsExternalScriptWithMain(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tool.gs")
+	out := filepath.Join(dir, "out.txt")
+	writeTestFile(t, script, strings.ReplaceAll(`
+let fs = require("@std/fs");
+let process = require("@std/process");
+function main() {
+  fs.writeFileSync("__OUT__", process.argv.slice(2).join("|"));
+}
+`, "__OUT__", strings.ReplaceAll(out, `\`, `\\`)))
+
+	if code := run([]string{"run-script", script, "--", "--flag", "value"}); code != 0 {
+		t.Fatalf("want exit code 0, got %d", code)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "--flag|value" {
+		t.Fatalf("want script args, got %q", data)
+	}
+}
+
+func TestEmbeddedRunScriptCommandRunsExternalScript(t *testing.T) {
+	if os.Getenv("GOSCRIPT_EMBEDDED_RUN_SCRIPT_HELPER") == "1" {
+		for i, arg := range os.Args {
+			if arg == "--" {
+				os.Exit(run(os.Args[i+1:]))
+			}
+		}
+		os.Exit(2)
+	}
+
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "project.toml"), `[project]
+entry = "main.gs"
+`)
+	writeTestFile(t, filepath.Join(root, "main.gs"), `function main() { println("embedded app"); }`)
+	pkgPath := filepath.Join(root, "app.gspkg")
+	if err := packagefile.PackDirectory(root, pkgPath); err != nil {
+		t.Fatal(err)
+	}
+	stub, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exePath := filepath.Join(root, "app.exe")
+	if err := packagefile.AppendPackageToExecutable(stub, pkgPath, exePath); err != nil {
+		t.Fatal(err)
+	}
+
+	outFile := filepath.Join(root, "external.txt")
+	script := filepath.Join(root, "external.gs")
+	writeTestFile(t, script, strings.ReplaceAll(`
+let fs = require("@std/fs");
+let process = require("@std/process");
+function main() {
+  fs.writeFileSync("__OUT__", process.argv.slice(2).join("|"));
+}
+`, "__OUT__", strings.ReplaceAll(outFile, `\`, `\\`)))
+
+	cmd := exec.Command(exePath, "-test.run=TestEmbeddedRunScriptCommandRunsExternalScript", "--", "run-script", script, "--", "generated", "tool")
+	cmd.Env = append(os.Environ(), "GOSCRIPT_EMBEDDED_RUN_SCRIPT_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("embedded run-script failed: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "generated|tool" {
+		t.Fatalf("want external script args, got %q", data)
+	}
+}
+
 func TestSplitEmbeddedAppArgsOnlyForEmbeddedExecutable(t *testing.T) {
 	old := hasAppendedPackage
 	defer func() { hasAppendedPackage = old }()
@@ -319,6 +396,28 @@ func TestSplitEmbeddedAppArgsOnlyForEmbeddedExecutable(t *testing.T) {
 	}
 	if strings.Join(split.app, "|") != "--self-test|--flag" {
 		t.Fatalf("unexpected app args: %#v", split.app)
+	}
+}
+
+func TestSplitDirectEmbeddedAppArgs(t *testing.T) {
+	if split := splitDirectEmbeddedAppArgs([]string{"--timeout", "1s", "--tui"}); split == nil {
+		t.Fatal("embedded app flag should split after known cli flags")
+	} else if split.separator != 2 || strings.Join(split.app, "|") != "--tui" {
+		t.Fatalf("unexpected split: %#v", split)
+	}
+
+	if split := splitDirectEmbeddedAppArgs([]string{"--timeout=1s", "--tui", "extra"}); split == nil {
+		t.Fatal("embedded app flag should split after known cli flag with value")
+	} else if split.separator != 1 || strings.Join(split.app, "|") != "--tui|extra" {
+		t.Fatalf("unexpected split with value: %#v", split)
+	}
+
+	if split := splitDirectEmbeddedAppArgs([]string{"--version"}); split != nil {
+		t.Fatalf("known cli flag should not split: %#v", split)
+	}
+
+	if split := splitDirectEmbeddedAppArgs([]string{"--", "--tui"}); split != nil {
+		t.Fatalf("double dash is handled by splitEmbeddedAppArgs: %#v", split)
 	}
 }
 

@@ -52,6 +52,18 @@ func TestEval_Integer(t *testing.T) {
 	}
 }
 
+func TestEval_NumericBaseLiterals(t *testing.T) {
+	input := `
+(0x2e80 === 11904) &&
+(20320 >= 0x2e80) &&
+(20320 <= 0xa4cf) &&
+(0b1010 === 10) &&
+(0o17 === 15);
+`
+	evaluated := testEval(input)
+	testBoolean(t, evaluated, true)
+}
+
 func TestEval_String(t *testing.T) {
 	tests := []struct{ input, expected string }{
 		{`"hello";`, "hello"},
