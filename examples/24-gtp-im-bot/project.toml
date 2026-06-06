@@ -1,0 +1,11 @@
+[project]
+name = "gtp-im-bot"
+version = "0.1.0"
+entry = "main.gs"
+
+[plugins.im_bot]
+command = "go"
+args = ["run", "./cmd/gtp-imbot"]
+cwd = "../.."
+modules = ["@plugin/im-bot"]
+capabilities = ["call"]

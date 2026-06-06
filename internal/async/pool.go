@@ -40,6 +40,7 @@ func (p *Pool) Go(fn func()) {
 			atomic.AddInt64(&p.active, -1)
 			<-p.sem // release slot
 		}()
+		defer RecoverPanic("worker pool task")
 		fn()
 	}()
 }
@@ -57,6 +58,7 @@ func (p *Pool) TryGo(fn func()) bool {
 				atomic.AddInt64(&p.active, -1)
 				<-p.sem
 			}()
+			defer RecoverPanic("worker pool task")
 			fn()
 		}()
 		return true

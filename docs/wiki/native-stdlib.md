@@ -35,6 +35,7 @@ console.log(fs.readTextSync(file));
 | `@std/exec` | [exec.md](native-stdlib/exec.md) |
 | `@std/pty` | [pty.md](native-stdlib/pty.md) |
 | `@std/terminal` | [terminal.md](native-stdlib/terminal.md) |
+| `@std/tui` | [tui.md](native-stdlib/tui.md) |
 | `@std/signal` | [signal.md](native-stdlib/signal.md) |
 | `@std/timers` | [timers.md](native-stdlib/timers.md) |
 | `@std/time` | [time.md](native-stdlib/time.md) |
@@ -107,7 +108,7 @@ console.log(fs.readTextSync(file));
 | 本地 HTTP 服务 | `@std/web` 或 `@std/net/http/server` |
 | HTTP 客户端与流式读取 | `@std/net/http/client` + `@std/stream` + `@std/sse` |
 | 子进程或交互式命令 | `@std/exec` 或 `@std/pty` |
-| 终端 UI 输出 | `@std/terminal` + `@std/text` + `@std/table` + `@std/highlight` + `@std/markdown` |
+| 终端 UI 输出 | 简单输出用 `@std/terminal` + `@std/text`；全屏状态机用 `@std/tui` |
 | 数据校验入参 | `@std/schema` + 内置 `JSON` |
 
 ## 扩展原生库时怎么补文档

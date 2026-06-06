@@ -63,6 +63,11 @@ type runOptions struct {
 }
 
 func main() {
+	defer func() {
+		if async.RecoverPanic("gs main") {
+			os.Exit(1)
+		}
+	}()
 	code := run(os.Args[1:])
 	os.Exit(code)
 }

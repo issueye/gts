@@ -46,3 +46,27 @@ func TestPool_MultipleWait(t *testing.T) {
 		t.Fatalf("active should be 0 after Wait")
 	}
 }
+
+func TestPool_RecoversPanic(t *testing.T) {
+	p := NewPool(1)
+	p.Go(func() {
+		panic("boom")
+	})
+	p.Wait()
+	if p.Active() != 0 {
+		t.Fatalf("active should be 0 after recovered panic")
+	}
+}
+
+func TestPool_TryGoRecoversPanic(t *testing.T) {
+	p := NewPool(1)
+	if !p.TryGo(func() {
+		panic("boom")
+	}) {
+		t.Fatal("TryGo should accept task")
+	}
+	p.Wait()
+	if p.Active() != 0 {
+		t.Fatalf("active should be 0 after recovered panic")
+	}
+}

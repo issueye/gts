@@ -3,6 +3,8 @@ package object
 import (
 	"sync"
 	"sync/atomic"
+
+	"github.com/issueye/goscript/internal/async"
 )
 
 // VirtualMachine owns the runtime object space for one script execution.
@@ -180,7 +182,10 @@ func (vm *VirtualMachine) Go(fn func()) {
 		vm.spawn(fn)
 		return
 	}
-	go fn()
+	go func() {
+		defer async.RecoverPanic("virtual machine task")
+		fn()
+	}()
 }
 
 func (vm *VirtualMachine) AsyncAdd(delta int) {

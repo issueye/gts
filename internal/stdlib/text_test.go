@@ -21,6 +21,7 @@ func TestTextTruncateAndPadWidth(t *testing.T) {
 	pos := ast.Position{}
 
 	assertString(t, textTruncateWidth(env, pos, &object.String{Value: "你好a"}, &object.Number{Value: 4}), "你好")
+	assertString(t, textTruncateWidth(env, pos, &object.String{Value: "\x1b[31m你好a\x1b[0m"}, &object.Number{Value: 4}), "\x1b[31m你好\x1b[0m")
 	assertString(t, textPadRightWidth(env, pos, &object.String{Value: "你"}, &object.Number{Value: 4}), "你  ")
 }
 

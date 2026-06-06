@@ -140,13 +140,61 @@ func textTruncateToWidth(value string, limit int) string {
 	}
 	var out strings.Builder
 	width := 0
-	for _, ch := range textVisibleChars(value) {
+	openSGR := false
+	for i := 0; i < len(value); {
+		if value[i] == 0x1b && i+1 < len(value) {
+			next := value[i+1]
+			if next == '[' {
+				start := i
+				i += 2
+				for i < len(value) {
+					b := value[i]
+					i++
+					if b >= 0x40 && b <= 0x7e {
+						break
+					}
+				}
+				seq := value[start:i]
+				out.WriteString(seq)
+				if strings.HasSuffix(seq, "m") {
+					openSGR = !strings.HasSuffix(seq, "[0m")
+				}
+				continue
+			}
+			if next == ']' {
+				start := i
+				i += 2
+				for i < len(value) {
+					if value[i] == 0x07 {
+						i++
+						break
+					}
+					if value[i] == 0x1b && i+1 < len(value) && value[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+				out.WriteString(value[start:i])
+				continue
+			}
+		}
+
+		r, size := utf8.DecodeRuneInString(value[i:])
+		if r == utf8.RuneError && size == 0 {
+			break
+		}
+		ch := value[i : i+size]
 		chWidth := textCharWidth(ch)
 		if width+chWidth > limit {
 			break
 		}
 		out.WriteString(ch)
 		width += chWidth
+		i += size
+	}
+	if openSGR {
+		out.WriteString("\x1b[0m")
 	}
 	return out.String()
 }

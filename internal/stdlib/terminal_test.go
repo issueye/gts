@@ -113,6 +113,21 @@ func TestTerminalRenderFrameClipsRowsAndColumns(t *testing.T) {
 	}
 }
 
+func TestTerminalRenderFrameClipPreservesANSI(t *testing.T) {
+	opts := terminalFrameOptions{rows: 1, cols: 4, clip: true, full: true}
+	seq, lines := terminalBuildFrameSequence("\x1b[31m你好a\x1b[0m", opts, nil)
+	if len(lines) != 1 {
+		t.Fatalf("want 1 clipped line, got %#v", lines)
+	}
+	if lines[0] != "\x1b[31m你好\x1b[0m" {
+		t.Fatalf("unexpected clipped line: %q", lines[0])
+	}
+	want := "\x1b[2J\x1b[H\x1b[31m你好\x1b[0m"
+	if seq != want {
+		t.Fatalf("unexpected frame sequence:\nwant %q\ngot  %q", want, seq)
+	}
+}
+
 func TestTerminalRenderFrameDiffOnlyWritesChangedRows(t *testing.T) {
 	opts := terminalFrameOptions{rows: 3, cols: 20, clip: true, diff: true}
 	previous := []string{"one", "two", "three"}
