@@ -613,6 +613,51 @@ function main() {
 	}
 }
 
+func TestRunProjectScriptListensToGTPPluginEvent(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate test file")
+	}
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "project.toml"), fmt.Sprintf(`[project]
+entry = "app.gs"
+
+[plugins.scheduler]
+command = "go"
+args = ["run", %q]
+cwd = %q
+modules = ["@plugin/scheduler"]
+capabilities = ["call", "event"]
+`, filepath.Join(root, "cmd", "gtp-scheduler"), root))
+	writeTestFile(t, filepath.Join(dir, "app.gs"), `
+let fs = require("@std/fs");
+function main() {
+  const scheduler = require("@plugin/scheduler");
+  scheduler.once("trigger", function(event) {
+    let task = event.data;
+    fs.writeFileSync("plugin-event-result.txt", event.event + ":" + task.name + ":" + task.payload.message);
+  });
+  scheduler.schedule({
+    name: "script-listener-test",
+    delayMs: 25,
+    payload: { message: "handled by script" }
+  });
+}
+`)
+	r := newRunner(options{workers: 1, timeout: 5 * time.Second})
+	if err := r.runProject(dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "plugin-event-result.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "trigger:script-listener-test:handled by script" {
+		t.Fatalf("plugin event result = %q", data)
+	}
+}
+
 func TestInitCommandCreatesProject(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "hello-app")
 	if err := initCommand([]string{dir}); err != nil {

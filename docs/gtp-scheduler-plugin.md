@@ -106,3 +106,65 @@ println(String(tasks.length));
 ```bash
 go run ./examples/19-gtp-scheduler-client
 ```
+
+## 宿主处理插件主动事件
+
+`examples/21-gtp-scheduler-event-handler` 展示了更接近真实宿主的用法：
+
+1. 宿主启动 scheduler 插件。
+2. 宿主调用 `schedule()` 注册任务。
+3. scheduler 到点后发送 `event: trigger`，并带回任务 `payload`。
+4. 宿主监听插件事件，读取 `payload.kind`，再执行自己的处理逻辑。
+
+```bash
+go run ./examples/21-gtp-scheduler-event-handler
+```
+
+这个示例中，scheduler 不执行任务内容，只负责计时和推送；真正的执行发生在宿主侧。
+
+## 脚本监听插件事件
+
+插件模块也会向脚本暴露事件监听方法：
+
+```javascript
+const scheduler = require("@plugin/scheduler");
+
+scheduler.once("trigger", function(event) {
+  let task = event.data;
+  println(task.payload.message);
+});
+
+scheduler.schedule({
+  name: "script-listener-demo",
+  delayMs: 100,
+  payload: { message: "handled in script" }
+});
+```
+
+事件监听是按当前模块隔离的：`@plugin/a` 和 `@plugin/b` 即使来自同一个插件进程，并且都发送 `trigger` 事件，也只会触发各自模块对象上注册的监听器。
+
+监听方法：
+
+| 方法 | 说明 |
+|------|------|
+| `on(event, listener)` | 持久监听；会保持脚本运行，直到调用 `off` 或插件关闭 |
+| `once(event, listener)` | 一次性监听；第一次匹配事件触发后自动释放 |
+| `off(event, listener)` | 移除一个持久或一次性监听 |
+| `listenerCount(event)` | 返回当前模块对应事件的监听数量 |
+
+回调收到的 `event` 对象包含：
+
+| 字段 | 说明 |
+|------|------|
+| `id` | GTP event frame id |
+| `type` | 固定为 `event` |
+| `module` | 发送事件的模块名 |
+| `event` | 事件名 |
+| `data` | 插件发送的事件数据 |
+
+可运行示例：
+
+```bash
+cd examples/22-gtp-scheduler-script-events
+go run ../../cmd/gs run
+```

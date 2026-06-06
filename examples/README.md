@@ -26,6 +26,8 @@
 | 18 | `18-go-sdk-host/` | Go SDK 宿主程序：注册 `@go/*` 模块并运行 GTS |
 | 19 | `19-gtp-scheduler-client/` | GTP 定时任务插件：独立进程、JSON Lines 调用与事件 |
 | 20 | `20-gtp-plugin-autostart/` | GTS 项目启动读取配置并自动唤醒 GTP 插件 |
+| 21 | `21-gtp-scheduler-event-handler/` | GTP 插件主动事件：定时任务触发后由宿主处理 payload |
+| 22 | `22-gtp-scheduler-script-events/` | GTP 插件主动事件：GoScript 脚本监听并处理定时任务事件 |
 
 ## 运行方式
 
@@ -66,6 +68,14 @@ go run ./examples/19-gtp-scheduler-client
 
 # 运行 GTP 插件自动唤醒示例
 cd examples/20-gtp-plugin-autostart
+go run ../../cmd/gs run
+
+# 运行 GTP 插件主动事件处理示例
+cd ../..
+go run ./examples/21-gtp-scheduler-event-handler
+
+# 运行 GTP 脚本事件监听示例
+cd examples/22-gtp-scheduler-script-events
 go run ../../cmd/gs run
 ```
 
