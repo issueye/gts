@@ -391,7 +391,7 @@ err.stack;
 | `@std/archive/zip` | `list`, `extract`, `create`；支持 zip 条目列表、解压和从文件/目录创建 zip |
 | `@std/exec` | `run`, `output`, `combinedOutput`, `start`, `command`, `spawn`；`spawn` 返回 stdin/stdout/stderr stream、`write/writeln/closeStdin/wait/kill` |
 | `@std/pty` | `spawn`, `open`；返回 PTY/ConPTY 进程对象，含 `output`, `write`, `writeln`, `readText`, `readLine`, `resize`, `wait`, `kill`, `close` |
-| `@std/terminal` | `isTTY`, `size`, `read`, `write`, `writeln`, `setRawMode`；用于宿主终端探测、读写和 raw mode 恢复 |
+| `@std/terminal` | `isTTY`, `size`, `capabilities`, `read`, `write`, `writeln`, `setRawMode`, `start`, `clear`, `renderFrame`；用于宿主终端探测、托管 TUI 会话、resize 事件、防抖、清屏/scrollback 策略和帧渲染 |
 | `@std/net/http/client` | `request`, `fetch`, `get`, `post`, `stream`；`request/fetch({ stream: true })` 或 `responseType: "stream"` 返回带 `body` readable stream 的响应对象；所有客户端方法支持 `proxy: "http://host:port"` 正向代理 |
 | `@std/net/http/server` | `createServer` |
 | `@std/web` | `createApp`, `json`, `text`, `static`, `proxy`, `forward`；Express 风格轻量 Web 框架，支持 `use/get/post/put/patch/delete/all/listen`、多 handler 串联、`:param` 路由参数、`req.params/query/body/rawBody/headers`、`res.status/setHeader/send/json/end/redirect`，并支持反向代理/流量转发 |
