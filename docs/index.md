@@ -15,6 +15,7 @@
 | [`grammar.ebnf`](grammar.ebnf) | 形式化 EBNF 语法 | 工具链作者、Parser 维护者 |
 | [`bad-parts-fixed.md`](bad-parts-fixed.md) | **被修复的 JS 缺点一览** | 所有人（强烈推荐阅读） |
 | [`builtins.md`](builtins.md) | 内置对象与标准库 API 参考 | 脚本作者 |
+| [`wiki/`](wiki/) | 可查阅的知识库入口，当前包含原生标准库接口知识库 | 脚本作者、维护者 |
 | [`async-model.md`](async-model.md) | Promise / async-await / 事件循环 | 高级用户、嵌入式使用 |
 | [`package-module-design.md`](package-module-design.md) | 包模块打包、引用解析、依赖锁定与分发设计 | 运行时/工具链维护者 |
 | [`gts-go-interop-protocol.md`](gts-go-interop-protocol.md) | GTS 与 Go 程序交互协议、原生模块 ABI、进程间 GTP 帧协议 | 运行时/宿主集成维护者 |
