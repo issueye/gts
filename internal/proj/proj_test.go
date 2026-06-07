@@ -116,8 +116,8 @@ func TestLoadPluginConfig(t *testing.T) {
 	cfg := loadToml(t, `
 [plugins.scheduler]
 command = "go"
-args = ["run", "./cmd/gtp-scheduler"]
-cwd = "."
+args = ["run", "."]
+cwd = "../../plugins/scheduler"
 modules = ["@plugin/scheduler"]
 capabilities = ["call", "event"]
 
@@ -136,8 +136,11 @@ autoStart = false
 	if !scheduler.AutoStart {
 		t.Fatal("AutoStart = false, want true by default")
 	}
-	if !reflect.DeepEqual(scheduler.Args, []string{"run", "./cmd/gtp-scheduler"}) {
+	if !reflect.DeepEqual(scheduler.Args, []string{"run", "."}) {
 		t.Fatalf("Args = %#v", scheduler.Args)
+	}
+	if scheduler.Cwd != "../../plugins/scheduler" {
+		t.Fatalf("Cwd = %q", scheduler.Cwd)
 	}
 	if !reflect.DeepEqual(scheduler.Modules, []string{"@plugin/scheduler"}) {
 		t.Fatalf("Modules = %#v", scheduler.Modules)

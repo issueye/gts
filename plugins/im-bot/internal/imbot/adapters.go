@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/issueye/goscript/internal/gtp"
+	"github.com/issueye/goscript/sdk/gtp"
 )
 
 type feishuAdapter struct {
@@ -66,8 +66,7 @@ func (a *feishuAdapter) Send(req SendRequest) (gtp.Value, error) {
 	if msgType == "" {
 		msgType = "text"
 	}
-	content := map[string]string{"text": req.Text}
-	contentJSON, _ := jsonString(content)
+	contentJSON, _ := jsonString(map[string]string{"text": req.Text})
 	body := map[string]any{
 		"receive_id": req.To,
 		"msg_type":   msgType,
@@ -129,8 +128,13 @@ func newOneBotAdapter(opts gtp.Value, client *http.Client) (Adapter, error) {
 }
 
 func (a *oneBotAdapter) Platform() string { return "onebot" }
+
 func (a *oneBotAdapter) Info() gtp.Value {
-	return gtp.Object(map[string]gtp.Value{"platform": gtp.String("onebot"), "baseUrl": gtp.String(a.baseURL), "tokenSet": gtp.Bool(a.token != "")})
+	return gtp.Object(map[string]gtp.Value{
+		"platform": gtp.String("onebot"),
+		"baseUrl":  gtp.String(a.baseURL),
+		"tokenSet": gtp.Bool(a.token != ""),
+	})
 }
 
 func (a *oneBotAdapter) Send(req SendRequest) (gtp.Value, error) {
@@ -179,15 +183,21 @@ func newQQBotAdapter(opts gtp.Value, client *http.Client) (Adapter, error) {
 		apiBase = "https://sandbox.api.sgroup.qq.com"
 	}
 	return &qqBotAdapter{
-		appID: appID, appSecret: appSecret, apiBase: apiBase,
-		tokenURL: stringDefault(opts, "tokenUrl", "https://bots.qq.com/app/getAppAccessToken"),
-		client:   client,
+		appID:     appID,
+		appSecret: appSecret,
+		apiBase:   apiBase,
+		tokenURL:  stringDefault(opts, "tokenUrl", "https://bots.qq.com/app/getAppAccessToken"),
+		client:    client,
 	}, nil
 }
 
 func (a *qqBotAdapter) Platform() string { return "qqbot" }
+
 func (a *qqBotAdapter) Info() gtp.Value {
-	return gtp.Object(map[string]gtp.Value{"platform": gtp.String("qqbot"), "apiBase": gtp.String(a.apiBase)})
+	return gtp.Object(map[string]gtp.Value{
+		"platform": gtp.String("qqbot"),
+		"apiBase":  gtp.String(a.apiBase),
+	})
 }
 
 func (a *qqBotAdapter) Send(req SendRequest) (gtp.Value, error) {
@@ -195,8 +205,7 @@ func (a *qqBotAdapter) Send(req SendRequest) (gtp.Value, error) {
 	if err != nil {
 		return gtp.Null(), err
 	}
-	msgType := 0
-	body := map[string]any{"msg_type": msgType, "content": req.Text}
+	body := map[string]any{"msg_type": 0, "content": req.Text}
 	var path string
 	if req.ToType == "group" || strings.HasPrefix(req.To, "group:") {
 		path = "/v2/groups/" + strings.TrimPrefix(req.To, "group:") + "/messages"
@@ -255,8 +264,13 @@ func newWeixinAdapter(opts gtp.Value, client *http.Client) (Adapter, error) {
 }
 
 func (a *weixinAdapter) Platform() string { return "weixin" }
+
 func (a *weixinAdapter) Info() gtp.Value {
-	return gtp.Object(map[string]gtp.Value{"platform": gtp.String("weixin"), "baseUrl": gtp.String(a.baseURL), "tokenSet": gtp.Bool(a.token != "")})
+	return gtp.Object(map[string]gtp.Value{
+		"platform": gtp.String("weixin"),
+		"baseUrl":  gtp.String(a.baseURL),
+		"tokenSet": gtp.Bool(a.token != ""),
+	})
 }
 
 func (a *weixinAdapter) Send(req SendRequest) (gtp.Value, error) {

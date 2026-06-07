@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/issueye/goscript/internal/gtp"
+	"github.com/issueye/goscript/sdk/gtp"
 )
 
 const ModuleName = "@plugin/scheduler"

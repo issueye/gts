@@ -1,6 +1,6 @@
 # GTP IM 机器人插件
 
-`cmd/gtp-imbot` 是一个独立 GTP 插件，模块名为 `@plugin/im-bot`。它不依赖 `cc-connect` 运行，而是参考各 IM 平台的接入方式，按当前项目的 GTP 插件机制封装成统一脚本 API。
+`plugins/im-bot` 是一个独立 Go 项目 GTP 插件，模块名为 `@plugin/im-bot`。它只依赖公开的 `github.com/issueye/goscript/sdk/gtp` 协议 SDK，不依赖解释器、解析器或 `internal` 运行时实现；也不依赖 `cc-connect` 运行，而是参考各 IM 平台的接入方式，按当前项目的 GTP 插件机制封装成统一脚本 API。
 
 ## 支持的适配器
 
@@ -23,8 +23,8 @@
 ```toml
 [plugins.im_bot]
 command = "go"
-args = ["run", "./cmd/gtp-imbot"]
-cwd = "../.."
+args = ["run", "."]
+cwd = "../../plugins/im-bot"
 modules = ["@plugin/im-bot"]
 capabilities = ["call"]
 ```

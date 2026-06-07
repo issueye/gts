@@ -1,11 +1,12 @@
 # GTP 定时任务插件
 
-`cmd/gtp-scheduler` 是一个基于 GTP JSON Lines 的独立进程插件，模块名为 `@plugin/scheduler`。
+`plugins/scheduler` 是一个基于 GTP JSON Lines 的独立 Go 项目插件，模块名为 `@plugin/scheduler`。插件只依赖公开的 `github.com/issueye/goscript/sdk/gtp` 协议 SDK，不依赖解释器、解析器或 `internal` 运行时实现。
 
 ## 启动
 
 ```bash
-go run ./cmd/gtp-scheduler
+cd plugins/scheduler
+go run .
 ```
 
 插件通过 stdin/stdout 收发 GTP 帧，stderr 只用于错误日志。
@@ -17,8 +18,8 @@ go run ./cmd/gtp-scheduler
 ```toml
 [plugins.scheduler]
 command = "go"
-args = ["run", "./cmd/gtp-scheduler"]
-cwd = "../.."
+args = ["run", "."]
+cwd = "../../plugins/scheduler"
 modules = ["@plugin/scheduler"]
 capabilities = ["call", "event"]
 ```

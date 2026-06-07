@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"math"
 	"strconv"
-
-	"github.com/issueye/goscript/internal/object"
 )
 
 const Version = 1
@@ -273,41 +271,6 @@ type valueWireRaw struct {
 	Methods  []string        `json:"methods,omitempty"`
 	Name     string          `json:"name,omitempty"`
 	Message  string          `json:"message,omitempty"`
-}
-
-func FromObject(obj object.Object) Value {
-	switch v := obj.(type) {
-	case *object.Undefined:
-		return Undefined()
-	case *object.Null:
-		return Null()
-	case *object.Boolean:
-		return Bool(v.Value)
-	case *object.Number:
-		return Number(v.Value)
-	case *object.String:
-		return String(v.Value)
-	case *object.Array:
-		items := make([]Value, len(v.Elements))
-		for i, item := range v.Elements {
-			items[i] = FromObject(item)
-		}
-		return Array(items)
-	case *object.Hash:
-		fields := make(map[string]Value, len(v.Pairs))
-		for _, pair := range v.OrderedPairs() {
-			if key, ok := pair.Key.(*object.String); ok {
-				fields[key.Value] = FromObject(pair.Value)
-			}
-		}
-		return Object(fields)
-	case *object.Error:
-		return Value{Type: "error", Name: v.Name, Message: v.Message}
-	case *object.GoObject:
-		return Resource(fmt.Sprintf("%p", v.Value), fmt.Sprintf("%T", v.Value), nil)
-	default:
-		return Null()
-	}
 }
 
 func EncodeFrame(frame Frame) ([]byte, error) {

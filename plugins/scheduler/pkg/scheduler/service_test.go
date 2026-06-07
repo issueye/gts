@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/issueye/goscript/internal/gtp"
+	"github.com/issueye/goscript/sdk/gtp"
 )
 
 func TestScheduleTriggersEvent(t *testing.T) {

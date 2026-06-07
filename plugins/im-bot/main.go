@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/issueye/goscript/internal/gtp/imbot"
+	"github.com/issueye/goscript/plugins/im-bot/internal/imbot"
 )
 
 func main() {

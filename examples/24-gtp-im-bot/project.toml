@@ -5,7 +5,7 @@ entry = "main.gs"
 
 [plugins.im_bot]
 command = "go"
-args = ["run", "./cmd/gtp-imbot"]
-cwd = "../.."
+args = ["run", "."]
+cwd = "../../plugins/im-bot"
 modules = ["@plugin/im-bot"]
 capabilities = ["call"]

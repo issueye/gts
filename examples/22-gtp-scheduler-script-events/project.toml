@@ -5,7 +5,7 @@ entry = "main.gs"
 
 [plugins.scheduler]
 command = "go"
-args = ["run", "./cmd/gtp-scheduler"]
-cwd = "../.."
+args = ["run", "."]
+cwd = "../../plugins/scheduler"
 modules = ["@plugin/scheduler"]
 capabilities = ["call", "event"]

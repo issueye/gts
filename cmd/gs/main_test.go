@@ -587,11 +587,11 @@ entry = "app.gs"
 
 [plugins.scheduler]
 command = "go"
-args = ["run", %q]
+args = ["run", "."]
 cwd = %q
 modules = ["@plugin/scheduler"]
 capabilities = ["call", "event"]
-`, filepath.Join(root, "cmd", "gtp-scheduler"), root))
+`, filepath.Join(root, "plugins", "scheduler")))
 	writeTestFile(t, filepath.Join(dir, "app.gs"), `
 let fs = require("@std/fs");
 function main() {
@@ -625,11 +625,11 @@ entry = "app.gs"
 
 [plugins.scheduler]
 command = "go"
-args = ["run", %q]
+args = ["run", "."]
 cwd = %q
 modules = ["@plugin/scheduler"]
 capabilities = ["call", "event"]
-`, filepath.Join(root, "cmd", "gtp-scheduler"), root))
+`, filepath.Join(root, "plugins", "scheduler")))
 	writeTestFile(t, filepath.Join(dir, "app.gs"), `
 let fs = require("@std/fs");
 function main() {

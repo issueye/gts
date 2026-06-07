@@ -33,6 +33,14 @@ func StringField(obj Value, key string) (string, bool) {
 	return value.StringValue()
 }
 
+func NumberField(obj Value, key string) (float64, bool) {
+	value, ok := Field(obj, key)
+	if !ok {
+		return 0, false
+	}
+	return value.NumberValue()
+}
+
 func Plain(value Value) any {
 	switch value.Type {
 	case "undefined", "null":
@@ -58,14 +66,6 @@ func Plain(value Value) any {
 	default:
 		return value.Value
 	}
-}
-
-func NumberField(obj Value, key string) (float64, bool) {
-	value, ok := Field(obj, key)
-	if !ok {
-		return 0, false
-	}
-	return value.NumberValue()
 }
 
 func RequiredObjectArg(args []Value, index int, name string) (Value, *Error) {

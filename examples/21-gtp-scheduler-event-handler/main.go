@@ -8,7 +8,6 @@ import (
 
 	"github.com/issueye/goscript/internal/gtp"
 	"github.com/issueye/goscript/internal/gtp/pluginhost"
-	"github.com/issueye/goscript/internal/gtp/scheduler"
 	"github.com/issueye/goscript/internal/proj"
 )
 
@@ -23,10 +22,10 @@ func main() {
 
 	err = host.Start("scheduler", proj.PluginConfig{
 		Command:      "go",
-		Args:         []string{"run", "./cmd/gtp-scheduler"},
-		Cwd:          ".",
+		Args:         []string{"run", "."},
+		Cwd:          "plugins/scheduler",
 		AutoStart:    true,
-		Modules:      []string{scheduler.ModuleName},
+		Modules:      []string{"@plugin/scheduler"},
 		Capabilities: []string{"call", "event"},
 	})
 	if err != nil {
@@ -38,7 +37,7 @@ func main() {
 		fatal(fmt.Errorf("scheduler plugin was not started"))
 	}
 
-	task, err := plugin.Call(scheduler.ModuleName, "schedule", []gtp.Value{
+	task, err := plugin.Call("@plugin/scheduler", "schedule", []gtp.Value{
 		gtp.Object(map[string]gtp.Value{
 			"name":    gtp.String("host-handled-demo"),
 			"delayMs": gtp.Number(150),
@@ -71,7 +70,7 @@ func handleSchedulerEvent(frame gtp.Frame) error {
 	if frame.Type != "event" {
 		return fmt.Errorf("expected event frame, got %q", frame.Type)
 	}
-	if frame.Module != scheduler.ModuleName || frame.Event != "trigger" {
+	if frame.Module != "@plugin/scheduler" || frame.Event != "trigger" {
 		return fmt.Errorf("unexpected event %s/%s", frame.Module, frame.Event)
 	}
 	if frame.Data == nil {

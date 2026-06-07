@@ -34,8 +34,8 @@ func TestStartSchedulerPlugin(t *testing.T) {
 
 	err = host.Start("scheduler", proj.PluginConfig{
 		Command:      "go",
-		Args:         []string{"run", "./cmd/gtp-scheduler"},
-		Cwd:          ".",
+		Args:         []string{"run", "."},
+		Cwd:          "plugins/scheduler",
 		AutoStart:    true,
 		Modules:      []string{"@plugin/scheduler"},
 		Capabilities: []string{"call", "event"},

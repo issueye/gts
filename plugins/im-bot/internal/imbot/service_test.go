@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/issueye/goscript/internal/gtp"
+	"github.com/issueye/goscript/sdk/gtp"
 )
 
 func TestConfigureAndList(t *testing.T) {

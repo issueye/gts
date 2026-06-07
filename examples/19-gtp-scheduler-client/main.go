@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/issueye/goscript/internal/gtp"
-	"github.com/issueye/goscript/internal/gtp/scheduler"
 )
 
 func main() {
-	cmd := exec.Command("go", "run", "./cmd/gtp-scheduler")
+	cmd := exec.Command("go", "run", ".")
+	cmd.Dir = "plugins/scheduler"
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		panic(err)
@@ -38,7 +38,7 @@ func main() {
 		Runtime:      "example",
 		Protocol:     "gtp",
 		Capabilities: []string{"call", "event"},
-		Modules:      []string{scheduler.ModuleName},
+		Modules:      []string{"@plugin/scheduler"},
 	}); err != nil {
 		panic(err)
 	}
@@ -52,7 +52,7 @@ func main() {
 		Version: gtp.Version,
 		ID:      "schedule-1",
 		Type:    "call",
-		Module:  scheduler.ModuleName,
+		Module:  "@plugin/scheduler",
 		Method:  "schedule",
 		Args: []gtp.Value{
 			gtp.Object(map[string]gtp.Value{
