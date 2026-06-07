@@ -84,7 +84,7 @@ func main() {
 
 - 已新增 `internal/gtp` GTP 帧和值编码基础包。
 - 已新增 GTP JSON Lines 编解码与性能基线测试。
-- 已新增 GTP 插件宿主管理器，`gs run` 会读取 `[plugins]` 配置并自动唤醒插件。
+- 已新增 GTP 插件宿主管理器，`gs run` 会读取 `config.toml` 的 `[plugins]` 配置并自动唤醒插件。
 - 已支持 `require("@plugin/...")` 代理调用已唤醒插件的方法。
 - 实现 JSON Lines transport 的真实进程/pipe 版本。
 - 实现 hello/ready/call/result/cancel 基础帧。

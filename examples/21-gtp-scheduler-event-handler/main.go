@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/issueye/goscript/internal/config"
 	"github.com/issueye/goscript/internal/gtp"
 	"github.com/issueye/goscript/internal/gtp/pluginhost"
-	"github.com/issueye/goscript/internal/proj"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	host := pluginhost.New(root)
 	defer host.Close()
 
-	err = host.Start("scheduler", proj.PluginConfig{
+	err = host.Start("scheduler", config.PluginConfig{
 		Command:      "go",
 		Args:         []string{"run", "."},
 		Cwd:          "plugins/scheduler",

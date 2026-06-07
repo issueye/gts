@@ -18,7 +18,9 @@
 - QQBot：官方 Gateway WebSocket。
 - Weixin：ilink `getupdates` 长轮询。
 
-## 项目配置
+## 普通配置文件
+
+在项目根目录的 `config.toml` 中配置插件：
 
 ```toml
 [plugins.im_bot]

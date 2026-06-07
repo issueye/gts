@@ -15,6 +15,7 @@ import (
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/async"
 	"github.com/issueye/goscript/internal/bundle"
+	"github.com/issueye/goscript/internal/config"
 	"github.com/issueye/goscript/internal/evaluator"
 	"github.com/issueye/goscript/internal/gtp/pluginhost"
 	"github.com/issueye/goscript/internal/lexer"
@@ -533,8 +534,12 @@ func (r *runner) runProject(dir string, args ...string) error {
 	if err != nil {
 		return err
 	}
+	runCfg, err := config.LoadStrict(filepath.Join(absDir, "config.toml"))
+	if err != nil {
+		return err
+	}
 	r.plugins = pluginhost.New(absDir)
-	if err := r.plugins.StartConfigured(cfg.Plugins); err != nil {
+	if err := r.plugins.StartConfigured(runCfg.Plugins); err != nil {
 		return err
 	}
 	defer func() {

@@ -582,9 +582,10 @@ func TestRunProjectStartsConfiguredGTPPlugin(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "project.toml"), fmt.Sprintf(`[project]
+	writeTestFile(t, filepath.Join(dir, "project.toml"), `[project]
 entry = "app.gs"
-
+`)
+	writeTestFile(t, filepath.Join(dir, "config.toml"), fmt.Sprintf(`
 [plugins.scheduler]
 command = "go"
 args = ["run", "."]
@@ -620,9 +621,10 @@ func TestRunProjectScriptListensToGTPPluginEvent(t *testing.T) {
 	}
 	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "project.toml"), fmt.Sprintf(`[project]
+	writeTestFile(t, filepath.Join(dir, "project.toml"), `[project]
 entry = "app.gs"
-
+`)
+	writeTestFile(t, filepath.Join(dir, "config.toml"), fmt.Sprintf(`
 [plugins.scheduler]
 command = "go"
 args = ["run", "."]

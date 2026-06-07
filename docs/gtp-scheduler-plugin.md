@@ -13,7 +13,7 @@ go run .
 
 ## GTS 项目自动唤醒
 
-在项目 `project.toml` 中配置插件：
+在项目根目录的普通配置文件 `config.toml` 中配置插件：
 
 ```toml
 [plugins.scheduler]
@@ -24,7 +24,7 @@ modules = ["@plugin/scheduler"]
 capabilities = ["call", "event"]
 ```
 
-运行 `gs run` 时，GTS 会读取 `[plugins]` 配置，自动启动插件进程，发送 `hello` 握手帧并等待 `ready`。脚本中可以直接加载插件模块：
+运行 `gs run` 时，GTS 会读取 `config.toml` 的 `[plugins]` 配置，自动启动插件进程，发送 `hello` 握手帧并等待 `ready`。脚本中可以直接加载插件模块：
 
 ```javascript
 const scheduler = require("@plugin/scheduler");

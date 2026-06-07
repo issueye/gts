@@ -4,16 +4,16 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/issueye/goscript/internal/config"
 	"github.com/issueye/goscript/internal/gtp"
 	"github.com/issueye/goscript/internal/object"
-	"github.com/issueye/goscript/internal/proj"
 )
 
 func TestStartConfiguredSkipsDisabled(t *testing.T) {
 	host := New(t.TempDir())
 	defer host.Close()
 
-	err := host.StartConfigured(map[string]proj.PluginConfig{
+	err := host.StartConfigured(map[string]config.PluginConfig{
 		"disabled": {
 			Command:   "definitely-not-a-real-command",
 			AutoStart: false,
@@ -32,7 +32,7 @@ func TestStartSchedulerPlugin(t *testing.T) {
 	host := New(root)
 	defer host.Close()
 
-	err = host.Start("scheduler", proj.PluginConfig{
+	err = host.Start("scheduler", config.PluginConfig{
 		Command:      "go",
 		Args:         []string{"run", "."},
 		Cwd:          "plugins/scheduler",

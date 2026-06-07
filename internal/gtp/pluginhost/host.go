@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"github.com/issueye/goscript/internal/ast"
+	"github.com/issueye/goscript/internal/config"
 	"github.com/issueye/goscript/internal/gtp"
 	"github.com/issueye/goscript/internal/object"
-	"github.com/issueye/goscript/internal/proj"
 )
 
 type Host struct {
@@ -24,7 +24,7 @@ type Host struct {
 
 type Plugin struct {
 	Name   string
-	Config proj.PluginConfig
+	Config config.PluginConfig
 	Ready  gtp.Frame
 
 	cmd    *exec.Cmd
@@ -67,7 +67,7 @@ func New(projectRoot string) *Host {
 	}
 }
 
-func (h *Host) StartConfigured(plugins map[string]proj.PluginConfig) error {
+func (h *Host) StartConfigured(plugins map[string]config.PluginConfig) error {
 	names := make([]string, 0, len(plugins))
 	for name := range plugins {
 		names = append(names, name)
@@ -86,7 +86,7 @@ func (h *Host) StartConfigured(plugins map[string]proj.PluginConfig) error {
 	return nil
 }
 
-func (h *Host) Start(name string, cfg proj.PluginConfig) error {
+func (h *Host) Start(name string, cfg config.PluginConfig) error {
 	if cfg.Command == "" {
 		return fmt.Errorf("plugin %s: command is required", name)
 	}

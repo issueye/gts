@@ -1,0 +1,6 @@
+[plugins.scheduler]
+command = "go"
+args = ["run", "."]
+cwd = "../../plugins/scheduler"
+modules = ["@plugin/scheduler"]
+capabilities = ["call", "event"]

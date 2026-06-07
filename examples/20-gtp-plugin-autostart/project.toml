@@ -2,10 +2,3 @@
 name = "gtp-plugin-autostart"
 version = "0.1.0"
 entry = "main.gs"
-
-[plugins.scheduler]
-command = "go"
-args = ["run", "."]
-cwd = "../../plugins/scheduler"
-modules = ["@plugin/scheduler"]
-capabilities = ["call", "event"]

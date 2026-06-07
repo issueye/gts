@@ -1,0 +1,6 @@
+[plugins.im_bot]
+command = "go"
+args = ["run", "."]
+cwd = "../../plugins/im-bot"
+modules = ["@plugin/im-bot"]
+capabilities = ["call"]
