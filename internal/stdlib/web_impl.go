@@ -578,6 +578,8 @@ func callWebNext(next object.Object) object.Object {
 
 func buildWebRequestObject(ctx *webContext) object.Object {
 	reqObj := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+	setHashMember(reqObj, "_raw", &object.GoObject{Value: ctx.req})
+	setHashMember(reqObj, "_writer", &object.GoObject{Value: ctx.writer})
 	setHashMember(reqObj, "method", &object.String{Value: ctx.req.Method})
 	setHashMember(reqObj, "url", &object.String{Value: ctx.req.URL.String()})
 	setHashMember(reqObj, "path", &object.String{Value: ctx.req.URL.Path})
