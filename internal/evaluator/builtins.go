@@ -85,6 +85,9 @@ func registerStandardGlobalConstants(env *object.Environment) {
 		"clearInterval":      &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval},
 		"queueMicrotask":     &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask},
 		"sleep":              &object.Builtin{Name: "sleep", Fn: builtinSleep},
+		"go":                 &object.Builtin{Name: "go", Fn: builtinGo},
+		"makeChannel":        &object.Builtin{Name: "makeChannel", Fn: builtinMakeChannel},
+		"makeWaitGroup":      &object.Builtin{Name: "makeWaitGroup", Fn: builtinMakeWaitGroup},
 	})
 }
 

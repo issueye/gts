@@ -165,3 +165,13 @@ func (e *Environment) Parent() *Environment {
 func (e *Environment) Keys() []string {
 	return e.bindings.SortedKeys()
 }
+
+// ForEach iterates over all bindings in the current scope (not parent)
+func (e *Environment) ForEach(fn func(name string, val Object)) {
+	keys := e.bindings.SortedKeys()
+	for _, key := range keys {
+		if binding, ok := e.bindings.Get(key); ok {
+			fn(key, binding.Value)
+		}
+	}
+}

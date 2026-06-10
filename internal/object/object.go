@@ -33,6 +33,8 @@ const (
 	MAP_OBJ            ObjectType = "MAP"
 	SET_OBJ            ObjectType = "SET"
 	BOOLEAN_OBJECT_OBJ ObjectType = "BOOLEAN_OBJECT"
+	CHANNEL_OBJ        ObjectType = "CHANNEL"
+	WAITGROUP_OBJ      ObjectType = "WAITGROUP"
 )
 
 type Object interface {
