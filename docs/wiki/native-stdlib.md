@@ -33,6 +33,7 @@ console.log(fs.readTextSync(file));
 | 库 | 知识单元 |
 |------|---------|
 | `@std/exec` | [exec.md](native-stdlib/exec.md) |
+| `@std/cli` | [cli.md](native-stdlib/cli.md) |
 | `@std/pty` | [pty.md](native-stdlib/pty.md) |
 | `@std/terminal` | [terminal.md](native-stdlib/terminal.md) |
 | `@std/tui` | [tui.md](native-stdlib/tui.md) |
@@ -103,7 +104,7 @@ console.log(fs.readTextSync(file));
 | 目标 | 推荐组合 |
 |------|---------|
 | 读写配置文件 | `@std/fs` + `@std/path` + `@std/toml` / `@std/yaml` / 内置 `JSON` |
-| 命令行工具 | `@std/process` + `@std/fs` + `@std/path` + `@std/terminal` |
+| 命令行工具 | `@std/cli` + `@std/process` + `@std/fs` + `@std/path` + `@std/terminal` |
 | 文件校验与打包 | `@std/fs` + `@std/crypto` / `@std/hash` + `@std/archive/zip` |
 | 本地 HTTP 服务 | `@std/web` 或 `@std/net/http/server` |
 | HTTP 客户端与流式读取 | `@std/net/http/client` + `@std/stream` + `@std/sse` |

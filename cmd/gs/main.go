@@ -192,7 +192,7 @@ func splitDirectEmbeddedAppArgs(args []string) *embeddedAppArgs {
 		if isKnownCLIFlagValue(args, i) {
 			continue
 		}
-		if strings.HasPrefix(arg, "--") && !isKnownCLIFlag(arg) {
+		if isEmbeddedAppDirectArg(arg) {
 			return &embeddedAppArgs{
 				separator: i,
 				app:       append([]string{}, args[i:]...),
@@ -200,6 +200,19 @@ func splitDirectEmbeddedAppArgs(args []string) *embeddedAppArgs {
 		}
 	}
 	return nil
+}
+
+func isEmbeddedAppDirectArg(arg string) bool {
+	if arg == "" {
+		return false
+	}
+	if arg == "--help" || arg == "-h" {
+		return true
+	}
+	if strings.HasPrefix(arg, "-") {
+		return !isKnownCLIFlag(arg)
+	}
+	return true
 }
 
 func isKnownCLIFlag(arg string) bool {

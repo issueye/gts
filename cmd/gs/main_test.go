@@ -417,6 +417,18 @@ func TestSplitDirectEmbeddedAppArgs(t *testing.T) {
 		t.Fatalf("known cli flag should not split: %#v", split)
 	}
 
+	if split := splitDirectEmbeddedAppArgs([]string{"serve", "--port", "9000"}); split == nil {
+		t.Fatal("embedded app subcommand should split as app args")
+	} else if split.separator != 0 || strings.Join(split.app, "|") != "serve|--port|9000" {
+		t.Fatalf("unexpected app subcommand split: %#v", split)
+	}
+
+	if split := splitDirectEmbeddedAppArgs([]string{"--help"}); split == nil {
+		t.Fatal("embedded app help should split as app args")
+	} else if split.separator != 0 || strings.Join(split.app, "|") != "--help" {
+		t.Fatalf("unexpected app help split: %#v", split)
+	}
+
 	if split := splitDirectEmbeddedAppArgs([]string{"--", "--tui"}); split != nil {
 		t.Fatalf("double dash is handled by splitEmbeddedAppArgs: %#v", split)
 	}
@@ -467,6 +479,96 @@ entry = "main.gs"
 	wantSuffix := "main.gs|--self-test|--flag|value"
 	if !strings.HasSuffix(got, wantSuffix) {
 		t.Fatalf("want argv suffix %q, got %q", wantSuffix, got)
+	}
+}
+
+func TestEmbeddedExecutablePassesDirectArgsToCLIApp(t *testing.T) {
+	if os.Getenv("GOSCRIPT_EMBEDDED_CLI_HELPER") == "1" {
+		args := []string{}
+		for _, arg := range os.Args[1:] {
+			if strings.HasPrefix(arg, "-test.") {
+				continue
+			}
+			args = append(args, arg)
+		}
+		os.Exit(run(args))
+	}
+
+	root := t.TempDir()
+	outFile := filepath.Join(root, "cli.txt")
+	appSource := strings.ReplaceAll(`
+let cli = require("@std/cli");
+let fs = require("@std/fs");
+
+function write(value) {
+  fs.writeFileSync("__OUT__", value);
+}
+
+function main() {
+  let root = cli.command({
+    use: "app",
+    run: function(cmd, args) {
+      if (cmd.flag("tui")) {
+        write("tui");
+        return;
+      }
+      write("root:" + args.join("|"));
+    },
+  });
+  root.flags().bool("tui", "", false, "run tui");
+  let serve = root.command({
+    use: "serve",
+    run: function(cmd, args) {
+      write("serve:" + String(cmd.flag("port")));
+    },
+  });
+  serve.flags().int("port", "", 8080, "port");
+  root.execute();
+}
+`, "__OUT__", strings.ReplaceAll(outFile, `\`, `\\`))
+	writeTestFile(t, filepath.Join(root, "project.toml"), `[project]
+entry = "main.gs"
+`)
+	writeTestFile(t, filepath.Join(root, "main.gs"), appSource)
+	pkgPath := filepath.Join(root, "app.gspkg")
+	if err := packagefile.PackDirectory(root, pkgPath); err != nil {
+		t.Fatal(err)
+	}
+	stub, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exePath := filepath.Join(root, "app.exe")
+	if err := packagefile.AppendPackageToExecutable(stub, pkgPath, exePath); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(exePath, "-test.run=TestEmbeddedExecutablePassesDirectArgsToCLIApp", "--", "--tui")
+	cmd.Env = append(os.Environ(), "GOSCRIPT_EMBEDDED_CLI_HELPER=1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("embedded cli --tui failed: %v\n%s", err, out)
+	}
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "tui" {
+		t.Fatalf("want tui, got %q", data)
+	}
+
+	cmd = exec.Command(exePath, "-test.run=TestEmbeddedExecutablePassesDirectArgsToCLIApp", "--", "serve", "--port", "9000")
+	cmd.Env = append(os.Environ(), "GOSCRIPT_EMBEDDED_CLI_HELPER=1")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("embedded cli subcommand failed: %v\n%s", err, out)
+	}
+	data, err = os.ReadFile(outFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "serve:9000" {
+		t.Fatalf("want serve:9000, got %q", data)
 	}
 }
 
