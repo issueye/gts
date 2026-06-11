@@ -86,6 +86,9 @@ func exportedValue(exports object.Object, name string) (object.Object, error) {
 }
 
 func readResolvedSource(resolved module.ResolvedModule) (string, error) {
+	if resolved.Kind == module.ModuleKindStdSource {
+		return module.ReadStdSource(resolved.Specifier)
+	}
 	if resolved.PackageFile != "" {
 		return packagefile.ReadNestedText(resolved.PackageFile, resolved.ArchivePath)
 	}
@@ -97,6 +100,9 @@ func readResolvedSource(resolved module.ResolvedModule) (string, error) {
 }
 
 func resolvedModuleDir(resolved module.ResolvedModule) string {
+	if resolved.Kind == module.ModuleKindStdSource {
+		return module.StdSourceDir(resolved.Specifier)
+	}
 	if resolved.PackageFile != "" {
 		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
 	}

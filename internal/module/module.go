@@ -3,7 +3,6 @@ package module
 import (
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/issueye/goscript/internal/object"
 	"github.com/issueye/goscript/internal/safemap"
@@ -52,9 +51,6 @@ func ResolvePath(path, baseDir string) string {
 		if baseDir == "" {
 			baseDir, _ = os.Getwd()
 		}
-		if strings.HasPrefix(path, "@agent/") {
-			return withDefaultExt(filepath.Join(FindProjectRoot(baseDir), "scripts", "agent", strings.TrimPrefix(path, "@agent/")))
-		}
 		return withDefaultExt(filepath.Join(baseDir, path))
 	}
 	if resolved.Path != "" {
@@ -70,8 +66,7 @@ func withDefaultExt(path string) string {
 	return path
 }
 
-// FindProjectRoot walks upward looking for a GoScript project root. The root is
-// used for script library aliases such as @agent/*.
+// FindProjectRoot walks upward looking for a GoScript project root.
 func FindProjectRoot(startDir string) string {
 	if startDir == "" {
 		startDir, _ = os.Getwd()

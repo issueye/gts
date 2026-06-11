@@ -16,10 +16,11 @@ import (
 type ModuleKind string
 
 const (
-	ModuleKindNative   ModuleKind = "native"
-	ModuleKindSource   ModuleKind = "source"
-	ModuleKindPackage  ModuleKind = "package"
-	ModuleKindExternal ModuleKind = "external"
+	ModuleKindNative    ModuleKind = "native"
+	ModuleKindStdSource ModuleKind = "std_source"
+	ModuleKindSource    ModuleKind = "source"
+	ModuleKindPackage   ModuleKind = "package"
+	ModuleKindExternal  ModuleKind = "external"
 )
 
 // ResolvedModule describes the resolved identity and backing location of a
@@ -118,6 +119,15 @@ func (r *Resolver) Resolve(specifier string, opts ResolveOptions) (ResolvedModul
 }
 
 func (r *Resolver) resolveUncached(specifier, baseDir, projectRoot string) (ResolvedModule, error) {
+	if IsStdSourceDir(filepath.ToSlash(baseDir)) && IsNativeSpecifier(specifier) && !IsStdSourceSpecifier(specifier) {
+		return ResolvedModule{
+			ID:        "native:" + specifier,
+			Kind:      ModuleKindNative,
+			Specifier: specifier,
+			External:  true,
+		}, nil
+	}
+
 	if pkgPath, archiveBase, ok := splitArchiveBaseDir(baseDir); ok {
 		if isPathSpecifier(specifier) {
 			return resolvePackageFileRelative(specifier, pkgPath, archiveBase)
@@ -125,9 +135,19 @@ func (r *Resolver) resolveUncached(specifier, baseDir, projectRoot string) (Reso
 		if resolved, ok, err := tryResolvePackageFileImportAlias(specifier, pkgPath); ok || err != nil {
 			return resolved, err
 		}
-		if !IsNativeSpecifier(specifier) && !strings.HasPrefix(specifier, "@agent/") {
+		if !IsNativeSpecifier(specifier) {
 			return r.resolvePackageFromPackageFile(specifier, pkgPath, projectRoot)
 		}
+	}
+
+	if IsStdSourceSpecifier(specifier) {
+		return ResolvedModule{
+			ID:        "std:" + specifier,
+			Kind:      ModuleKindStdSource,
+			Specifier: specifier,
+			Path:      StdSourceFile(specifier),
+			External:  true,
+		}, nil
 	}
 
 	if IsNativeSpecifier(specifier) {
@@ -147,18 +167,6 @@ func (r *Resolver) resolveUncached(specifier, baseDir, projectRoot string) (Reso
 		path, err := r.resolveSourcePath(base)
 		if err != nil {
 			return ResolvedModule{}, fmt.Errorf("module not found %q from %q: %w", specifier, baseDir, err)
-		}
-		return sourceModule(specifier, path, ModuleKindSource, "", ""), nil
-	}
-
-	if strings.HasPrefix(specifier, "@agent/") {
-		agentRoot := r.findAgentRoot(baseDir)
-		if agentRoot == "" {
-			agentRoot = projectRoot
-		}
-		path, err := r.resolveSourcePath(filepath.Join(agentRoot, "scripts", "agent", strings.TrimPrefix(specifier, "@agent/")))
-		if err != nil {
-			return ResolvedModule{}, fmt.Errorf("module not found %q from @agent alias: %w", specifier, err)
 		}
 		return sourceModule(specifier, path, ModuleKindSource, "", ""), nil
 	}
@@ -586,29 +594,6 @@ func FindPackageRoot(startDir string) string {
 	}
 }
 
-// FindAgentRoot walks upward looking for the repository-level script agent
-// library. This intentionally differs from FindProjectRoot because examples and
-// package projects can have their own project.toml files below the repository.
-func FindAgentRoot(startDir string) string {
-	if startDir == "" {
-		startDir, _ = os.Getwd()
-	}
-	dir, err := filepath.Abs(startDir)
-	if err != nil {
-		return ""
-	}
-	for {
-		if fileExists(filepath.Join(dir, "scripts", "agent")) {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
 func loadExistingManifest(root string) (*proj.Config, error) {
 	path := filepath.Join(root, "project.toml")
 	if _, err := os.Stat(path); err != nil {
@@ -703,22 +688,6 @@ func (r *Resolver) findPackageRoot(startDir string) string {
 	root = FindPackageRoot(startDir)
 	r.mu.Lock()
 	r.packageRoot[key] = root
-	r.mu.Unlock()
-	return root
-}
-
-func (r *Resolver) findAgentRoot(startDir string) string {
-	key := "agent:" + filepath.Clean(startDir)
-	r.mu.RLock()
-	root, ok := r.projectRoot[key]
-	r.mu.RUnlock()
-	if ok {
-		return root
-	}
-
-	root = FindAgentRoot(startDir)
-	r.mu.Lock()
-	r.projectRoot[key] = root
 	r.mu.Unlock()
 	return root
 }

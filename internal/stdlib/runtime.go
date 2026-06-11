@@ -334,6 +334,9 @@ func callRuntimeMain(env *object.Environment, file string) object.Object {
 }
 
 func readRuntimeResolvedSource(resolved module.ResolvedModule) (string, error) {
+	if resolved.Kind == module.ModuleKindStdSource {
+		return module.ReadStdSource(resolved.Specifier)
+	}
 	if resolved.PackageFile != "" {
 		return packagefile.ReadNestedText(resolved.PackageFile, resolved.ArchivePath)
 	}
@@ -345,6 +348,9 @@ func readRuntimeResolvedSource(resolved module.ResolvedModule) (string, error) {
 }
 
 func runtimeResolvedFile(resolved module.ResolvedModule) string {
+	if resolved.Kind == module.ModuleKindStdSource {
+		return module.StdSourceFile(resolved.Specifier)
+	}
 	if resolved.PackageFile != "" {
 		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(resolved.ArchivePath)
 	}
@@ -352,6 +358,9 @@ func runtimeResolvedFile(resolved module.ResolvedModule) string {
 }
 
 func runtimeResolvedModuleDir(resolved module.ResolvedModule) string {
+	if resolved.Kind == module.ModuleKindStdSource {
+		return module.StdSourceDir(resolved.Specifier)
+	}
 	if resolved.PackageFile != "" {
 		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
 	}

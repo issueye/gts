@@ -1,1 +1,0 @@
-Read this task and report the next action: inspect workspace files.

@@ -68,23 +68,6 @@ func TestResolverCachesFailedResolution(t *testing.T) {
 	}
 }
 
-func TestResolverAgentAlias(t *testing.T) {
-	root := t.TempDir()
-	nested := filepath.Join(root, "examples", "nested")
-	agent := filepath.Join(root, "scripts", "agent", "core", "agent.gs")
-	writeFile(t, filepath.Join(root, "project.toml"), "[project]\nentry = \"main.gs\"\n")
-	writeFile(t, agent, "")
-	if err := os.MkdirAll(nested, 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	resolved, err := NewResolver("").Resolve("@agent/core/agent", ResolveOptions{BaseDir: nested})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertPath(t, resolved.Path, agent)
-}
-
 func TestResolverDirectoryMainAndIndex(t *testing.T) {
 	dir := t.TempDir()
 	withMain := filepath.Join(dir, "with-main")

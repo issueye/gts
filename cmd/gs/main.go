@@ -867,7 +867,7 @@ func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 		if err != nil {
 			return nil, err
 		}
-		if resolved.Path == "" {
+		if resolved.Path == "" && resolved.Kind != module.ModuleKindStdSource {
 			return nil, fmt.Errorf("module %s resolved without a source path", path)
 		}
 		cacheKey := resolved.ID
@@ -1009,6 +1009,9 @@ func (r *runner) requireFrom(env *object.Environment, path string) (object.Objec
 }
 
 func (r *runner) readResolvedSource(resolved module.ResolvedModule) (string, error) {
+	if resolved.Kind == module.ModuleKindStdSource {
+		return module.ReadStdSource(resolved.Specifier)
+	}
 	if resolved.PackageFile != "" {
 		return packagefile.ReadNestedText(resolved.PackageFile, resolved.ArchivePath)
 	}
@@ -1020,6 +1023,9 @@ func (r *runner) readResolvedSource(resolved module.ResolvedModule) (string, err
 }
 
 func resolvedModuleDir(resolved module.ResolvedModule) string {
+	if resolved.Kind == module.ModuleKindStdSource {
+		return module.StdSourceDir(resolved.Specifier)
+	}
 	if resolved.PackageFile != "" {
 		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
 	}

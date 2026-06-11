@@ -2690,227 +2690,6 @@ fs.writeTextSync("__PORT_FILE__", server.port.toString());
 	}
 }
 
-func TestAgentAnthropicProviderWithMockServer(t *testing.T) {
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" {
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
-		if r.Header.Get("x-api-key") != "test-key" {
-			t.Fatalf("missing anthropic api key header")
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		requests++
-		w.Header().Set("Content-Type", "application/json")
-		if requests == 1 {
-			if !strings.Contains(string(body), `"tools"`) || !strings.Contains(string(body), `"read_task"`) {
-				t.Fatalf("first request missing tool schema: %s", body)
-			}
-			_, _ = w.Write([]byte(`{
-  "id": "msg_1",
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    {
-      "type": "tool_use",
-      "id": "toolu_1",
-      "name": "read_task",
-      "input": { "path": "task.txt" }
-    }
-  ],
-  "stop_reason": "tool_use"
-}`))
-			return
-		}
-		if !strings.Contains(string(body), `"tool_result"`) || !strings.Contains(string(body), `"toolu_1"`) {
-			t.Fatalf("second request missing tool result: %s", body)
-		}
-		_, _ = w.Write([]byte(`{
-  "id": "msg_2",
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    { "type": "text", "text": "mock anthropic completed" }
-  ],
-  "stop_reason": "end_turn"
-}`))
-	}))
-	defer server.Close()
-
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate test file")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	dir, err := os.MkdirTemp(root, ".agent-anthropic-test-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = os.RemoveAll(dir)
-	})
-	script := filepath.Join(dir, "anthropic_mock.gs")
-	source := strings.ReplaceAll(`
-import { createAgent } from "@agent/core/agent";
-import { createRegistry, createTool } from "@agent/tools/registry";
-import { createAnthropicProvider } from "@agent/llm/anthropic";
-
-let registry = createRegistry();
-registry.register(createTool(
-  "read_task",
-  "Read a task by path.",
-  {
-    type: "object",
-    required: ["path"],
-    additionalProperties: false,
-    properties: {
-      path: { type: "string" },
-    },
-  },
-  function(args) {
-    return { path: args.path, content: "mock task" };
-  }
-));
-
-let provider = createAnthropicProvider({
-  apiKey: "test-key",
-  baseUrl: "__URL__",
-  model: "claude-test",
-  maxTokens: 128,
-});
-
-let agent = createAgent({
-  provider: provider,
-  registry: registry,
-  maxTurns: 4,
-});
-
-let answer = agent.run("read task");
-answer.content;
-`, "__URL__", server.URL)
-	if err := os.WriteFile(script, []byte(source), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	runner := newRunner(options{workers: 1, timeout: 5 * time.Second})
-	result, err := runner.evalFile(script, runOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	str, ok := result.(*object.String)
-	if !ok || str.Value != "mock anthropic completed" {
-		t.Fatalf("want mock anthropic completed, got %T %v", result, result)
-	}
-	if requests != 2 {
-		t.Fatalf("want 2 anthropic requests, got %d", requests)
-	}
-}
-
-func TestAgentExampleReadsLocalTomlProviderConfig(t *testing.T) {
-	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" {
-			t.Fatalf("unexpected path %s", r.URL.Path)
-		}
-		if r.Header.Get("x-api-key") != "toml-key" {
-			t.Fatalf("missing toml api key header")
-		}
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		requests++
-		if !strings.Contains(string(body), `"model":"toml-model"`) {
-			t.Fatalf("request did not use toml model: %s", body)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if requests == 1 {
-			if !strings.Contains(string(body), `"read_task"`) {
-				t.Fatalf("first request missing workspace tool: %s", body)
-			}
-			_, _ = w.Write([]byte(`{
-  "id": "msg_1",
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    {
-      "type": "tool_use",
-      "id": "toolu_toml",
-      "name": "read_task",
-      "input": { "path": "task.txt" }
-    }
-  ],
-  "stop_reason": "tool_use"
-}`))
-			return
-		}
-		if !strings.Contains(string(body), `"tool_result"`) || !strings.Contains(string(body), `"toolu_toml"`) {
-			t.Fatalf("second request missing tool result: %s", body)
-		}
-		_, _ = w.Write([]byte(`{
-  "id": "msg_2",
-  "type": "message",
-  "role": "assistant",
-  "content": [
-    { "type": "text", "text": "toml provider completed" }
-  ],
-  "stop_reason": "end_turn"
-}`))
-	}))
-	defer server.Close()
-
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate test file")
-	}
-	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
-	example := filepath.Join(root, "examples", "15-gs-agent")
-	localConfig := filepath.Join(example, "agent.local.toml")
-	writeTestFile(t, localConfig, strings.ReplaceAll(`
-[agent]
-provider = "anthropic"
-system = "Use the configured model."
-maxTurns = 4
-
-[llm.anthropic]
-apiKey = "toml-key"
-baseUrl = "__URL__"
-model = "toml-model"
-maxTokens = 64
-timeoutMs = 5000
-`, "__URL__", server.URL))
-	t.Cleanup(func() {
-		_ = os.Remove(localConfig)
-		_ = os.RemoveAll(filepath.Join(example, ".agent"))
-	})
-
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	runWd := t.TempDir()
-	t.Cleanup(func() {
-		_ = os.Chdir(oldWd)
-	})
-	if err := os.Chdir(runWd); err != nil {
-		t.Fatal(err)
-	}
-
-	r := newRunner(options{workers: 1, timeout: 5 * time.Second})
-	if err := r.runProject(example); err != nil {
-		t.Fatal(err)
-	}
-	if requests != 2 {
-		t.Fatalf("want 2 anthropic requests, got %d", requests)
-	}
-	if _, err := os.Stat(filepath.Join(example, ".agent", "session.jsonl")); err != nil {
-		t.Fatalf("expected example session file in project root: %v", err)
-	}
-}
-
 func TestStdDBSQLiteModule(t *testing.T) {
 	dir := t.TempDir()
 	script := filepath.Join(dir, "db_sqlite.gs")
@@ -2986,6 +2765,73 @@ rowsKind + ":" + rows[0].name + ":" + one.name;
 	str, ok := result.(*object.String)
 	if !ok || str.Value != "one-row:committed:committed" {
 		t.Fatalf("want one-row:committed:committed, got %T %v", result, result)
+	}
+}
+
+func TestStdORMSourceModule(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.ToSlash(filepath.Join(dir, "orm.sqlite"))
+	script := filepath.Join(dir, "orm_source.gs")
+	if err := os.WriteFile(script, []byte(fmt.Sprintf(`
+import rawdb from "@std/db";
+import orm from "@std/orm";
+
+const dsn = %q;
+const setup = rawdb.open("sqlite", dsn);
+setup.exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, age INTEGER, city TEXT)");
+setup.close();
+
+const db = orm.connect("sqlite", dsn);
+db.autoMigrate({
+  table: "profiles",
+  columns: [
+    { name: "id", type: "integer", primaryKey: true },
+    { name: "nickname", type: "text" }
+  ]
+});
+db.autoMigrate({
+  table: "profiles",
+  columns: [
+    { name: "id", type: "integer", primaryKey: true },
+    { name: "nickname", type: "text" },
+    { name: "city", type: "text", defaultValue: "''" }
+  ],
+  indexes: [
+    { name: "idx_profiles_nickname", columns: ["nickname"] }
+  ]
+});
+db.table("profiles").insert({ id: 1, nickname: "Ace", city: "Beijing" });
+db.table("users").insert({ name: "Alice", age: 30, city: "Beijing" });
+db.table("users").insert({ name: "Bob", age: 25, city: "Shanghai" });
+const batch = db.batchInsert("users", [
+  { name: "Charlie", age: 35, city: "Guangzhou" },
+  { name: "David", age: 28, city: "Beijing" }
+]);
+const found = db.table("users").whereIn("city", ["Beijing", "Shanghai"]).orderBy("id ASC").find();
+const first = db.table("users").where("age >= ?", 30).orderBy("age ASC").first();
+const updated = db.table("users").where("name = ?", "Bob").update({ age: 26 });
+const tx = db.begin();
+tx.table("users").insert({ name: "Eve", age: 22, city: "Shenzhen" });
+tx.commit();
+const count = db.table("users").count();
+const deleted = db.table("users").where("age < ?", 25).delete();
+const profile = db.table("profiles").where("id = ?", 1).first();
+db.close();
+
+String(found.length) + ":" + first.name + ":" + String(batch.rowsAffected) + ":" +
+  String(updated.rowsAffected) + ":" + String(count) + ":" + String(deleted.rowsAffected) + ":" + profile.city;
+`, dbPath)), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r := newRunner(options{workers: 1, timeout: 5 * time.Second})
+	result, err := r.evalFile(script, runOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	str, ok := result.(*object.String)
+	if !ok || str.Value != "3:Alice:2:1:5:1:Beijing" {
+		t.Fatalf("want 3:Alice:2:1:5:1:Beijing, got %T %v", result, result)
 	}
 }
 
@@ -3092,41 +2938,6 @@ lib.sum(lib.value, 5);
 	num, ok := result.(*object.Number)
 	if !ok || num.Value != 12 {
 		t.Fatalf("want 12, got %T %v", result, result)
-	}
-}
-
-func TestImportAgentAliasFromProjectRoot(t *testing.T) {
-	dir := t.TempDir()
-	appDir := filepath.Join(dir, "examples")
-	agentDir := filepath.Join(dir, "scripts", "agent", "core")
-	if err := os.MkdirAll(appDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "project.toml"), []byte("[project]\nentry = \"examples/app.gs\"\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(agentDir, "message.gs"), []byte(`export function label(x) { return "agent:" + x; }`), 0644); err != nil {
-		t.Fatal(err)
-	}
-	app := filepath.Join(appDir, "app.gs")
-	if err := os.WriteFile(app, []byte(`
-import { label } from "@agent/core/message";
-label("ok");
-`), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	r := newRunner(options{workers: 1, timeout: time.Second})
-	result, err := r.evalFile(app, runOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	str, ok := result.(*object.String)
-	if !ok || str.Value != "agent:ok" {
-		t.Fatalf("want agent:ok, got %T %v", result, result)
 	}
 }
 
@@ -3636,12 +3447,6 @@ func TestStableExamples(t *testing.T) {
 		}
 	})
 
-	t.Run("examples/15-gs-agent", func(t *testing.T) {
-		r := newRunner(options{workers: 1, timeout: time.Second})
-		if err := r.runProject(filepath.Join(root, "examples", "15-gs-agent")); err != nil {
-			t.Fatal(err)
-		}
-	})
 }
 
 func writeTestFile(t *testing.T, path, contents string) {

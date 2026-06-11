@@ -1,7 +1,0 @@
-[project]
-name = "gs-agent-demo"
-version = "0.1.0"
-entry = "app.gs"
-
-[imports]
-"@/*" = "src/*.gs"
