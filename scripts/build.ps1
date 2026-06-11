@@ -44,6 +44,7 @@ if ($TrimPath) {
   $buildArgs += "-trimpath"
 }
 
+$buildArgs += @("-ldflags", "-s -w")
 $buildArgs += @("-o", $outPath, "./cmd/gs")
 
 Push-Location $repoRootFull

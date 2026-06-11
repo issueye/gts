@@ -2,6 +2,7 @@
 /gs.exe
 /gs
 *.exe
+*.db
 
 # build output
 /gts
@@ -13,6 +14,9 @@
 .vscode/
 *.swp
 *.swo
+
+.agent/
+.gateway/
 
 # OS
 .DS_Store

@@ -48,6 +48,7 @@ type runner struct {
 	resolver *module.Resolver
 	plugins  *pluginhost.Host
 	rootDir  string
+	loading  map[string]bool // 正在加载的模块路径，防止循环依赖
 }
 
 type replConfig struct {
@@ -321,7 +322,8 @@ func newRunner(opts options) *runner {
 		opts.workers = 1
 	}
 	return &runner{
-		opts: opts,
+		opts:    opts,
+		loading: make(map[string]bool),
 	}
 }
 
@@ -876,6 +878,13 @@ func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
 			return module.GetExports(cached), nil
 		}
 
+		// 检测循环依赖
+		if r.loading[cacheKey] {
+			return nil, fmt.Errorf("circular dependency detected: %s", path)
+		}
+		r.loading[cacheKey] = true
+		defer delete(r.loading, cacheKey)
+
 		env := r.cache.GetOrCreate(cacheKey)
 		module.SetupExports(env)
 		r.configureModuleLoaders(env, resolvedModuleDir(resolved))
@@ -986,6 +995,16 @@ func (r *runner) requireFrom(env *object.Environment, path string) (object.Objec
 		}
 		return native, nil
 	}
+
+	// 检测循环依赖
+	cacheKey := resolved.ID
+	if cacheKey == "" {
+		cacheKey = resolved.Path
+	}
+	if r.loading[cacheKey] {
+		return nil, fmt.Errorf("circular dependency detected: %s", path)
+	}
+
 	return r.requireFunc(baseDir)(path)
 }
 

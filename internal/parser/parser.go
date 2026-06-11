@@ -29,6 +29,8 @@ const (
 	PREC_CALL
 )
 
+const maxParseErrors = 100 // 限制最大错误数量，防止内存耗尽
+
 type (
 	prefixFn func() ast.Expression
 	infixFn  func(ast.Expression) ast.Expression
@@ -195,6 +197,12 @@ func (p *Parser) curTokenIs(t lexer.TokenType) bool  { return p.cur.Type == t }
 func (p *Parser) peekTokenIs(t lexer.TokenType) bool { return p.peek.Type == t }
 
 func (p *Parser) addError(msg string) {
+	if len(p.errors) >= maxParseErrors {
+		if len(p.errors) == maxParseErrors {
+			p.errors = append(p.errors, fmt.Sprintf("%s: too many parse errors (limit: %d)", p.pos(), maxParseErrors))
+		}
+		return
+	}
 	p.errors = append(p.errors, fmt.Sprintf("%s: %s", p.pos(), msg))
 }
 
