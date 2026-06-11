@@ -933,6 +933,34 @@ function main() {
 	}
 }
 
+func TestDistCommandRejectsSyntaxErrorInDependency(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "project.toml"), `[project]
+entry = "main.gs"
+`)
+	writeTestFile(t, filepath.Join(root, "main.gs"), `import { value } from "./lib";
+
+function main() {
+  println(value);
+}
+`)
+	writeTestFile(t, filepath.Join(root, "lib.gs"), `export const value = 42;
+}
+`)
+	out := filepath.Join(t.TempDir(), "app.exe")
+
+	err := distCommand([]string{root, out})
+	if err == nil {
+		t.Fatal("distCommand should reject dependency syntax errors")
+	}
+	if !strings.Contains(err.Error(), "dist preflight failed") || !strings.Contains(err.Error(), "unexpected }") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, statErr := os.Stat(out); !os.IsNotExist(statErr) {
+		t.Fatalf("dist output should not be written, stat err=%v", statErr)
+	}
+}
+
 func TestBundleCommandWritesOutput(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "main.gs"), `let lib = require("./lib");

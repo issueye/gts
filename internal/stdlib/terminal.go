@@ -1543,6 +1543,9 @@ func (s *terminalSession) restoreRawLocked() error {
 
 func terminalMakeRaw() (*terminalRawMode, error) {
 	fd := int(os.Stdin.Fd())
+	if !term.IsTerminal(fd) {
+		return nil, fmt.Errorf("stdin is not a terminal (TTY required for raw mode)")
+	}
 	state, err := term.MakeRaw(fd)
 	if err != nil {
 		return nil, err

@@ -144,6 +144,8 @@ func run(args []string) int {
 		err = r.runProject(".", scriptArgs(rest[1:])...)
 	case "run-script":
 		err = r.runScriptCommand(rest[1:])
+	case "agent":
+		err = r.runFile("agent-cli.gs", scriptArgs(rest[1:]))
 	case "pack":
 		err = packCommand(rest[1:])
 	case "dist":
@@ -332,7 +334,8 @@ func printUsage(fs *flag.FlagSet) {
 	fmt.Fprintf(fs.Output(), "  gs [flags] <script.gs>\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] <code>\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] init [dir]\n")
-	fmt.Fprintf(fs.Output(), "  gs [flags] run\n\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] run\n")
+	fmt.Fprintf(fs.Output(), "  gs [flags] agent\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] run-script <script.gs> [args...]\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] pack [dir] [out.gspkg]\n\n")
 	fmt.Fprintf(fs.Output(), "  gs [flags] dist [dir] [out]\n\n")
@@ -509,6 +512,9 @@ func distCommand(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := validateProjectForDist(absDir); err != nil {
+		return err
+	}
 	if out == "" {
 		name := filepath.Base(filepath.Clean(absDir))
 		if runtime.GOOS == "windows" {
@@ -537,6 +543,18 @@ func distCommand(args []string) error {
 		return err
 	}
 	fmt.Fprintln(os.Stdout, absOut)
+	return nil
+}
+
+func validateProjectForDist(absDir string) error {
+	cfg, err := proj.LoadStrict(filepath.Join(absDir, "project.toml"))
+	if err != nil {
+		return err
+	}
+	entry := filepath.Join(absDir, cfg.Entry)
+	if _, err := bundle.Bundle(entry); err != nil {
+		return fmt.Errorf("dist preflight failed: %w", err)
+	}
 	return nil
 }
 

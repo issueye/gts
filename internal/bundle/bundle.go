@@ -54,7 +54,11 @@ func Bundle(entry string) (string, error) {
 		}
 		mod := &bundledModule{resolved: resolved, source: src}
 		seen[id] = mod
-		for _, spec := range findStaticDependencies(src) {
+		deps, err := findStaticDependencies(src, moduleDisplayPath(resolved))
+		if err != nil {
+			return err
+		}
+		for _, spec := range deps {
 			resolved, err := resolver.Resolve(spec, module.ResolveOptions{
 				ProjectRoot: projectRoot,
 				BaseDir:     resolvedModuleDir(mod.resolved),
@@ -155,6 +159,13 @@ func moduleDisplayName(resolved module.ResolvedModule) string {
 	return filepath.Base(resolved.Path)
 }
 
+func moduleDisplayPath(resolved module.ResolvedModule) string {
+	if resolved.PackageFile != "" {
+		return resolved.PackageFile + "!" + resolved.ArchivePath
+	}
+	return resolved.Path
+}
+
 func resolvedModuleDir(resolved module.ResolvedModule) string {
 	if resolved.PackageFile != "" {
 		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
@@ -173,11 +184,17 @@ func readResolvedSource(resolved module.ResolvedModule) (string, error) {
 	return string(data), nil
 }
 
-func findStaticDependencies(src string) []string {
+func findStaticDependencies(src, file string) ([]string, error) {
 	l := lexer.New(src)
-	p := parser.New(l, "<bundle>")
+	p := parser.New(l, file)
 	prog := p.ParseProgram()
-	return collectDependencies(prog.Body)
+	var parseErrors []string
+	parseErrors = append(parseErrors, l.Errors()...)
+	parseErrors = append(parseErrors, prog.Errors...)
+	if len(parseErrors) > 0 {
+		return nil, fmt.Errorf("%s: syntax check failed:\n%s", file, strings.Join(parseErrors, "\n"))
+	}
+	return collectDependencies(prog.Body), nil
 }
 
 func collectDependencies(stmts []ast.Statement) []string {

@@ -45,6 +45,10 @@ func (p *Parser) parseStatement() ast.Statement {
 		me := p.parseMatch()
 		p.skipSemicolon()
 		return &ast.ExprStmt{Pos_: p.pos(), Expr: me}
+	case lexer.TOKEN_RBRACE:
+		p.addError("unexpected }")
+		p.nextToken()
+		return nil
 	case lexer.TOKEN_IDENT:
 		if p.peekTokenIs(lexer.TOKEN_COLON) {
 			name := p.cur.Literal
