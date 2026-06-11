@@ -19,6 +19,7 @@ import (
 	"github.com/issueye/goscript/internal/evaluator"
 	"github.com/issueye/goscript/internal/gtp/pluginhost"
 	"github.com/issueye/goscript/internal/lexer"
+	"github.com/issueye/goscript/internal/lsp"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
 	"github.com/issueye/goscript/internal/packagefile"
@@ -146,6 +147,8 @@ func run(args []string) int {
 		err = r.runScriptCommand(rest[1:])
 	case "agent":
 		err = r.runFile("agent-cli.gs", scriptArgs(rest[1:]))
+	case "lsp":
+		err = lsp.NewServer(os.Stdin, os.Stdout, os.Stderr).Run()
 	case "pack":
 		err = packCommand(rest[1:])
 	case "dist":

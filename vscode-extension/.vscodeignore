@@ -3,4 +3,5 @@
 .git/**
 **/*.map
 **/*.ts
-node_modules/**
+node_modules/typescript/**
+node_modules/@types/**

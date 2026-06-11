@@ -1,11 +1,12 @@
 {
   "name": "goscript",
   "displayName": "GoScript",
-  "description": "GoScript language support with syntax highlighting",
+  "description": "GoScript language support with syntax highlighting and LSP features",
   "version": "0.1.0",
   "publisher": "issueye",
   "icon": "images/icon.png",
   "license": "MIT",
+  "main": "./out/extension.js",
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -32,11 +33,42 @@
         "scopeName": "source.gs",
         "path": "./syntaxes/gs.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "GoScript",
+      "properties": {
+        "goscript.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the GoScript CLI executable that provides the language server. Leave empty to auto-detect gs."
+        },
+        "goscript.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace communication with the GoScript language server."
+        }
+      }
+    }
   },
   "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
     "package": "npx @vscode/vsce package --allow-missing-repository",
     "install:local": "npx @vscode/vsce package --allow-missing-repository && code --install-extension *.vsix"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "^1.75.0",
+    "typescript": "^5.8.3"
   },
   "repository": {
     "type": "git",

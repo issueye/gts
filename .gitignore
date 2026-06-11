@@ -8,6 +8,8 @@
 /gts
 /bin/
 /dist/
+/vscode-extension/node_modules/
+/vscode-extension/out/
 
 # IDE
 .idea/
