@@ -623,11 +623,24 @@ func newWebResponseObject(w http.ResponseWriter) object.Object {
 		if len(args) < 1 {
 			return object.UNDEFINED
 		}
+		if stream, ok := readableStreamFromObject(args[0]); ok {
+			return res.stream(pos, stream)
+		}
 		if res.writer.Header().Get("Content-Type") == "" {
 			res.writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		}
 		res.write([]byte(args[0].Inspect()))
 		return object.UNDEFINED
+	}})
+	setHashMember(resObj, "stream", &object.Builtin{Name: "web.response.stream", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		if len(args) < 1 {
+			return object.NewError(pos, "response.stream requires a readable stream")
+		}
+		stream, ok := readableStreamFromObject(args[0])
+		if !ok {
+			return object.NewError(pos, "response.stream: argument must be a readable stream")
+		}
+		return res.stream(pos, stream)
 	}})
 	setHashMember(resObj, "json", &object.Builtin{Name: "web.response.json", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 		if len(args) < 1 {
@@ -682,6 +695,32 @@ func (res *webResponse) write(data []byte) {
 	_, _ = res.writer.Write(data)
 }
 
+func (res *webResponse) stream(pos ast.Position, stream *readableStream) object.Object {
+	res.writeHeader()
+	flusher, canFlush := res.writer.(http.Flusher)
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := stream.reader.Read(buf)
+		if n > 0 {
+			if _, writeErr := res.writer.Write(buf[:n]); writeErr != nil {
+				return object.NewError(pos, "response.stream: %v", writeErr)
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if err == io.EOF {
+			if canFlush {
+				flusher.Flush()
+			}
+			return object.UNDEFINED
+		}
+		if err != nil {
+			return object.NewError(pos, "response.stream: %v", err)
+		}
+	}
+}
+
 func boundWebApp(pos ast.Position, env *object.Environment, name string) (*webApp, *object.Error) {
 	goObj, ok := env.Extra.(*object.GoObject)
 	if !ok {
@@ -692,6 +731,23 @@ func boundWebApp(pos ast.Position, env *object.Environment, name string) (*webAp
 		return nil, object.NewError(pos, "%s: invalid app receiver", name)
 	}
 	return app, nil
+}
+
+func readableStreamFromObject(value object.Object) (*readableStream, bool) {
+	hash, ok := value.(*object.Hash)
+	if !ok {
+		return nil, false
+	}
+	raw, ok := hashValue(hash, "__stream")
+	if !ok {
+		return nil, false
+	}
+	goObj, ok := raw.(*object.GoObject)
+	if !ok {
+		return nil, false
+	}
+	stream, ok := goObj.Value.(*readableStream)
+	return stream, ok
 }
 
 func stringMapObject(values map[string]string) *object.Hash {

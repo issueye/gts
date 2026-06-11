@@ -43,10 +43,23 @@ let webExpressAlias = require("@std/express");
 | `res.status(code)` | 设置响应状态码并返回 `res` |
 | `res.setHeader(name, value)` | 设置响应头并返回 `res` |
 | `res.send(body)` | 发送文本响应 |
+| `res.stream(readableStream)` | 发送可读流响应，适合 SSE 或上游流式转发 |
 | `res.json(value)` | 发送 JSON 响应 |
 | `res.redirect(url)` | 使用默认状态码跳转到 URL |
 | `res.redirect(status, url)` | 使用指定状态码跳转到 URL |
 | `res.end(body?)` | 结束响应，可选发送响应体 |
+
+## 流式响应
+
+`res.stream(readableStream)` 会按当前 `res.status(code)` 状态码写出响应头，并将 `@std/stream` 或 `@std/net/http/client.stream()` 返回的可读流复制到 HTTP 响应。脚本可以在调用前设置响应头，例如 SSE 转发：
+
+```javascript
+res.status(200);
+res.setHeader("Content-Type", "text/event-stream");
+res.stream(upstream.body);
+```
+
+`res.send(stream)` 也会识别可读流并按流式响应发送；非流参数仍保持原有文本发送语义。
 
 ## 维护来源
 
