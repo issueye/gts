@@ -1,0 +1,4 @@
+[plugins.testPlugin]
+command = "plugins/test-plugin.exe"
+auto_start = true
+capabilities = ["call", "event"]
