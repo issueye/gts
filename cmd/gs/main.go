@@ -518,6 +518,10 @@ func distCommand(args []string) error {
 	if err := validateProjectForDist(absDir); err != nil {
 		return err
 	}
+
+	// 读取配置以检查插件
+	cfg, _ := config.LoadStrict(filepath.Join(absDir, "config.toml"))
+
 	if out == "" {
 		name := filepath.Base(filepath.Clean(absDir))
 		if runtime.GOOS == "windows" {
@@ -525,6 +529,13 @@ func distCommand(args []string) error {
 		}
 		out = filepath.Join(absDir, "dist", name)
 	}
+
+	// 创建 dist 目录
+	distDir := filepath.Dir(out)
+	if err := os.MkdirAll(distDir, 0755); err != nil {
+		return err
+	}
+
 	tmpDir, err := os.MkdirTemp("", "goscript-dist-")
 	if err != nil {
 		return err
@@ -541,12 +552,84 @@ func distCommand(args []string) error {
 	if err := packagefile.AppendPackageToExecutable(stub, pkgPath, out); err != nil {
 		return err
 	}
+
+	// 复制插件二进制到 dist/plugins/
+	if cfg != nil && len(cfg.Plugins) > 0 {
+		if err := copyPluginsToDist(absDir, distDir, cfg.Plugins); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to copy plugins: %v\n", err)
+		}
+	}
+
 	absOut, err := filepath.Abs(out)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(os.Stdout, absOut)
 	return nil
+}
+
+func copyPluginsToDist(projectDir, distDir string, plugins map[string]config.PluginConfig) error {
+	pluginsDir := filepath.Join(distDir, "plugins")
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		return err
+	}
+
+	copied := 0
+	for name, cfg := range plugins {
+		if cfg.Command == "" {
+			continue
+		}
+
+		// 解析插件命令路径
+		cmdPath := cfg.Command
+		if !filepath.IsAbs(cmdPath) {
+			cmdPath = filepath.Join(projectDir, cmdPath)
+		}
+
+		// 检查文件是否存在
+		if _, err := os.Stat(cmdPath); os.IsNotExist(err) {
+			continue
+		}
+
+		// 复制插件二进制
+		targetPath := filepath.Join(pluginsDir, filepath.Base(cmdPath))
+		if err := copyFile(cmdPath, targetPath); err != nil {
+			return fmt.Errorf("copy plugin %s: %w", name, err)
+		}
+
+		// 设置执行权限
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(targetPath, 0755); err != nil {
+				return err
+			}
+		}
+
+		copied++
+	}
+
+	if copied > 0 {
+		fmt.Fprintf(os.Stdout, "Copied %d plugin(s) to %s\n", copied, pluginsDir)
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func validateProjectForDist(absDir string) error {
