@@ -91,6 +91,18 @@ console.log(fs.readTextSync(file));
 | `@std/schema` | [schema.md](native-stdlib/schema.md) |
 | `@std/db` | [db.md](native-stdlib/db.md) |
 
+### 测试与工程化
+
+| 库 | 知识单元 |
+|------|---------|
+| `@std/test` | [test.md](native-stdlib/test.md) |
+| `@std/env` | [env.md](native-stdlib/env.md) |
+| `@std/validation` | [validation.md](native-stdlib/validation.md) |
+| `@std/json` | [json.md](native-stdlib/json.md) |
+| `@std/random` | [random.md](native-stdlib/random.md) |
+| `@std/semver` | [semver.md](native-stdlib/semver.md) |
+| `@std/cache` | [cache.md](native-stdlib/cache.md) |
+
 ### 事件与流
 
 | 库 | 知识单元 |

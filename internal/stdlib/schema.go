@@ -259,14 +259,14 @@ func schemaValueType(value object.Object) string {
 
 func enumContains(enum *object.Array, value object.Object) bool {
 	for _, candidate := range enum.Elements {
-		if objectsEqual(candidate, value) {
+		if schemaObjectsEqual(candidate, value) {
 			return true
 		}
 	}
 	return false
 }
 
-func objectsEqual(a, b object.Object) bool {
+func schemaObjectsEqual(a, b object.Object) bool {
 	switch av := a.(type) {
 	case *object.String:
 		bv, ok := b.(*object.String)

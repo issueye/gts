@@ -82,6 +82,45 @@ app;
 	}
 }
 
+func TestWebResponseWriteAndFlush(t *testing.T) {
+	appObj := evalWebTestScript(t, `
+let web = require("@std/web");
+let app = web.createApp();
+app.get("/chunks", function(req, res) {
+  res.status(202);
+  res.setHeader("Content-Type", "text/event-stream");
+  res.write("data: one\n\n");
+  res.flush();
+  res.write("data: two\n\n");
+  res.end();
+});
+app;
+`)
+	app := mustWebApp(t, appObj)
+	server := httptest.NewServer(app)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/chunks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("want 202, got %d: %s", resp.StatusCode, string(data))
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("want SSE content type, got %q", got)
+	}
+	if string(data) != "data: one\n\ndata: two\n\n" {
+		t.Fatalf("unexpected chunk body %q", string(data))
+	}
+}
+
 func evalWebTestScript(t *testing.T, src string) object.Object {
 	t.Helper()
 	vm := object.NewVirtualMachine()

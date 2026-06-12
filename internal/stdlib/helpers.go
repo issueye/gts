@@ -17,3 +17,8 @@ func hashValue(hash *object.Hash, key string) (object.Object, bool) {
 	v, ok := hash.Pairs[hk]
 	return v.Value, ok
 }
+
+func getHashValue(hash *object.Hash, key string) object.Object {
+	val, _ := hashValue(hash, key)
+	return val
+}

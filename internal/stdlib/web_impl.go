@@ -642,6 +642,21 @@ func newWebResponseObject(w http.ResponseWriter) object.Object {
 		}
 		return res.stream(pos, stream)
 	}})
+	setHashMember(resObj, "write", &object.Builtin{Name: "web.response.write", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		if len(args) < 1 {
+			return object.NewError(pos, "response.write requires data")
+		}
+		if err := res.writeChunk([]byte(args[0].Inspect())); err != nil {
+			return object.NewError(pos, "response.write: %v", err)
+		}
+		return resObj
+	}})
+	setHashMember(resObj, "flush", &object.Builtin{Name: "web.response.flush", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		if flusher, ok := res.writer.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return resObj
+	}})
 	setHashMember(resObj, "json", &object.Builtin{Name: "web.response.json", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 		if len(args) < 1 {
 			return object.UNDEFINED
@@ -693,6 +708,12 @@ func (res *webResponse) writeHeader() {
 func (res *webResponse) write(data []byte) {
 	res.writeHeader()
 	_, _ = res.writer.Write(data)
+}
+
+func (res *webResponse) writeChunk(data []byte) error {
+	res.writeHeader()
+	_, err := res.writer.Write(data)
+	return err
 }
 
 func (res *webResponse) stream(pos ast.Position, stream *readableStream) object.Object {

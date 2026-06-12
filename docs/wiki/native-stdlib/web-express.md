@@ -43,6 +43,8 @@ let webExpressAlias = require("@std/express");
 | `res.status(code)` | 设置响应状态码并返回 `res` |
 | `res.setHeader(name, value)` | 设置响应头并返回 `res` |
 | `res.send(body)` | 发送文本响应 |
+| `res.write(data)` | 写入一段响应数据并保持响应打开 |
+| `res.flush()` | 尝试刷新响应缓冲，适合 SSE 或分块输出 |
 | `res.stream(readableStream)` | 发送可读流响应，适合 SSE 或上游流式转发 |
 | `res.json(value)` | 发送 JSON 响应 |
 | `res.redirect(url)` | 使用默认状态码跳转到 URL |
@@ -60,6 +62,8 @@ res.stream(upstream.body);
 ```
 
 `res.send(stream)` 也会识别可读流并按流式响应发送；非流参数仍保持原有文本发送语义。
+
+需要边读边转换时，可以使用 `res.write(data)` 和 `res.flush()` 逐块输出，最后调用 `res.end()` 结束响应。
 
 ## 维护来源
 

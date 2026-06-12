@@ -494,6 +494,8 @@ func webAPIDoc() []string {
 		"res.status(code)  设置响应状态码并返回 res",
 		"res.setHeader(name, value)  设置响应头并返回 res",
 		"res.send(body)  发送文本响应",
+		"res.write(data)  写入一段响应数据并保持响应打开",
+		"res.flush()  尝试刷新响应缓冲",
 		"res.stream(readableStream)  发送可读流响应，适合 SSE 或上游流式转发",
 		"res.json(value)  发送 JSON 响应",
 		"res.redirect(url)  使用默认状态码跳转到 URL",
