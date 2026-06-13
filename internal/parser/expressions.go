@@ -296,8 +296,16 @@ func (p *Parser) parseProperty() *ast.Property {
 	case lexer.TOKEN_NUMBER:
 		key = &ast.NumberLit{Pos_: p.pos(), TokenLit: p.cur.Literal}
 	default:
-		p.addError("expected property key")
-		return nil
+		// Allow reserved keywords as property keys (e.g. { default: 1, if: 2 }).
+		// This mirrors standard JS object literal semantics. Without this,
+		// encountering a keyword key would not advance the parser, causing an
+		// infinite loop in parseObjectOrBlock.
+		if lexer.IsKeyword(p.cur.Type) {
+			key = &ast.Ident{Pos_: p.pos(), TokenLit: p.cur.Literal}
+		} else {
+			p.addError("expected property key")
+			return nil
+		}
 	}
 	p.nextToken() // advance past key
 

@@ -163,15 +163,28 @@ func evalAdd(left, right object.Object, pos ast.Position) object.Object {
 }
 
 func evalNumberOp(left, right object.Object, pos ast.Position, fn func(float64, float64) float64) object.Object {
-	l, ok := left.(*object.Number)
-	if !ok {
+	l, lOk := toNumeric(left)
+	if !lOk {
 		return object.NewError(pos, "TypeError: left operand must be number, got %s", left.Type())
 	}
-	r, ok := right.(*object.Number)
-	if !ok {
+	r, rOk := toNumeric(right)
+	if !rOk {
 		return object.NewError(pos, "TypeError: right operand must be number, got %s", right.Type())
 	}
-	return &object.Number{Value: fn(l.Value, r.Value)}
+	return &object.Number{Value: fn(l, r)}
+}
+
+// toNumeric converts a value to its numeric form for arithmetic. Numbers pass
+// through unchanged; Dates yield their epoch milliseconds (standard JS coerces
+// Date to number via valueOf for arithmetic, e.g. `dateA - dateB`).
+func toNumeric(obj object.Object) (float64, bool) {
+	switch v := obj.(type) {
+	case *object.Number:
+		return v.Value, true
+	case *object.Date:
+		return float64(v.Time.UnixMilli()), true
+	}
+	return 0, false
 }
 
 func strictEqual(a, b object.Object) bool {
@@ -224,7 +237,36 @@ func evalCompare(left, right object.Object, op string, pos ast.Position) object.
 			return object.NativeBool(lStr.Value >= rStr.Value)
 		}
 	}
+	// Date comparison: standard JS converts Date to its epoch milliseconds
+	// (via valueOf) before comparing, so `date1 < date2` is legal. Support
+	// mixed Date/Number comparisons as well.
+	lDate, lIsDate := left.(*object.Date)
+	rDate, rIsDate := right.(*object.Date)
+	if lIsDate && rIsDate {
+		return compareNumbers(float64(lDate.Time.UnixMilli()), float64(rDate.Time.UnixMilli()), op)
+	}
+	if lIsDate && rIsNum {
+		return compareNumbers(float64(lDate.Time.UnixMilli()), rNum.Value, op)
+	}
+	if lIsNum && rIsDate {
+		return compareNumbers(lNum.Value, float64(rDate.Time.UnixMilli()), op)
+	}
 	return object.NewError(pos, "TypeError: cannot compare %s and %s — types must match", left.Type(), right.Type())
+}
+
+// compareNumbers evaluates a relational operator against two float64 values.
+func compareNumbers(l, r float64, op string) object.Object {
+	switch op {
+	case "<":
+		return object.NativeBool(l < r)
+	case "<=":
+		return object.NativeBool(l <= r)
+	case ">":
+		return object.NativeBool(l > r)
+	case ">=":
+		return object.NativeBool(l >= r)
+	}
+	return object.NULL
 }
 
 func evalIn(left, right object.Object, pos ast.Position) object.Object {
@@ -329,6 +371,23 @@ func evalAssign(n *ast.AssignExpr, env *object.Environment) object.Object {
 	right := Eval(n.Right, env)
 	if object.IsRuntimeError(right) {
 		return right
+	}
+	// Compound assignment (+=, -=, ...) to a member/index target: evaluate the
+	// current value of the target, combine it with the right-hand side, and
+	// proceed as a plain assignment. Without this, `obj.x += 1` previously
+	// overwrote obj.x with the bare right value (1), ignoring the old value.
+	// (Identifier targets are handled separately in the Ident branch below.)
+	if n.Op != "=" {
+		if _, isIdent := n.Left.(*ast.Ident); !isIdent {
+			current := Eval(n.Left, env)
+			if object.IsRuntimeError(current) {
+				return current
+			}
+			right = evalCompoundAssign(current, right, n.Op, n.Pos())
+			if object.IsRuntimeError(right) {
+				return right
+			}
+		}
 	}
 	switch left := n.Left.(type) {
 	case *ast.Ident:

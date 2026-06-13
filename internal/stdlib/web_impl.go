@@ -19,8 +19,9 @@ import (
 )
 
 type webApp struct {
-	mu     sync.RWMutex
-	routes []webRoute
+	mu        sync.RWMutex
+	handlerMu sync.Mutex
+	routes    []webRoute
 }
 
 type webRoute struct {
@@ -287,6 +288,8 @@ func (app *webApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx.reqObj = buildWebRequestObject(ctx)
 	ctx.resObj = newWebResponseObject(ctx.writer)
 	routes := app.snapshotRoutes()
+	app.handlerMu.Lock()
+	defer app.handlerMu.Unlock()
 	app.runRoutes(routes, ctx, 0)
 }
 

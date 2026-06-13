@@ -1,9 +1,13 @@
 package stdlib
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/issueye/goscript/internal/evaluator"
@@ -118,6 +122,71 @@ app;
 	}
 	if string(data) != "data: one\n\ndata: two\n\n" {
 		t.Fatalf("unexpected chunk body %q", string(data))
+	}
+}
+
+func TestWebHandlersAreSerializedForConcurrentRequests(t *testing.T) {
+	appObj := evalWebTestScript(t, `
+let web = require("@std/web");
+let app = web.createApp();
+let count = 0;
+app.get("/hit", function(req, res) {
+  let next = count + 1;
+  count = next;
+  res.send(String(next));
+});
+app.get("/count", function(req, res) {
+  res.send(String(count));
+});
+app;
+`)
+	app := mustWebApp(t, appObj)
+	server := httptest.NewServer(app)
+	defer server.Close()
+
+	const requests = 64
+	var wg sync.WaitGroup
+	errs := make(chan error, requests)
+	for i := 0; i < requests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := http.Get(server.URL + "/hit")
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				errs <- fmt.Errorf("hit status %d: %s", resp.StatusCode, string(body))
+				return
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp, err := http.Get(server.URL + "/count")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("count response %q is not a number: %v", string(data), err)
+	}
+	if got != requests {
+		t.Fatalf("serialized handler count = %d, want %d", got, requests)
 	}
 }
 
