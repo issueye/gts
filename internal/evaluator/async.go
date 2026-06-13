@@ -17,6 +17,7 @@ func registerAsync(env *object.Environment) {
 		"clearInterval":  &object.Builtin{Name: "clearInterval", Fn: builtinClearInterval},
 		"queueMicrotask": &object.Builtin{Name: "queueMicrotask", Fn: builtinQueueMicrotask},
 		"sleep":          &object.Builtin{Name: "sleep", Fn: builtinSleep},
+		"sleepAsync":     &object.Builtin{Name: "sleepAsync", Fn: builtinSleepAsync},
 	})
 }
 
@@ -368,4 +369,26 @@ func builtinSleep(env *object.Environment, pos ast.Position, args ...object.Obje
 	}
 	time.Sleep(time.Duration(ms.Value) * time.Millisecond)
 	return object.UNDEFINED
+}
+
+func builtinSleepAsync(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+	promise := env.ObjectManager().NewPromise()
+	if len(args) < 1 {
+		promise.Resolve(object.UNDEFINED)
+		return promise
+	}
+	ms, ok := args[0].(*object.Number)
+	if !ok {
+		promise.Resolve(object.UNDEFINED)
+		return promise
+	}
+	vm := env.VM()
+	vm.AsyncAdd(1)
+	time.AfterFunc(time.Duration(ms.Value)*time.Millisecond, func() {
+		_ = vm.Post(func() {
+			defer vm.AsyncDone()
+			promise.Resolve(object.UNDEFINED)
+		})
+	})
+	return promise
 }

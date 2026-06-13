@@ -19,6 +19,7 @@ type VirtualMachine struct {
 	globalMu        sync.Mutex
 	typeCheck       atomic.Bool
 	spawn           func(func())
+	scheduler       func(func()) error
 	importer        func(env *Environment, path string) (Object, error)
 	evaluator       func(node interface{}, env *Environment) Object
 	argv            atomic.Value // stores []string
@@ -49,6 +50,7 @@ func (vm *VirtualMachine) Reset() {
 	vm.globalConstants.Store(map[string]Object{})
 	vm.globalMu.Unlock()
 	vm.spawn = nil
+	vm.scheduler = nil
 	vm.importer = nil
 	vm.evaluator = nil
 	vm.typeCheck.Store(false)
@@ -177,6 +179,10 @@ func (vm *VirtualMachine) SetSpawner(spawn func(func())) {
 	vm.spawn = spawn
 }
 
+func (vm *VirtualMachine) SetScheduler(schedule func(func()) error) {
+	vm.scheduler = schedule
+}
+
 func (vm *VirtualMachine) Go(fn func()) {
 	if vm.spawn != nil {
 		vm.spawn(fn)
@@ -186,6 +192,14 @@ func (vm *VirtualMachine) Go(fn func()) {
 		defer async.RecoverPanic("virtual machine task")
 		fn()
 	}()
+}
+
+func (vm *VirtualMachine) Post(fn func()) error {
+	if vm.scheduler != nil {
+		return vm.scheduler(fn)
+	}
+	vm.Go(fn)
+	return nil
 }
 
 func (vm *VirtualMachine) AsyncAdd(delta int) {

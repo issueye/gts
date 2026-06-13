@@ -1,6 +1,8 @@
 package sdk
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -225,6 +227,50 @@ func TestRuntimeLocalModuleDoesNotLeakGlobally(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("error = %q, want not registered", err.Error())
+	}
+}
+
+func TestRuntimeModuleTopLevelStateIsIsolatedBetweenRuntimes(t *testing.T) {
+	dir := t.TempDir()
+	modulePath := filepath.Join(dir, "counter.gs")
+	if err := os.WriteFile(modulePath, []byte(`
+let count = 0;
+export function next() {
+  count = count + 1;
+  return count;
+}
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	source := `
+const counter = require("./counter");
+String(counter.next()) + ":" + String(counter.next());
+`
+	first := NewRuntime(Options{Timeout: 2 * time.Second, Workers: 1, WorkingDir: dir})
+	defer first.Close()
+	second := NewRuntime(Options{Timeout: 2 * time.Second, Workers: 1, WorkingDir: dir})
+	defer second.Close()
+
+	firstResult, err := first.RunSource(source, filepath.Join(dir, "first.gs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondResult, err := second.RunSource(source, filepath.Join(dir, "second.gs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstText, ok := AsString(firstResult)
+	if !ok {
+		t.Fatalf("first result should be string, got %T", firstResult)
+	}
+	secondText, ok := AsString(secondResult)
+	if !ok {
+		t.Fatalf("second result should be string, got %T", secondResult)
+	}
+	if firstText != "1:2" || secondText != "1:2" {
+		t.Fatalf("module top-level state leaked: first=%q second=%q", firstText, secondText)
 	}
 }
 

@@ -20,6 +20,16 @@ func init() {
 			"buffer.toArray()  转成字节数字数组",
 			"buffer.slice(start?, end?) -> Buffer  截取 Buffer",
 		},
+		"@std/cache": {
+			"create() -> cache  创建内存缓存实例",
+			"cache.set(key, value, ttlMs?)  写入缓存项，可选毫秒 TTL",
+			"cache.get(key)  读取缓存项；不存在或过期时返回 undefined",
+			"cache.has(key)  判断缓存项是否存在且未过期",
+			"cache.delete(key)  删除缓存项",
+			"cache.clear()  清空缓存",
+			"cache.size()  返回当前缓存项数量",
+			"cache.keys()  返回缓存 key 数组",
+		},
 		"@std/compress/gzip": {
 			"compress(value, options?) -> Buffer  gzip 压缩字符串或 Buffer",
 			"decompress(value, options?)  gzip 解压，默认返回字符串",
@@ -43,6 +53,27 @@ func init() {
 			"cmd.help()  输出帮助文本",
 			"cmd.commandPath()  返回命令路径",
 			"noArgs()/arbitraryArgs()/exactArgs(n)/minArgs(n)/maxArgs(n)/rangeArgs(min, max)  参数数量校验器",
+		},
+		"@std/collections": {
+			"unique(array)  返回去重后的数组",
+			"chunk(array, size)  将数组按指定大小分块",
+			"flatten(array)  展平一层嵌套数组",
+			"sample(array)  从数组随机取一个元素",
+			"shuffle(array)  返回打乱顺序后的新数组",
+			"range(end) / range(start, end, step?)  生成数字序列数组",
+		},
+		"@std/color": {
+			"red(text)/green(text)/yellow(text)/blue(text)  返回 ANSI 前景色文本",
+			"bgRed(text)/bgGreen(text)/bgYellow(text)/bgBlue(text)  返回 ANSI 背景色文本",
+			"bold(text)/dim(text)/italic(text)/underline(text)  返回 ANSI 样式文本",
+			"rgb(r, g, b)(text)  创建 RGB 前景色函数",
+			"hex(color)(text)  创建十六进制颜色函数",
+			"strip(text)  移除 ANSI 颜色序列",
+			"enabled/level  颜色输出开关和等级",
+		},
+		"@std/compression": {
+			"gzipCompress(value)  gzip 压缩字符串",
+			"gzipDecompress(value)  gzip 解压字符串",
 		},
 		"@std/crypto": {
 			"randomUUID()  生成 UUID v4",
@@ -77,6 +108,11 @@ func init() {
 			"stmt.queryOne(params?)  查询预编译语句单行",
 			"stmt.close()  关闭预编译语句",
 		},
+		"@std/diff": {
+			"lines(left, right)  按行比较两个文本并返回差异数组",
+			"chars(left, right)  按字符比较两个文本并返回差异数组",
+			"diff.type/value  差异片段类型和值",
+		},
 		"@std/encoding/base64": {
 			"encode(value, options?)  Base64 编码",
 			"decode(text, options?)  Base64 解码，options.asBuffer 可返回 Buffer",
@@ -94,6 +130,17 @@ func init() {
 		"@std/encoding/hex": {
 			"encode(value)  十六进制编码",
 			"decode(text, options?)  十六进制解码，options.asBuffer 可返回 Buffer",
+		},
+		"@std/env": {
+			"load(path?, options?)  加载 .env 文件到进程环境",
+			"loadMultiple(paths, options?)  按顺序加载多个 .env 文件",
+			"get(name, fallback?) / getString(name, fallback?)  读取字符串环境变量",
+			"getInt(name, fallback?) / getFloat(name, fallback?) / getBool(name, fallback?)  读取并转换环境变量",
+			"getArray(name, separator?) / getJson(name)  读取数组或 JSON 环境变量",
+			"has(name) / require(name)  检查或要求环境变量存在",
+			"set(name, value) / unset(name)  设置或删除环境变量",
+			"toObject()  返回环境变量对象",
+			"parse(text)  解析 .env 文本为对象",
 		},
 		"@std/events": {
 			"EventEmitter() -> emitter  创建事件发射器",
@@ -143,6 +190,10 @@ func init() {
 			"renameSync(from, to)  重命名或移动",
 			"unlinkSync(path)  删除文件",
 		},
+		"@std/glob": {
+			"match(pattern, path)  判断路径是否匹配 glob 模式",
+			"find(pattern)  返回匹配 glob 模式的路径数组",
+		},
 		"@std/hash": {
 			"adler32(value)  计算 Adler-32 十六进制摘要",
 			"crc32(value)  计算 CRC-32 十六进制摘要",
@@ -156,6 +207,25 @@ func init() {
 			"options.lang  语言：json/diff/shell/gs/js/toml",
 			"options.width  按终端宽度换行",
 			"options.color  是否输出 ANSI 颜色",
+		},
+		"@std/image": {
+			"info(path)  读取图片格式、宽度和高度信息",
+		},
+		"@std/json": {
+			"parse5(text)  解析宽松 JSON5 风格文本",
+			"stringify5(value, options?)  序列化为 JSON/JSON5 风格文本",
+			"validate(text)  校验 JSON 文本是否有效",
+			"get(value, path)  按路径读取 JSON 对象值",
+			"set(value, path, nextValue)  按路径设置 JSON 对象值",
+			"has(value, path)  判断路径是否存在",
+			"remove(value, path)  按路径删除 JSON 对象值",
+			"patch(value, operations)  应用 JSON patch 操作",
+			"diff(left, right)  比较两个 JSON 值",
+		},
+		"@std/jwt": {
+			"sign(payload, secret, options?)  使用 HMAC 签发 JWT",
+			"verify(token, secret, options?)  验证 JWT 并返回载荷",
+			"decode(token)  不校验签名直接解码 JWT",
 		},
 		"@std/log": {
 			"createFileLogger(path, options?) -> logger  创建文件日志器",
@@ -274,6 +344,9 @@ func init() {
 			"splitList(value)  拆分 PATH 列表",
 			"sep/delimiter  平台路径分隔符",
 		},
+		"@std/pdf": {
+			"info(path)  读取 PDF 页数、标题等基础信息",
+		},
 		"@std/process": {
 			"argv  当前脚本参数数组",
 			"argv0  进程启动名",
@@ -290,6 +363,13 @@ func init() {
 			"unsetenv(name)  删除环境变量",
 			"exit(code?)  退出进程",
 			"version  GoScript 版本",
+		},
+		"@std/prometheus": {
+			"create() -> registry  创建 Prometheus 指标注册器",
+			"registry.counter(name, help?)  创建计数器",
+			"registry.gauge(name, help?)  创建仪表盘指标",
+			"registry.histogram(name, help?, buckets?)  创建直方图指标",
+			"registry.metrics()  导出 Prometheus 文本格式指标",
 		},
 		"@std/runtime": {
 			"runScript(path, options?)  在独立 VM 中执行外部 GoScript 文件并返回 exports",
@@ -313,9 +393,44 @@ func init() {
 			"pty.kill()  终止进程",
 			"pty.close()  关闭伪终端",
 		},
+		"@std/random": {
+			"int(min, max)  生成指定范围内的随机整数",
+			"float(min, max)  生成指定范围内的随机浮点数",
+			"bool()  生成随机布尔值",
+			"pick(array)  从数组随机取一个元素",
+			"sample(array, count)  从数组随机取多个元素",
+			"shuffle(array)  返回打乱顺序后的新数组",
+			"hex(bytes) / base64(bytes)  生成随机字节并编码",
+			"alphanumeric(length) / alpha(length) / numeric(length)  生成随机字符串",
+			"uuid() / uuidv4()  生成 UUID v4",
+			"bytes(size)  生成随机字节数字数组",
+		},
+		"@std/rate-limit": {
+			"create(options?) -> limiter  创建令牌桶限流器，支持 rate/capacity",
+			"limiter.tryAcquire()  尝试获取令牌并返回布尔值",
+			"limiter.acquire()  阻塞直到获取令牌",
+			"limiter.remaining()  返回当前剩余令牌数",
+		},
+		"@std/regexp": {
+			"escape(value)  转义正则表达式特殊字符",
+			"matchAll(pattern, value)  返回所有匹配结果",
+			"split(pattern, value)  按正则拆分字符串",
+		},
+		"@std/retry": {
+			"run(fn, options?)  重试执行函数，支持 times/delay/backoff",
+			"exponential(fn, options?)  使用指数退避重试执行函数",
+		},
 		"@std/schema": {
 			"validate(schema, value)  校验值并返回结果对象",
 			"assert(schema, value)  校验失败时抛出错误",
+		},
+		"@std/semver": {
+			"parse(version)  解析语义化版本",
+			"valid(version)  判断版本字符串是否合法",
+			"compare(left, right)  比较两个版本，返回 -1/0/1",
+			"gt/gte/lt/lte/eq/neq(left, right)  版本比较快捷方法",
+			"inc(version, release)  按 major/minor/patch/prerelease 递增版本",
+			"satisfies(version, range)  判断版本是否满足范围表达式",
 		},
 		"@std/signal": {
 			"supported()  返回支持的信号名",
@@ -345,6 +460,13 @@ func init() {
 			"renderHTML(source, data?, options?)  渲染 HTML 模板并转义",
 			"renderFileSync(path, data?, options?)  读取文件并渲染模板",
 			"escapeHTML(value)  HTML 转义",
+		},
+		"@std/test": {
+			"describe(name, fn)  定义测试套件",
+			"it(name, fn) / test(name, fn)  定义测试用例",
+			"beforeEach(fn) / afterEach(fn)  注册用例钩子",
+			"expect(value)  创建断言对象",
+			"run()  运行已注册测试并返回结果",
 		},
 		"@std/table": {
 			"layout(rows, options?)  按终端宽度布局表格，返回 lines/widths",
@@ -429,6 +551,7 @@ func init() {
 			"clearInterval(id)  取消 interval",
 			"queueMicrotask(fn)  排入微任务",
 			"sleep(ms)  阻塞等待指定毫秒",
+			"sleepAsync(ms) -> Promise  非阻塞等待指定毫秒后完成 Promise",
 		},
 		"@std/toml": {
 			"parse(text)  解析 TOML 文本",
@@ -449,6 +572,18 @@ func init() {
 			"params.set(name, value)/append(name, value)  设置或追加查询参数",
 			"params.delete(name)  删除查询参数",
 			"params.toString()  序列化查询参数",
+		},
+		"@std/validation": {
+			"string()/number()/boolean()/array()/object()  创建对应类型校验器",
+			"validator.required()/optional()  设置必填或可选",
+			"string.min(n)/max(n)/email()/url()/uuid()/matches(pattern)  字符串校验链",
+			"number.min(n)/max(n)/int()/positive()  数字校验链",
+			"array.min(n)/max(n)  数组长度校验链",
+			"validator.validate(value)  返回校验结果",
+			"validator.parse(value)  校验成功返回值，失败抛出错误",
+		},
+		"@std/watch": {
+			"file(path, callback, options?)  轮询监听文件修改，options.interval 为毫秒间隔",
 		},
 		"@std/web":     webAPIDoc(),
 		"@std/express": webAPIDoc(),
@@ -474,6 +609,7 @@ func init() {
 func webAPIDoc() []string {
 	return []string{
 		"createApp() -> app  创建 Web 应用实例",
+		"createApp(options?) -> app  创建 Web 应用实例；options.concurrency 目前支持 serial（默认，脚本 handler 串行执行）",
 		"json() -> middleware  解析 JSON 请求体并写入 req.body",
 		"text() -> middleware  将原始文本请求体写入 req.body",
 		"static(root) -> middleware  从 root 目录提供静态文件服务",

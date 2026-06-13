@@ -21,6 +21,7 @@ func initTimersModule(exports *object.Hash) {
 	setHashMember(exports, "clearInterval", timerAlias("clearInterval"))
 	setHashMember(exports, "queueMicrotask", timerAlias("queueMicrotask"))
 	setHashMember(exports, "sleep", timerAlias("sleep"))
+	setHashMember(exports, "sleepAsync", timerAlias("sleepAsync"))
 }
 
 func timerAlias(name string) *object.Builtin {

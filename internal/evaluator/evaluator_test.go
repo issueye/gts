@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/object"
 	"github.com/issueye/goscript/internal/parser"
@@ -1140,6 +1141,47 @@ score;
 `
 	evaluated := testEval(input)
 	testNumber(t, evaluated, "111")
+}
+
+func TestEval_BuiltinsDocs_SleepAsync(t *testing.T) {
+	input := `
+sleepAsync(1).then(function() {
+  return "awake";
+});
+`
+	evaluated := waitIfPromise(testEval(input))
+	testString(t, evaluated, "awake")
+}
+
+func TestEval_SleepAsyncSettlesThroughVirtualMachineScheduler(t *testing.T) {
+	vm := object.NewVirtualMachine()
+	env := vm.NewEnvironment()
+	RegisterBuiltins(env)
+	posted := make(chan struct{}, 1)
+	vm.SetScheduler(func(fn func()) error {
+		posted <- struct{}{}
+		fn()
+		return nil
+	})
+
+	sleepAsyncObj, ok := env.Get("sleepAsync")
+	if !ok {
+		t.Fatal("sleepAsync builtin missing")
+	}
+	sleepAsync := sleepAsyncObj.(*object.Builtin)
+	result := sleepAsync.Fn(env, ast.Position{}, &object.Number{Value: 1})
+	promise, ok := result.(*object.Promise)
+	if !ok {
+		t.Fatalf("sleepAsync should return promise, got %T", result)
+	}
+	if got := promise.Wait(); got != object.UNDEFINED {
+		t.Fatalf("sleepAsync resolved to %s, want undefined", got.Inspect())
+	}
+	select {
+	case <-posted:
+	default:
+		t.Fatal("sleepAsync should settle through vm scheduler")
+	}
 }
 
 func TestEval_BuiltinsDocs_ExtendedGlobalMathObjectArrayStringNumber(t *testing.T) {

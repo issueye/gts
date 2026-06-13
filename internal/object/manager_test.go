@@ -276,6 +276,24 @@ func TestVirtualMachineSpawnersAreIndependent(t *testing.T) {
 	}
 }
 
+func TestVirtualMachinePostUsesScheduler(t *testing.T) {
+	vm := NewVirtualMachine()
+	called := false
+	ran := false
+	vm.SetScheduler(func(fn func()) error {
+		called = true
+		fn()
+		return nil
+	})
+
+	if err := vm.Post(func() { ran = true }); err != nil {
+		t.Fatal(err)
+	}
+	if !called || !ran {
+		t.Fatal("vm post should use scheduler")
+	}
+}
+
 func TestVirtualMachineGlobalConstantsAreSharedAndIsolated(t *testing.T) {
 	vmA := NewVirtualMachine()
 	vmB := NewVirtualMachine()

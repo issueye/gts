@@ -22,7 +22,7 @@ let webExpressAlias = require("@std/express");
 
 | 接口 | 说明 |
 |------|------|
-| `createApp() -> app` | 创建 Web 应用实例 |
+| `createApp(options?) -> app` | 创建 Web 应用实例；`options.concurrency` 目前支持 `serial`（默认，脚本 handler 串行执行） |
 | `json() -> middleware` | 解析 JSON 请求体并写入 `req.body` |
 | `text() -> middleware` | 将原始文本请求体写入 `req.body` |
 | `static(root) -> middleware` | 从 `root` 目录提供静态文件服务 |
@@ -50,6 +50,16 @@ let webExpressAlias = require("@std/express");
 | `res.redirect(url)` | 使用默认状态码跳转到 URL |
 | `res.redirect(status, url)` | 使用指定状态码跳转到 URL |
 | `res.end(body?)` | 结束响应，可选发送响应体 |
+
+## 并发模型
+
+当前 `@std/web` 默认使用 `serial` 并发模式。HTTP server 可以同时接收多个请求，但进入 GTS 脚本 `handler(req, res, next)` 链时会串行执行，避免多个请求同时访问同一个 VM、闭包环境和模块顶层状态。
+
+```javascript
+let app = webExpress.createApp({ concurrency: "serial" });
+```
+
+后续会在 VM / 环境隔离能力完成后引入 `isolated` 模式；在当前版本中传入 `concurrency: "isolated"` 会明确报错。
 
 ## 流式响应
 

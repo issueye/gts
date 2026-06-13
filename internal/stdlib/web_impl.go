@@ -19,9 +19,10 @@ import (
 )
 
 type webApp struct {
-	mu        sync.RWMutex
-	handlerMu sync.Mutex
-	routes    []webRoute
+	mu          sync.RWMutex
+	handlerMu   sync.Mutex
+	routes      []webRoute
+	concurrency string
 }
 
 type webRoute struct {
@@ -62,8 +63,39 @@ type webProxyOptions struct {
 }
 
 func webCreateApp(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
-	app := &webApp{}
+	concurrency, errObj := parseWebConcurrency(pos, args)
+	if errObj != nil {
+		return errObj
+	}
+	app := &webApp{concurrency: concurrency}
 	return webAppObject(app)
+}
+
+func parseWebConcurrency(pos ast.Position, args []object.Object) (string, *object.Error) {
+	const serial = "serial"
+	if len(args) == 0 || args[0] == object.UNDEFINED || args[0] == object.NULL {
+		return serial, nil
+	}
+	opts, ok := args[0].(*object.Hash)
+	if !ok {
+		return "", object.NewError(pos, "web.createApp: options must be an object")
+	}
+	value, ok := hashValue(opts, "concurrency")
+	if !ok || value == object.UNDEFINED || value == object.NULL {
+		return serial, nil
+	}
+	mode, ok := value.(*object.String)
+	if !ok {
+		return "", object.NewError(pos, "web.createApp: concurrency must be a string")
+	}
+	switch mode.Value {
+	case "", serial:
+		return serial, nil
+	case "isolated":
+		return "", object.NewError(pos, "web.createApp: isolated concurrency is not implemented yet")
+	default:
+		return "", object.NewError(pos, "web.createApp: unsupported concurrency mode %q", mode.Value)
+	}
 }
 
 func webJSON(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
@@ -288,9 +320,20 @@ func (app *webApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx.reqObj = buildWebRequestObject(ctx)
 	ctx.resObj = newWebResponseObject(ctx.writer)
 	routes := app.snapshotRoutes()
+	if app.concurrencyMode() != "serial" {
+		http.Error(w, "web concurrency mode is not available", http.StatusServiceUnavailable)
+		return
+	}
 	app.handlerMu.Lock()
 	defer app.handlerMu.Unlock()
 	app.runRoutes(routes, ctx, 0)
+}
+
+func (app *webApp) concurrencyMode() string {
+	if app == nil || app.concurrency == "" {
+		return "serial"
+	}
+	return app.concurrency
 }
 
 func (app *webApp) snapshotRoutes() []webRoute {

@@ -128,15 +128,26 @@ app;
 func TestWebHandlersAreSerializedForConcurrentRequests(t *testing.T) {
 	appObj := evalWebTestScript(t, `
 let web = require("@std/web");
-let app = web.createApp();
+let app = web.createApp({ concurrency: "serial" });
 let count = 0;
+let active = 0;
+let maxActive = 0;
 app.get("/hit", function(req, res) {
+  active = active + 1;
+  if (active > maxActive) {
+    maxActive = active;
+  }
+  sleep(5);
   let next = count + 1;
   count = next;
+  active = active - 1;
   res.send(String(next));
 });
 app.get("/count", function(req, res) {
   res.send(String(count));
+});
+app.get("/max-active", function(req, res) {
+  res.send(String(maxActive));
 });
 app;
 `)
@@ -188,6 +199,49 @@ app;
 	if got != requests {
 		t.Fatalf("serialized handler count = %d, want %d", got, requests)
 	}
+
+	resp, err = http.Get(server.URL + "/max-active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maxActive, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("max-active response %q is not a number: %v", string(data), err)
+	}
+	if maxActive != 1 {
+		t.Fatalf("max concurrent script handlers = %d, want 1", maxActive)
+	}
+}
+
+func TestWebCreateAppRejectsUnsupportedConcurrency(t *testing.T) {
+	result := evalWebTestScriptAllowRuntimeError(t, `
+let web = require("@std/web");
+web.createApp({ concurrency: "parallel" });
+`)
+	if !object.IsRuntimeError(result) {
+		t.Fatalf("want runtime error, got %T: %s", result, result.Inspect())
+	}
+	if !strings.Contains(result.Inspect(), "unsupported concurrency mode") {
+		t.Fatalf("unexpected error: %s", result.Inspect())
+	}
+}
+
+func TestWebCreateAppRejectsIsolatedUntilImplemented(t *testing.T) {
+	result := evalWebTestScriptAllowRuntimeError(t, `
+let web = require("@std/web");
+web.createApp({ concurrency: "isolated" });
+`)
+	if !object.IsRuntimeError(result) {
+		t.Fatalf("want runtime error, got %T: %s", result, result.Inspect())
+	}
+	if !strings.Contains(result.Inspect(), "isolated concurrency is not implemented yet") {
+		t.Fatalf("unexpected error: %s", result.Inspect())
+	}
 }
 
 func TestWebAppAllStarMatchesAnyPathAndMethod(t *testing.T) {
@@ -224,6 +278,15 @@ app;
 
 func evalWebTestScript(t *testing.T, src string) object.Object {
 	t.Helper()
+	result := evalWebTestScriptAllowRuntimeError(t, src)
+	if object.IsRuntimeError(result) {
+		t.Fatalf("runtime error: %s", result.Inspect())
+	}
+	return result
+}
+
+func evalWebTestScriptAllowRuntimeError(t *testing.T, src string) object.Object {
+	t.Helper()
 	vm := object.NewVirtualMachine()
 	env := vm.NewEnvironment()
 	module.SetupExports(env)
@@ -239,11 +302,7 @@ func evalWebTestScript(t *testing.T, src string) object.Object {
 	if len(l.Errors()) > 0 || len(program.Errors) > 0 {
 		t.Fatalf("parse errors: %v %v", l.Errors(), program.Errors)
 	}
-	result := evaluator.Eval(program, env)
-	if object.IsRuntimeError(result) {
-		t.Fatalf("runtime error: %s", result.Inspect())
-	}
-	return result
+	return evaluator.Eval(program, env)
 }
 
 func mustWebApp(t *testing.T, obj object.Object) *webApp {
