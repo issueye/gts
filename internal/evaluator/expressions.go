@@ -13,6 +13,10 @@ import (
 // ============================================================================
 
 func evalPrefix(n *ast.PrefixExpr, env *object.Environment) object.Object {
+	if n.Op == "++" || n.Op == "--" {
+		return evalUpdate(n.Right, env, n.Op, false, n.Pos())
+	}
+
 	right := Eval(n.Right, env)
 	if object.IsRuntimeError(right) {
 		return right
@@ -31,7 +35,7 @@ func evalPrefix(n *ast.PrefixExpr, env *object.Environment) object.Object {
 		}
 		return object.NewError(n.Pos(), "TypeError: cannot apply + to %s", right.Type())
 	case "typeof":
-		return &object.String{Value: string(right.Type())}
+		return &object.String{Value: typeofName(right)}
 	case "void":
 		return object.UNDEFINED
 	case "delete":
@@ -43,11 +47,65 @@ func evalPrefix(n *ast.PrefixExpr, env *object.Environment) object.Object {
 	return object.NewError(n.Pos(), "unknown prefix operator: %s", n.Op)
 }
 
+func typeofName(value object.Object) string {
+	switch value.(type) {
+	case *object.Undefined:
+		return "undefined"
+	case *object.Null:
+		return "object"
+	case *object.Boolean:
+		return "boolean"
+	case *object.Number:
+		return "number"
+	case *object.String:
+		return "string"
+	case *object.Function, *object.Builtin, *object.Class:
+		return "function"
+	default:
+		return "object"
+	}
+}
+
 func evalInfix(n *ast.InfixExpr, env *object.Environment) object.Object {
+	if (n.Op == "++" || n.Op == "--") && n.Right == nil {
+		return evalUpdate(n.Left, env, n.Op, true, n.Pos())
+	}
+
 	left := Eval(n.Left, env)
 	if object.IsRuntimeError(left) {
 		return left
 	}
+
+	switch n.Op {
+	case "&&":
+		if !object.IsTruthy(left) {
+			return left
+		}
+		right := Eval(n.Right, env)
+		if object.IsRuntimeError(right) {
+			return right
+		}
+		return right
+	case "||":
+		if object.IsTruthy(left) {
+			return left
+		}
+		right := Eval(n.Right, env)
+		if object.IsRuntimeError(right) {
+			return right
+		}
+		return right
+	case "??":
+		if left != object.NULL && left != object.UNDEFINED {
+			return left
+		}
+		right := Eval(n.Right, env)
+		if object.IsRuntimeError(right) {
+			return right
+		}
+		return right
+	}
+
 	right := Eval(n.Right, env)
 	if object.IsRuntimeError(right) {
 		return right
@@ -82,21 +140,6 @@ func evalInfix(n *ast.InfixExpr, env *object.Environment) object.Object {
 		return evalInstanceOf(left, right)
 	case "in":
 		return evalIn(left, right, n.Pos())
-	case "&&":
-		if !object.IsTruthy(left) {
-			return left
-		}
-		return right
-	case "||":
-		if object.IsTruthy(left) {
-			return left
-		}
-		return right
-	case "??":
-		if left == object.NULL || left == object.UNDEFINED {
-			return right
-		}
-		return left
 	default:
 		return object.NewError(n.Pos(), "unknown infix operator: %s", n.Op)
 	}
@@ -422,4 +465,142 @@ func evalCompoundAssign(left, right object.Object, op string, pos ast.Position) 
 		return object.NewError(pos, "TypeError: cannot += with different types")
 	}
 	return object.NewError(pos, "TypeError: compound assignment requires matching types")
+}
+
+func evalUpdate(target ast.Expression, env *object.Environment, op string, postfix bool, pos ast.Position) object.Object {
+	current, err := readUpdateTarget(target, env, pos)
+	if err != nil {
+		return err
+	}
+
+	num, ok := current.(*object.Number)
+	if !ok {
+		return object.NewError(pos, "TypeError: update operator requires number, got %s", current.Type())
+	}
+
+	delta := 1.0
+	if op == "--" {
+		delta = -1
+	}
+	next := &object.Number{Value: num.Value + delta}
+	if err := writeUpdateTarget(target, env, next, pos); err != nil {
+		return err
+	}
+
+	if postfix {
+		return current
+	}
+	return next
+}
+
+func readUpdateTarget(target ast.Expression, env *object.Environment, pos ast.Position) (object.Object, *object.Error) {
+	switch left := target.(type) {
+	case *ast.Ident:
+		value, ok := env.Get(left.TokenLit)
+		if !ok {
+			return nil, object.NewError(left.Pos(), "ReferenceError: '%s' is not defined", left.TokenLit)
+		}
+		return value, nil
+	case *ast.MemberExpr:
+		obj := Eval(left.Object, env)
+		if object.IsRuntimeError(obj) {
+			return nil, obj.(*object.Error)
+		}
+		name := left.Property.(*ast.Ident).TokenLit
+		return getProperty(obj, name, left.Pos()), nil
+	case *ast.IndexExpr:
+		obj := Eval(left.Left, env)
+		if object.IsRuntimeError(obj) {
+			return nil, obj.(*object.Error)
+		}
+		idx := Eval(left.Index, env)
+		if object.IsRuntimeError(idx) {
+			return nil, idx.(*object.Error)
+		}
+		switch o := obj.(type) {
+		case *object.Array:
+			if num, ok := idx.(*object.Number); ok {
+				i := int(num.Value)
+				if i >= 0 && i < len(o.Elements) {
+					return o.Elements[i], nil
+				}
+			}
+			return object.UNDEFINED, nil
+		case *object.Hash:
+			return getHashKey(o, idx), nil
+		default:
+			return nil, object.NewError(left.Pos(), "TypeError: cannot index %s", obj.Type())
+		}
+	default:
+		return nil, object.NewError(pos, "SyntaxError: invalid update target")
+	}
+}
+
+func writeUpdateTarget(target ast.Expression, env *object.Environment, value object.Object, pos ast.Position) *object.Error {
+	switch left := target.(type) {
+	case *ast.Ident:
+		if _, ok, isConst := env.Assign(left.TokenLit, value); !ok {
+			return object.NewError(left.Pos(), "ReferenceError: '%s' is not defined", left.TokenLit)
+		} else if isConst {
+			return object.NewError(left.Pos(), "TypeError: assignment to constant '%s'", left.TokenLit)
+		}
+		return nil
+	case *ast.MemberExpr:
+		obj := Eval(left.Object, env)
+		if object.IsRuntimeError(obj) {
+			return obj.(*object.Error)
+		}
+		name := left.Property.(*ast.Ident).TokenLit
+		if hash, ok := obj.(*object.Hash); ok {
+			if hash.Frozen {
+				return object.NewError(left.Pos(), "TypeError: cannot assign to frozen object")
+			}
+			if hash.Sealed {
+				if _, ok := hash.Pairs[hashKey(&object.String{Value: name})]; !ok {
+					return object.NewError(left.Pos(), "TypeError: cannot add property to sealed object")
+				}
+			}
+			hash.SetMember(&object.String{Value: name}, value)
+			return nil
+		}
+		if inst, ok := obj.(*object.Instance); ok {
+			inst.Props[name] = value
+			return nil
+		}
+		return object.NewError(left.Pos(), "TypeError: cannot assign to property of %T", obj)
+	case *ast.IndexExpr:
+		obj := Eval(left.Left, env)
+		if object.IsRuntimeError(obj) {
+			return obj.(*object.Error)
+		}
+		idx := Eval(left.Index, env)
+		if object.IsRuntimeError(idx) {
+			return idx.(*object.Error)
+		}
+		if arr, ok := obj.(*object.Array); ok {
+			if num, ok := idx.(*object.Number); ok {
+				i := int(num.Value)
+				if i >= 0 && i < len(arr.Elements) {
+					arr.Elements[i] = value
+					return nil
+				}
+			}
+			return object.NewError(left.Pos(), "TypeError: array index must be number")
+		}
+		if hash, ok := obj.(*object.Hash); ok {
+			if hash.Frozen {
+				return object.NewError(left.Pos(), "TypeError: cannot assign to frozen object")
+			}
+			if hash.Sealed {
+				if _, ok := hash.Pairs[hashKey(idx)]; !ok {
+					return object.NewError(left.Pos(), "TypeError: cannot add property to sealed object")
+				}
+			}
+			hash.SetMember(idx, value)
+			return nil
+		}
+		return object.NewError(left.Pos(), "TypeError: cannot index %s", obj.Type())
+	default:
+		return object.NewError(pos, "SyntaxError: invalid update target")
+	}
 }

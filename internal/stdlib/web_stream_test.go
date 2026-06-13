@@ -121,6 +121,38 @@ app;
 	}
 }
 
+func TestWebAppAllStarMatchesAnyPathAndMethod(t *testing.T) {
+	appObj := evalWebTestScript(t, `
+let web = require("@std/web");
+let app = web.createApp();
+app.all("*", function(req, res) {
+  res.status(209);
+  res.send(req.method + " " + req.url);
+});
+app;
+`)
+	app := mustWebApp(t, appObj)
+	server := httptest.NewServer(app)
+	defer server.Close()
+
+	resp, err := http.Post(server.URL+"/custom/path", "text/plain", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if resp.StatusCode != 209 {
+		t.Fatalf("want 209, got %d: %s", resp.StatusCode, string(data))
+	}
+	if string(data) != "POST /custom/path" {
+		t.Fatalf("unexpected wildcard body %q", string(data))
+	}
+}
+
 func evalWebTestScript(t *testing.T, src string) object.Object {
 	t.Helper()
 	vm := object.NewVirtualMachine()

@@ -2,6 +2,7 @@ package stdlib
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -142,6 +143,18 @@ func colorRgb(env *object.Environment, pos ast.Position, args ...object.Object) 
 	if !ok1 || !ok2 || !ok3 {
 		return object.NewError(pos, "color.rgb requires integer values")
 	}
+	ri, ok := colorByte(r.Value)
+	if !ok {
+		return object.NewError(pos, "color.rgb: r must be an integer between 0 and 255")
+	}
+	gi, ok := colorByte(g.Value)
+	if !ok {
+		return object.NewError(pos, "color.rgb: g must be an integer between 0 and 255")
+	}
+	bi, ok := colorByte(b.Value)
+	if !ok {
+		return object.NewError(pos, "color.rgb: b must be an integer between 0 and 255")
+	}
 
 	fn := &object.Builtin{
 		Name: "color.rgb",
@@ -153,7 +166,7 @@ func colorRgb(env *object.Environment, pos ast.Position, args ...object.Object) 
 			if !colorEnabled || colorLevel < 3 {
 				return &object.String{Value: text}
 			}
-			return &object.String{Value: fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r.Value, g.Value, b.Value, text)}
+			return &object.String{Value: fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", ri, gi, bi, text)}
 		},
 	}
 
@@ -163,6 +176,16 @@ func colorRgb(env *object.Environment, pos ast.Position, args ...object.Object) 
 		Value: fn,
 	}
 	return result
+}
+
+func colorByte(value float64) (int, bool) {
+	if math.IsNaN(value) || math.IsInf(value, 0) || math.Trunc(value) != value {
+		return 0, false
+	}
+	if value < 0 || value > 255 {
+		return 0, false
+	}
+	return int(value), true
 }
 
 func colorHex(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {

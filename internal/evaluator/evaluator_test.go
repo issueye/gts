@@ -130,6 +130,24 @@ func TestEval_Boolean(t *testing.T) {
 	}
 }
 
+func TestEval_LogicalOperatorsShortCircuit(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{`let req = {}; req.body && req.body.version;`, "undefined"},
+		{`let req = {}; "fallback" || req.body.version;`, "fallback"},
+		{`let req = {}; "value" ?? req.body.version;`, "value"},
+		{`let req = { body: { version: "1.2.3" } }; req.body && req.body.version;`, "1.2.3"},
+		{`let req = { body: { version: "1.2.3" } }; null ?? req.body.version;`, "1.2.3"},
+	}
+
+	for _, tt := range tests {
+		evaluated := testEval(tt.input)
+		testStringOrUndefined(t, evaluated, tt.expected)
+	}
+}
+
 func TestEval_InOperator(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -290,6 +308,64 @@ func TestEval_ForLetInitializer(t *testing.T) {
 	input := `let total = 0; for (let i = 0; i < 3; i = i + 1) { total = total + i; } total;`
 	evaluated := testEval(input)
 	testNumber(t, evaluated, "3")
+}
+
+func TestEval_UpdateExpressions(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "postfix in for post expression",
+			input:    `let total = 0; for (let i = 0; i < 3; i++) { total = total + i; } total;`,
+			expected: "3",
+		},
+		{
+			name:     "postfix returns previous value",
+			input:    `let i = 1; let old = i++; old + i;`,
+			expected: "3",
+		},
+		{
+			name:     "prefix returns next value",
+			input:    `let i = 1; let next = ++i; next + i;`,
+			expected: "4",
+		},
+		{
+			name:     "member update",
+			input:    `let item = { count: 1 }; item.count++; item.count;`,
+			expected: "2",
+		},
+		{
+			name:     "index update",
+			input:    `let values = [1]; ++values[0]; values[0];`,
+			expected: "2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evaluated := testEval(tt.input)
+			testNumber(t, evaluated, tt.expected)
+		})
+	}
+}
+
+func TestEval_TypeofUsesJavaScriptNames(t *testing.T) {
+	input := `
+let values = [
+  typeof undefined,
+  typeof null,
+  typeof true,
+  typeof 1,
+  typeof "x",
+  typeof {},
+  typeof function() {},
+];
+values.join(",");
+`
+	evaluated := testEval(input)
+	testString(t, evaluated, "undefined,object,boolean,number,string,object,function")
 }
 
 func TestEval_ForInUsesIterators(t *testing.T) {
@@ -1575,6 +1651,20 @@ func testString(t *testing.T, obj object.Object, expected string) {
 	if s.Value != expected {
 		t.Fatalf("want %q, got %q", expected, s.Value)
 	}
+}
+
+func testStringOrUndefined(t *testing.T, obj object.Object, expected string) {
+	t.Helper()
+	if err, ok := obj.(*object.Error); ok {
+		t.Fatalf("eval error: %s", err.Inspect())
+	}
+	if expected == "undefined" {
+		if obj != object.UNDEFINED {
+			t.Fatalf("want undefined, got %T (%s)", obj, obj.Inspect())
+		}
+		return
+	}
+	testString(t, obj, expected)
 }
 
 func testBoolean(t *testing.T, obj object.Object, expected bool) {

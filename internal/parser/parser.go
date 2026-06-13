@@ -250,6 +250,7 @@ var precedences = map[lexer.TokenType]int{
 	lexer.TOKEN_CARET_EQ:    PREC_ASSIGN,
 	lexer.TOKEN_QUESTION:    PREC_TERNARY,
 	lexer.TOKEN_OR_OR:       PREC_OR_OR,
+	lexer.TOKEN_QM_QM:       PREC_OR_OR,
 	lexer.TOKEN_AND_AND:     PREC_AND_AND,
 	lexer.TOKEN_PIPE:        PREC_BIT_OR,
 	lexer.TOKEN_CARET:       PREC_BIT_XOR,

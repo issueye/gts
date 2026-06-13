@@ -343,6 +343,9 @@ func matchWebRoute(route webRoute, r *http.Request) (map[string]string, bool) {
 }
 
 func matchWebPath(pattern, path string) (map[string]string, bool) {
+	if pattern == "*" || pattern == "/*" {
+		return map[string]string{}, true
+	}
 	if pattern == path {
 		return map[string]string{}, true
 	}
