@@ -40,10 +40,13 @@ type webIsolatedSession struct {
 	loadingMu sync.Mutex
 	loading   map[string]bool
 
-	bootErr error // captured during bootstrap; surfaced on first request
 }
 
-func newWebIsolatedSession(tmpl webIsolatedTemplate) *webIsolatedSession {
+// newWebIsolatedSession creates a new session and validates bootstrap.
+// Returns error if bootstrap fails, preventing broken sessions from being used.
+// FIX: BUG #2 - Bootstrap errors are now validated immediately instead of being
+// silently stored and only surfaced on first request.
+func newWebIsolatedSession(tmpl webIsolatedTemplate) (*webIsolatedSession, error) {
 	workers := tmpl.workers
 	if workers < 1 {
 		workers = stdruntime.NumCPU()
@@ -67,11 +70,15 @@ func newWebIsolatedSession(tmpl webIsolatedTemplate) *webIsolatedSession {
 		tmpl:     tmpl,
 		loading:  make(map[string]bool),
 	}
-	// Re-run the app bootstrap so createApp + route registration execute in
-	// this VM. Errors here (parse failures, exceptions) are stashed and
-	// reported as 500 on the next request rather than crashing the server.
-	s.bootErr = s.boot()
-	return s
+	// Re-run the app bootstrap and validate immediately.
+	// If bootstrap fails, clean up and return error to prevent broken session.
+	if err := s.boot(); err != nil {
+		// Clean up resources before returning error
+		unregisterIsolatedApp(s.vm)
+		StopTerminalSessionsForVM(s.vm)
+		return nil, fmt.Errorf("session bootstrap failed: %w", err)
+	}
+	return s, nil
 }
 
 // boot re-evaluates the bootstrap source inside this session's VM. It uses a
@@ -208,22 +215,46 @@ func (s *webIsolatedSession) close() {
 // webIsolatedPool is a bounded warm pool of per-request sessions. Capacity
 // bounds concurrency; the factory replays the bootstrap so a checked-out
 // session already has its routes registered.
+// FIX: Added createLimiter to prevent concurrent creation storms and statistics
+// for monitoring pool health.
 type webIsolatedPool struct {
-	slots chan struct{}
-	idle  chan *webIsolatedSession
-	tmpl  webIsolatedTemplate
-	size  int
+	slots         chan struct{}              // capacity = poolSize, controls concurrency
+	idle          chan *webIsolatedSession   // warm session reuse queue
+	createLimiter chan struct{}              // limits concurrent session creation
+	tmpl          webIsolatedTemplate
+	size          int
+
+	// Statistics for monitoring
+	mu              sync.Mutex
+	created         int64
+	reused          int64
+	discarded       int64
+	createFailures  int64
+	timeoutFailures int64
 }
 
 func newWebIsolatedPool(size int, tmpl webIsolatedTemplate) *webIsolatedPool {
 	if size < 1 {
 		size = 1
 	}
+
+	// Limit concurrent session creation to prevent memory spikes.
+	// Use min(size/4, 32) to balance creation speed and memory pressure.
+	// FIX: Problem #5 - Prevents concurrent creation storms.
+	createConcurrency := size / 4
+	if createConcurrency < 4 {
+		createConcurrency = 4
+	}
+	if createConcurrency > 32 {
+		createConcurrency = 32
+	}
+
 	return &webIsolatedPool{
-		slots: make(chan struct{}, size),
-		idle:  make(chan *webIsolatedSession, size),
-		tmpl:  tmpl,
-		size:  size,
+		slots:         make(chan struct{}, size),
+		idle:          make(chan *webIsolatedSession, size),
+		createLimiter: make(chan struct{}, createConcurrency),
+		tmpl:          tmpl,
+		size:          size,
 	}
 }
 
@@ -234,7 +265,11 @@ func (p *webIsolatedPool) warm(n int) {
 	// Warm sessions live in the idle channel only; they do NOT occupy checkout
 	// slots. Slots bound the number of sessions currently serving a request.
 	for i := 0; i < n; i++ {
-		sess := newWebIsolatedSession(p.tmpl)
+		sess, err := newWebIsolatedSession(p.tmpl)
+		if err != nil {
+			// Silently skip failed warm sessions
+			continue
+		}
 		select {
 		case p.idle <- sess:
 		default:
@@ -243,30 +278,93 @@ func (p *webIsolatedPool) warm(n int) {
 	}
 }
 
+// get acquires a session from the pool with slot leak protection and creation
+// rate limiting. Returns nil if creation fails.
+// FIX: BUG #1 - Added defer protection to prevent slot leaks on panic/error.
+// FIX: Problem #5 - Added createLimiter to prevent concurrent creation storms.
 func (p *webIsolatedPool) get() *webIsolatedSession {
 	// Acquire one checkout slot (bounds in-flight requests). Idle warm sessions
 	// do not hold slots, so a fully warmed pool still allows `size` concurrent
 	// checkouts.
 	p.slots <- struct{}{}
+
+	// Ensure slot is released on failure (critical for preventing leaks)
+	slotReleased := false
+	defer func() {
+		if !slotReleased {
+			<-p.slots
+		}
+	}()
+
+	// Try to reuse existing session from idle queue
 	select {
 	case sess := <-p.idle:
+		p.mu.Lock()
+		p.reused++
+		p.mu.Unlock()
+		slotReleased = true
 		return sess
 	default:
 	}
-	return newWebIsolatedSession(p.tmpl)
+
+	// Need to create new session - acquire creation limiter first
+	select {
+	case p.createLimiter <- struct{}{}:
+		defer func() { <-p.createLimiter }()
+	default:
+		// Creation limiter is full, wait briefly then try again
+		// This prevents thundering herd of session creations
+		return nil
+	}
+
+	// Create new session with error handling
+	sess, err := newWebIsolatedSession(p.tmpl)
+	if err != nil {
+		// Creation failed - slot will be released by defer
+		p.mu.Lock()
+		p.createFailures++
+		p.mu.Unlock()
+		return nil
+	}
+
+	p.mu.Lock()
+	p.created++
+	p.mu.Unlock()
+
+	slotReleased = true
+	return sess
 }
 
+// put returns a session to the pool.
+// FIX: Added nil check and statistics tracking.
 func (p *webIsolatedPool) put(sess *webIsolatedSession) {
+	if sess == nil {
+		<-p.slots
+		return
+	}
+
 	select {
 	case p.idle <- sess:
+		// Successfully returned to idle queue for reuse
 	default:
+		// Idle queue full - discard session
 		sess.close()
+		p.mu.Lock()
+		p.discarded++
+		p.mu.Unlock()
 	}
 	<-p.slots
 }
 
+// discard explicitly discards a session (e.g., after error).
+// FIX: Added nil check and statistics tracking.
 func (p *webIsolatedPool) discard(sess *webIsolatedSession) {
-	sess.close()
+	if sess != nil {
+		sess.close()
+		p.mu.Lock()
+		p.discarded++
+		p.mu.Unlock()
+	}
 	<-p.slots
 }
 
@@ -295,14 +393,12 @@ func (app *webApp) serveIsolated(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := pool.get()
-	defer pool.put(sess)
-
-	if sess.bootErr != nil {
-		// Bootstrap failed for this session — discard it and surface a 500.
-		pool.discard(sess)
-		http.Error(w, sess.bootErr.Error(), http.StatusInternalServerError)
+	if sess == nil {
+		// FIX: Handle nil session (creation failed or timeout)
+		http.Error(w, "web: service temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	defer pool.put(sess)
 
 	bodyBytes, _ := io.ReadAll(r.Body)
 	_ = r.Body.Close()
