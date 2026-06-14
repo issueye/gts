@@ -7,31 +7,27 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/async"
+	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/bundle"
 	"github.com/issueye/goscript/internal/config"
-	"github.com/issueye/goscript/internal/evaluator"
 	"github.com/issueye/goscript/internal/gtp/pluginhost"
-	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/lsp"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
 	"github.com/issueye/goscript/internal/packagefile"
-	"github.com/issueye/goscript/internal/parser"
 	"github.com/issueye/goscript/internal/proj"
-	"github.com/issueye/goscript/internal/stdlib"
+	"github.com/issueye/goscript/internal/runtime" // reused loader (Session)
+	stdruntime "runtime"
 )
 
 const version = "0.1.0-dev"
 const defaultTimeout = 10 * time.Second
 
-var sharedVMPool = object.NewVirtualMachinePool(runtime.NumCPU())
 var cliInput io.Reader = os.Stdin
 var hasAppendedPackage = currentExecutableHasAppendedPackage
 
@@ -41,15 +37,15 @@ type options struct {
 	timeout    time.Duration
 }
 
+// runner executes one CLI invocation. It delegates the VM / pool / cache /
+// resolver / loader to a runtime.Session (shared with the SDK and @std/web
+// isolated mode), keeping only CLI-specific concerns here: flag-driven
+// options, embedded package handling, plugin host wiring, and the per-run
+// timeout envelope. A fresh Session is built per run and closed on exit.
 type runner struct {
-	opts     options
-	pool     *async.Pool
-	cache    *module.Cache
-	vm       *object.VirtualMachine
-	resolver *module.Resolver
-	plugins  *pluginhost.Host
-	rootDir  string
-	loading  map[string]bool // 正在加载的模块路径，防止循环依赖
+	opts    options
+	sess    *runtime.Session
+	plugins *pluginhost.Host
 }
 
 type replConfig struct {
@@ -96,7 +92,7 @@ func run(args []string) int {
 
 	opts := options{}
 	fs.BoolVar(&opts.checkTypes, "check-types", false, "enable optional type checking")
-	fs.IntVar(&opts.workers, "workers", runtime.NumCPU(), "maximum async worker count")
+	fs.IntVar(&opts.workers, "workers", stdruntime.NumCPU(), "maximum async worker count")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "maximum script runtime; use 0 to disable")
 	showVersion := fs.Bool("version", false, "print version")
 	apiDoc := fs.String("api_doc", "", "print native module API docs, e.g. @std/web; use all to list modules")
@@ -256,7 +252,7 @@ func runWithEmbeddedArgs(cliArgs, appArgs []string) int {
 
 	opts := options{}
 	fs.BoolVar(&opts.checkTypes, "check-types", false, "enable optional type checking")
-	fs.IntVar(&opts.workers, "workers", runtime.NumCPU(), "maximum async worker count")
+	fs.IntVar(&opts.workers, "workers", stdruntime.NumCPU(), "maximum async worker count")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "maximum script runtime; use 0 to disable")
 	showVersion := fs.Bool("version", false, "print version")
 	apiDoc := fs.String("api_doc", "", "print native module API docs, e.g. @std/web; use all to list modules")
@@ -298,7 +294,7 @@ func runEmbeddedScriptCommand(args []string) int {
 
 	opts := options{}
 	fs.BoolVar(&opts.checkTypes, "check-types", false, "enable optional type checking")
-	fs.IntVar(&opts.workers, "workers", runtime.NumCPU(), "maximum async worker count")
+	fs.IntVar(&opts.workers, "workers", stdruntime.NumCPU(), "maximum async worker count")
 	fs.DurationVar(&opts.timeout, "timeout", defaultTimeout, "maximum script runtime; use 0 to disable")
 
 	if err := fs.Parse(args); err != nil {
@@ -327,8 +323,7 @@ func newRunner(opts options) *runner {
 		opts.workers = 1
 	}
 	return &runner{
-		opts:    opts,
-		loading: make(map[string]bool),
+		opts: opts,
 	}
 }
 
@@ -355,8 +350,12 @@ func printAPIDoc(path string) error {
 		}
 		return nil
 	}
-	env := object.NewEnvironment()
-	evaluator.RegisterBuiltins(env)
+	// Build a throwaway session just to host the builtins env that native
+	// module factories expect. No script runs here.
+	sess := runtime.NewSession(runtime.Options{})
+	defer sess.Close()
+	env := sess.NewEnvironment()
+	sess.Configure(env, "")
 	obj, ok := module.GetNative(path, env)
 	if !ok {
 		return fmt.Errorf("native module %s is not registered", path)
@@ -524,7 +523,7 @@ func distCommand(args []string) error {
 
 	if out == "" {
 		name := filepath.Base(filepath.Clean(absDir))
-		if runtime.GOOS == "windows" {
+		if stdruntime.GOOS == "windows" {
 			name += ".exe"
 		}
 		out = filepath.Join(absDir, "dist", name)
@@ -598,7 +597,7 @@ func copyPluginsToDist(projectDir, distDir string, plugins map[string]config.Plu
 		}
 
 		// 设置执行权限
-		if runtime.GOOS != "windows" {
+		if stdruntime.GOOS != "windows" {
 			if err := os.Chmod(targetPath, 0755); err != nil {
 				return err
 			}
@@ -717,31 +716,14 @@ func (r *runner) runInline(src string) error {
 		if err != nil {
 			return err
 		}
-		reuseVM := false
-		defer func() {
-			if reuseVM {
-				r.releaseVM()
-			} else {
-				r.discardVM()
-			}
-		}()
-		r.checkoutVM()
-		r.pool = async.NewPool(r.opts.workers)
-		r.vm.SetSpawner(r.pool.Go)
-		r.cache = module.NewCacheWithVM(r.vm)
-		r.rootDir = module.FindProjectRoot(cwd)
-		r.resolver = module.NewResolver(r.rootDir)
-		env := r.vm.NewEnvironment()
-		module.SetupExports(env)
-		r.configureModuleLoaders(env, cwd)
-		if _, err := r.evalSource(src, "<inline>", env); err != nil {
+		r.beginSession(cwd)
+		defer r.endSession()
+		env := r.sess.NewEnvironment()
+		r.sess.Configure(env, cwd)
+		if _, err := r.sess.EvalSource(src, "<inline>", env); err != nil {
 			return err
 		}
-		if err := r.drainRuntime(); err != nil {
-			return err
-		}
-		reuseVM = true
-		return nil
+		return r.sess.Drain()
 	})
 }
 
@@ -788,22 +770,117 @@ func (r *runner) runFileWithOptions(path string, opts runOptions) error {
 		}
 		defer restore()
 
-		reuseVM := false
-		defer func() {
-			if reuseVM {
-				r.releaseVM()
-			} else {
-				r.discardVM()
+		r.beginSession("")
+		defer r.endSession()
+		r.sess.VM().SetArgv(opts.argv)
+		src, err := os.ReadFile(absPath)
+		if err != nil {
+			return err
+		}
+		r.sess.SetBootstrapSource(string(src))
+		env := r.sess.NewEnvironment()
+		r.sess.Configure(env, filepath.Dir(absPath))
+		if _, err := r.sess.EvalSource(string(src), absPath, env); err != nil {
+			return err
+		}
+		if opts.autoMain {
+			if _, err := r.callMain(env, absPath); err != nil {
+				return err
 			}
-		}()
-		if _, err := r.evalFile(absPath, opts); err != nil {
+		}
+		return r.sess.Drain()
+	})
+}
+
+// beginSession builds a fresh runtime.Session for this run, rooted at rootDir
+// (derived from cwd when empty). The plugin host, if any, is wired in via the
+// Session's NativeResolver so plugin modules resolve ahead of the global
+// native registry. Each CLI run gets its own Session; there is no cross-run VM
+// reuse (the old sharedVMPool is gone — per-run isolation matches the new
+// model and the cost is negligible for a CLI invocation).
+func (r *runner) beginSession(rootDir string) {
+	if rootDir == "" {
+		rootDir = module.FindProjectRoot("")
+	}
+	r.sess = runtime.NewSession(runtime.Options{
+		Workers:    r.opts.workers,
+		Timeout:    0, // CLI governs the timeout envelope via withTimeout.
+		CheckTypes: r.opts.checkTypes,
+		RootDir:    rootDir,
+		NativeResolver: func(env *object.Environment, specifier string) (object.Object, bool, error) {
+			if r.plugins != nil {
+				if native, ok := r.plugins.NativeModule(specifier, env); ok {
+					return native, true, nil
+				}
+			}
+			return nil, false, nil
+		},
+	})
+}
+
+// endSession drains async work and closes the session, ensuring terminal
+// sessions and other VM-bound resources are torn down even on error.
+func (r *runner) endSession() {
+	if r.sess == nil {
+		return
+	}
+	_ = r.sess.Drain()
+	r.sess.Close()
+	r.sess = nil
+}
+
+// callMain invokes a top-level main() if present. Kept on the runner (rather
+// than the Session) because the CLI's main()-auto-call convention is a
+// CLI-level concern; the Session exposes the evaluator primitives.
+func (r *runner) callMain(env *object.Environment, file string) (object.Object, error) {
+	mainFn, ok := env.Get("main")
+	if !ok {
+		return object.UNDEFINED, nil
+	}
+	if _, ok := mainFn.(*object.Function); !ok {
+		return nil, fmt.Errorf("%s: top-level main is not a function", file)
+	}
+	pos := objectEvalPos(file)
+	call := mainCallExpr(pos)
+	result := r.sess.VM().EvalNode(call, env)
+	if promise, ok := result.(*object.Promise); ok {
+		var err error
+		result, err = r.sess.WaitPromise(promise, "main promise")
+		if err != nil {
+			return nil, err
+		}
+	}
+	if object.IsError(result) {
+		return nil, errors.New(result.Inspect())
+	}
+	return result, nil
+}
+
+func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executablePath, entry string, args ...string) error {
+	entry = filepath.ToSlash(entry)
+	src, err := pkg.ReadText(entry)
+	if err != nil {
+		return err
+	}
+	return r.withTimeout("script execution", func() error {
+		absExe, err := filepath.Abs(executablePath)
+		if err != nil {
 			return err
 		}
-		if err := r.drainRuntime(); err != nil {
+		archivePath := filepath.ToSlash(absExe) + "!" + entry
+		r.beginSession(absExe)
+		defer r.endSession()
+		r.sess.VM().SetArgv(append([]string{absExe, entry}, args...))
+		r.sess.SetBootstrapSource(src)
+		env := r.sess.NewEnvironment()
+		r.sess.Configure(env, filepath.ToSlash(absExe)+"!"+filepath.ToSlash(filepath.Dir(entry)))
+		if _, err := r.sess.EvalSource(src, archivePath, env); err != nil {
 			return err
 		}
-		reuseVM = true
-		return nil
+		if _, err := r.callMain(env, archivePath); err != nil {
+			return err
+		}
+		return r.sess.Drain()
 	})
 }
 
@@ -840,338 +917,6 @@ func enterWorkingDir(dir string) (func(), error) {
 	}, nil
 }
 
-func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error) {
-	src, err := os.ReadFile(absPath)
-	if err != nil {
-		return nil, err
-	}
-	r.checkoutVM()
-	r.vm.SetArgv(opts.argv)
-	r.pool = async.NewPool(r.opts.workers)
-	r.vm.SetSpawner(r.pool.Go)
-	r.cache = module.NewCacheWithVM(r.vm)
-	r.rootDir = module.FindProjectRoot(filepath.Dir(absPath))
-	r.resolver = module.NewResolver(r.rootDir)
-	env := r.vm.NewEnvironment()
-	module.SetupExports(env)
-	r.configureModuleLoaders(env, filepath.Dir(absPath))
-	result, err := r.evalSource(string(src), absPath, env)
-	if err != nil {
-		return nil, err
-	}
-	if opts.autoMain {
-		return r.callMain(env, absPath)
-	}
-	return result, nil
-}
-
-func (r *runner) runPackageEntryFromExecutable(pkg *packagefile.Package, executablePath, entry string, args ...string) error {
-	entry = filepath.ToSlash(entry)
-	src, err := pkg.ReadText(entry)
-	if err != nil {
-		return err
-	}
-	return r.withTimeout("script execution", func() error {
-		absExe, err := filepath.Abs(executablePath)
-		if err != nil {
-			return err
-		}
-		archivePath := filepath.ToSlash(absExe) + "!" + entry
-		r.checkoutVM()
-		r.vm.SetArgv(append([]string{absExe, entry}, args...))
-		r.pool = async.NewPool(r.opts.workers)
-		r.vm.SetSpawner(r.pool.Go)
-		r.cache = module.NewCacheWithVM(r.vm)
-		r.rootDir = absExe
-		r.resolver = module.NewResolver(r.rootDir)
-		env := r.vm.NewEnvironment()
-		module.SetupExports(env)
-		r.configureModuleLoaders(env, filepath.ToSlash(absExe)+"!"+filepath.ToSlash(filepath.Dir(entry)))
-		reuseVM := false
-		defer func() {
-			if reuseVM {
-				r.releaseVM()
-			} else {
-				r.discardVM()
-			}
-		}()
-		if _, err := r.evalSource(src, archivePath, env); err != nil {
-			return err
-		}
-		if _, err := r.callMain(env, archivePath); err != nil {
-			return err
-		}
-		if err := r.drainRuntime(); err != nil {
-			return err
-		}
-		reuseVM = true
-		return nil
-	})
-}
-
-func (r *runner) evalSource(src, file string, env *object.Environment) (object.Object, error) {
-	l := lexer.New(src)
-	p := parser.New(l, file)
-	program := p.ParseProgram()
-
-	var parseErrors []string
-	parseErrors = append(parseErrors, l.Errors()...)
-	parseErrors = append(parseErrors, program.Errors...)
-	if len(parseErrors) > 0 {
-		return nil, errors.New(strings.Join(parseErrors, "\n"))
-	}
-
-	result := evaluator.Eval(program, env)
-	if promise, ok := result.(*object.Promise); ok {
-		var err error
-		result, err = r.waitPromise(promise, "top-level promise")
-		if err != nil {
-			return nil, err
-		}
-	}
-	if object.IsError(result) {
-		return nil, errors.New(result.Inspect())
-	}
-	return result, nil
-}
-
-func (r *runner) callMain(env *object.Environment, file string) (object.Object, error) {
-	mainFn, ok := env.Get("main")
-	if !ok {
-		return object.UNDEFINED, nil
-	}
-	if _, ok := mainFn.(*object.Function); !ok {
-		return nil, fmt.Errorf("%s: top-level main is not a function", file)
-	}
-
-	pos := ast.Position{File: file}
-	call := &ast.CallExpr{
-		Pos_:     pos,
-		TokenLit: "main",
-		Callee:   &ast.Ident{Pos_: pos, TokenLit: "main"},
-	}
-	result := evaluator.Eval(call, env)
-	if promise, ok := result.(*object.Promise); ok {
-		var err error
-		result, err = r.waitPromise(promise, "main promise")
-		if err != nil {
-			return nil, err
-		}
-	}
-	if object.IsError(result) {
-		return nil, errors.New(result.Inspect())
-	}
-	return result, nil
-}
-
-func (r *runner) requireFunc(baseDir string) evaluator.RequireFn {
-	return func(path string) (object.Object, error) {
-		r.ensureRuntime()
-		resolved, err := r.resolver.Resolve(path, module.ResolveOptions{ProjectRoot: r.rootDir, BaseDir: baseDir})
-		if err != nil {
-			return nil, err
-		}
-		if resolved.Path == "" && resolved.Kind != module.ModuleKindStdSource {
-			return nil, fmt.Errorf("module %s resolved without a source path", path)
-		}
-		cacheKey := resolved.ID
-		if cacheKey == "" {
-			cacheKey = resolved.Path
-		}
-		if cached := r.cache.Get(cacheKey); cached != nil {
-			return module.GetExports(cached), nil
-		}
-
-		// 检测循环依赖
-		if r.loading[cacheKey] {
-			return nil, fmt.Errorf("circular dependency detected: %s", path)
-		}
-		r.loading[cacheKey] = true
-		defer delete(r.loading, cacheKey)
-
-		env := r.cache.GetOrCreate(cacheKey)
-		module.SetupExports(env)
-		r.configureModuleLoaders(env, resolvedModuleDir(resolved))
-
-		src, err := r.readResolvedSource(resolved)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := r.evalSource(string(src), resolved.Path, env); err != nil {
-			return nil, err
-		}
-		return module.GetExports(env), nil
-	}
-}
-
-func (r *runner) ensureRuntime() {
-	if r.vm == nil {
-		r.checkoutVM()
-	}
-	r.vm.SetTypeCheck(r.opts.checkTypes)
-	if r.pool == nil {
-		r.pool = async.NewPool(r.opts.workers)
-		r.vm.SetSpawner(r.pool.Go)
-	}
-	if r.cache == nil {
-		r.cache = module.NewCacheWithVM(r.vm)
-	}
-	if r.resolver == nil {
-		r.resolver = module.NewResolver("")
-	}
-	if r.rootDir == "" {
-		r.rootDir = module.FindProjectRoot("")
-	}
-}
-
-func (r *runner) checkoutVM() {
-	r.vm = sharedVMPool.Get()
-	r.vm.SetTypeCheck(r.opts.checkTypes)
-}
-
-func (r *runner) releaseVM() {
-	if r.vm == nil {
-		return
-	}
-	stdlib.StopTerminalSessionsForVM(r.vm)
-	sharedVMPool.Put(r.vm)
-	r.discardVM()
-}
-
-func (r *runner) discardVM() {
-	if r.vm != nil {
-		stdlib.StopTerminalSessionsForVM(r.vm)
-	}
-	r.vm = nil
-	r.cache = nil
-	r.resolver = nil
-	r.rootDir = ""
-	r.pool = nil
-}
-
-func (r *runner) drainRuntime() error {
-	if r.vm != nil {
-		if err := r.waitGroup("async tasks", r.vm.WaitAsync); err != nil {
-			r.vm = nil
-			return err
-		}
-	}
-	if r.pool != nil {
-		if err := r.waitGroup("worker pool", r.pool.Wait); err != nil {
-			r.vm = nil
-			r.pool = nil
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *runner) configureModuleLoaders(env *object.Environment, baseDir string) {
-	r.ensureRuntime()
-	env.ModuleDir = baseDir
-	require := func(path string) (object.Object, error) {
-		return r.requireFrom(env, path)
-	}
-	evaluator.RegisterBuiltinsWithCache(env, require)
-	env.VM().SetImportFunc(func(env *object.Environment, path string) (object.Object, error) {
-		return r.requireFrom(env, path)
-	})
-}
-
-func (r *runner) requireFrom(env *object.Environment, path string) (object.Object, error) {
-	baseDir := env.ModuleDir
-	if baseDir == "" {
-		baseDir = r.rootDir
-	}
-	resolved, err := r.resolver.Resolve(path, module.ResolveOptions{ProjectRoot: r.rootDir, BaseDir: baseDir})
-	if err != nil {
-		return nil, err
-	}
-	if resolved.Kind == module.ModuleKindNative {
-		if r.plugins != nil {
-			if native, ok := r.plugins.NativeModule(path, env); ok {
-				return native, nil
-			}
-		}
-		native, ok := module.GetNative(path, env)
-		if !ok {
-			return nil, fmt.Errorf("native module %s is not registered", path)
-		}
-		return native, nil
-	}
-
-	// 检测循环依赖
-	cacheKey := resolved.ID
-	if cacheKey == "" {
-		cacheKey = resolved.Path
-	}
-	if r.loading[cacheKey] {
-		return nil, fmt.Errorf("circular dependency detected: %s", path)
-	}
-
-	return r.requireFunc(baseDir)(path)
-}
-
-func (r *runner) readResolvedSource(resolved module.ResolvedModule) (string, error) {
-	if resolved.Kind == module.ModuleKindStdSource {
-		return module.ReadStdSource(resolved.Specifier)
-	}
-	if resolved.PackageFile != "" {
-		return packagefile.ReadNestedText(resolved.PackageFile, resolved.ArchivePath)
-	}
-	data, err := os.ReadFile(resolved.Path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func resolvedModuleDir(resolved module.ResolvedModule) string {
-	if resolved.Kind == module.ModuleKindStdSource {
-		return module.StdSourceDir(resolved.Specifier)
-	}
-	if resolved.PackageFile != "" {
-		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
-	}
-	return filepath.Dir(resolved.Path)
-}
-
-func (r *runner) waitPromise(p *object.Promise, label string) (object.Object, error) {
-	if r.opts.timeout <= 0 {
-		return p.Wait(), nil
-	}
-
-	done := make(chan object.Object, 1)
-	go func() {
-		done <- p.Wait()
-	}()
-	select {
-	case result := <-done:
-		return result, nil
-	case <-time.After(r.opts.timeout):
-		return nil, fmt.Errorf("%s timed out after %s", label, r.opts.timeout)
-	}
-}
-
-func (r *runner) waitGroup(label string, wait func()) error {
-	if r.opts.timeout <= 0 {
-		wait()
-		return nil
-	}
-
-	done := make(chan struct{})
-	go func() {
-		wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-time.After(r.opts.timeout):
-		return fmt.Errorf("%s timed out after %s", label, r.opts.timeout)
-	}
-}
-
 func (r *runner) withTimeout(label string, fn func() error) error {
 	if r.opts.timeout <= 0 {
 		return fn()
@@ -1190,4 +935,50 @@ func (r *runner) withTimeout(label string, fn func() error) error {
 	case <-timer.C:
 		return fmt.Errorf("%s timed out after %s", label, r.opts.timeout)
 	}
+}
+
+// objectEvalPos / mainCallExpr build the tiny AST for invoking top-level
+// main(). They live here (not on the Session) because the auto-call-main
+// convention is a CLI concern.
+func objectEvalPos(file string) ast.Position { return ast.Position{File: file} }
+
+func mainCallExpr(pos ast.Position) *ast.CallExpr {
+	return &ast.CallExpr{
+		Pos_:     pos,
+		TokenLit: "main",
+		Callee:   &ast.Ident{Pos_: pos, TokenLit: "main"},
+	}
+}
+
+// evalFile loads and evaluates a single script file within a fresh session,
+// returning the result. Exposed for benchmarks/tests that want to drive the
+// runner directly without going through the full CLI command dispatch.
+//
+// It deliberately does NOT drain or close the session: the web framework tests
+// start an HTTP server inside the script via app.listen(), which runs on the
+// session's pool, and the test then probes the live server. Draining here would
+// block forever waiting for that server to stop. Callers that need teardown
+// (the normal CLI run paths) use runFileWithOptions, which wraps evalFile-style
+// logic with begin/endSession. Leaked sessions in tests are reclaimed when the
+// test process exits.
+func (r *runner) evalFile(absPath string, opts runOptions) (object.Object, error) {
+	src, err := os.ReadFile(absPath)
+	if err != nil {
+		return nil, err
+	}
+	r.beginSession("")
+	if len(opts.argv) > 0 {
+		r.sess.VM().SetArgv(opts.argv)
+	}
+	r.sess.SetBootstrapSource(string(src))
+	env := r.sess.NewEnvironment()
+	r.sess.Configure(env, filepath.Dir(absPath))
+	result, err := r.sess.EvalSource(string(src), absPath, env)
+	if err != nil {
+		return nil, err
+	}
+	if opts.autoMain {
+		return r.callMain(env, absPath)
+	}
+	return result, nil
 }

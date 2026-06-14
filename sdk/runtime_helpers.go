@@ -3,18 +3,14 @@ package sdk
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/issueye/goscript/internal/ast"
 	"github.com/issueye/goscript/internal/evaluator"
-	"github.com/issueye/goscript/internal/lexer"
-	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
-	"github.com/issueye/goscript/internal/packagefile"
-	"github.com/issueye/goscript/internal/parser"
 )
 
+// callMain invokes a top-level main() if present, awaiting any Promise it
+// returns. Hosts reach this via RunFile(autoMain=true) / RunProject.
 func (r *Runtime) callMain(env *object.Environment, file string) (object.Object, error) {
 	mainFn, ok := env.Get("main")
 	if !ok {
@@ -32,7 +28,7 @@ func (r *Runtime) callMain(env *object.Environment, file string) (object.Object,
 	result := evaluator.Eval(call, env)
 	if promise, ok := result.(*object.Promise); ok {
 		var err error
-		result, err = r.waitPromise(promise, "main promise")
+		result, err = r.sess.WaitPromise(promise, "main promise")
 		if err != nil {
 			return nil, err
 		}
@@ -43,6 +39,9 @@ func (r *Runtime) callMain(env *object.Environment, file string) (object.Object,
 	return result, nil
 }
 
+// callValue invokes a script function value with Go-side Value arguments. The
+// arguments are staged as environment bindings and referenced by synthesized
+// identifier AST nodes, so the call flows through the normal evaluator.
 func (r *Runtime) callValue(fn object.Object, env *object.Environment, args []Value, file string) (object.Object, error) {
 	pos := ast.Position{File: file}
 	argExprs := make([]ast.Expression, len(args))
@@ -61,7 +60,7 @@ func (r *Runtime) callValue(fn object.Object, env *object.Environment, args []Va
 	result := evaluator.Eval(call, env)
 	if promise, ok := result.(*object.Promise); ok {
 		var err error
-		result, err = r.waitPromise(promise, "export promise")
+		result, err = r.sess.WaitPromise(promise, "export promise")
 		if err != nil {
 			return nil, err
 		}
@@ -72,6 +71,7 @@ func (r *Runtime) callValue(fn object.Object, env *object.Environment, args []Va
 	return result, nil
 }
 
+// exportedValue reads a named export from a module's exports object.
 func exportedValue(exports object.Object, name string) (object.Object, error) {
 	hash, ok := exports.(*object.Hash)
 	if !ok {
@@ -83,40 +83,4 @@ func exportedValue(exports object.Object, name string) (object.Object, error) {
 		return nil, fmt.Errorf("module has no export %q", name)
 	}
 	return pair.Value, nil
-}
-
-func readResolvedSource(resolved module.ResolvedModule) (string, error) {
-	if resolved.Kind == module.ModuleKindStdSource {
-		return module.ReadStdSource(resolved.Specifier)
-	}
-	if resolved.PackageFile != "" {
-		return packagefile.ReadNestedText(resolved.PackageFile, resolved.ArchivePath)
-	}
-	data, err := os.ReadFile(resolved.Path)
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-func resolvedModuleDir(resolved module.ResolvedModule) string {
-	if resolved.Kind == module.ModuleKindStdSource {
-		return module.StdSourceDir(resolved.Specifier)
-	}
-	if resolved.PackageFile != "" {
-		return filepath.ToSlash(resolved.PackageFile) + "!" + filepath.ToSlash(filepath.Dir(resolved.ArchivePath))
-	}
-	return filepath.Dir(resolved.Path)
-}
-
-func evalStandalone(source, file string, env *object.Environment) (object.Object, error) {
-	l := lexer.New(source)
-	p := parser.New(l, file)
-	program := p.ParseProgram()
-	parseErrors := append([]string{}, l.Errors()...)
-	parseErrors = append(parseErrors, program.Errors...)
-	if len(parseErrors) > 0 {
-		return nil, errors.New(parseErrors[0])
-	}
-	return evaluator.Eval(program, env), nil
 }

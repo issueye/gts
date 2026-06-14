@@ -309,7 +309,16 @@ web.createApp({ concurrency: "isolated" })
 - 已给 `VirtualMachine` 增加可选 `SetScheduler` / `Post` 挂点；未设置 scheduler 时 `Post` 退化为旧 `Go` 行为。
 - 已新增 `sleepAsync(ms) -> Promise`，并接入全局 builtin 与 `@std/timers.sleepAsync`。
 - `sleepAsync` 的 timer 到期后通过 `vm.Post` settle Promise；如果 VM 接入 event loop scheduler，settle 会回到 owner loop。
-- 尚未迁移 Promise chaining、`queueMicrotask`、`setTimeout`、`@std/web` handler 或 HTTP client；现有阻塞 `sleep(ms)` 语义保持不变。
+- 已将 `Promise.then/catch/finally` 的回调执行回投到 `vm.Post`；等待 Promise settle 的 goroutine 仍保留，但真正执行 handler 和 settle chained promise 的部分会经过 scheduler。
+- 已将 `Promise.all/race/allSettled` 的异步完成路径回投到 `vm.Post`；后台 goroutine 只等待 Promise settle，不直接构造数组/对象或改写组合 Promise 状态。
+- 已将 `queueMicrotask`、`setTimeout`、`setInterval` 的脚本 callback 执行回投到 `vm.Post`；`setInterval` 当前保持单 interval 不重叠执行。
+- 已给 `@std/web` serial app 接入 VM scheduler；handler 返回 Promise 时，请求 goroutine 等待 Promise，Promise 回调和响应写入仍通过同一个 handler 锁串行回到脚本侧。
+- 已新增并发测试证明：多个请求可以同时处于 `sleepAsync` 等待中，但进入脚本片段时 `maxScriptActive` 仍保持 1。
+- 尚未迁移 HTTP client、stream/proxy async handling；现有阻塞 `sleep(ms)` 语义保持不变。
+
+### 当前限制
+
+- 目前 `web.createApp({ concurrency: "serial" })` 会把当前 VM 的 scheduler 绑定到该 app 的 handler 锁；同一 VM 内创建多个 app 时，后创建 app 会覆盖 scheduler。后续应把 scheduler 所有权上移到正式的 `eventloop.Worker` / runtime session，而不是挂在单个 app 上。
 
 ## 与 VM 隔离路线的关系
 

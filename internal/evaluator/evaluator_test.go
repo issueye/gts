@@ -1184,6 +1184,146 @@ func TestEval_SleepAsyncSettlesThroughVirtualMachineScheduler(t *testing.T) {
 	}
 }
 
+func TestEval_PromiseThenRunsThroughVirtualMachineScheduler(t *testing.T) {
+	vm := object.NewVirtualMachine()
+	env := vm.NewEnvironment()
+	RegisterBuiltins(env)
+	posted := make(chan struct{}, 4)
+	vm.SetScheduler(func(fn func()) error {
+		posted <- struct{}{}
+		fn()
+		return nil
+	})
+
+	l := lexer.New(`Promise.resolve(2).then(function(value) { return value + 3; });`)
+	p := parser.New(l, "promise_scheduler_test.gs")
+	program := p.ParseProgram()
+	if len(l.Errors()) > 0 || len(program.Errors) > 0 {
+		t.Fatalf("parse errors: %v %v", l.Errors(), program.Errors)
+	}
+	result := Eval(program, env)
+	promise, ok := result.(*object.Promise)
+	if !ok {
+		t.Fatalf("want promise, got %T", result)
+	}
+	settled := promise.Wait()
+	testNumber(t, settled, "5")
+	select {
+	case <-posted:
+	default:
+		t.Fatal("Promise.then continuation should run through vm scheduler")
+	}
+}
+
+func TestEval_QueueMicrotaskRunsThroughVirtualMachineScheduler(t *testing.T) {
+	vm := object.NewVirtualMachine()
+	env := vm.NewEnvironment()
+	RegisterBuiltins(env)
+	posted := make(chan struct{}, 1)
+	vm.SetScheduler(func(fn func()) error {
+		posted <- struct{}{}
+		fn()
+		return nil
+	})
+
+	microtaskObj, ok := env.Get("queueMicrotask")
+	if !ok {
+		t.Fatal("queueMicrotask builtin missing")
+	}
+	microtask := microtaskObj.(*object.Builtin)
+	result := microtask.Fn(env, ast.Position{}, &object.Function{
+		Env:        env,
+		Parameters: nil,
+		Body:       &ast.BlockStmt{},
+	})
+	if result != object.UNDEFINED {
+		t.Fatalf("queueMicrotask should return undefined, got %s", result.Inspect())
+	}
+	select {
+	case <-posted:
+	default:
+		t.Fatal("queueMicrotask callback should run through vm scheduler")
+	}
+}
+
+func TestEval_SetTimeoutRunsThroughVirtualMachineScheduler(t *testing.T) {
+	vm := object.NewVirtualMachine()
+	env := vm.NewEnvironment()
+	RegisterBuiltins(env)
+	posted := make(chan struct{}, 1)
+	vm.SetScheduler(func(fn func()) error {
+		posted <- struct{}{}
+		fn()
+		return nil
+	})
+
+	timeoutObj, ok := env.Get("setTimeout")
+	if !ok {
+		t.Fatal("setTimeout builtin missing")
+	}
+	timeout := timeoutObj.(*object.Builtin)
+	result := timeout.Fn(env, ast.Position{}, &object.Function{
+		Env:        env,
+		Parameters: nil,
+		Body:       &ast.BlockStmt{},
+	}, &object.Number{Value: 1})
+	if _, ok := result.(*object.TimerId); !ok {
+		t.Fatalf("setTimeout should return timer id, got %T", result)
+	}
+	vm.WaitAsync()
+	select {
+	case <-posted:
+	default:
+		t.Fatal("setTimeout callback should run through vm scheduler")
+	}
+}
+
+func TestEval_PromiseCombinatorsSettleThroughVirtualMachineScheduler(t *testing.T) {
+	vm := object.NewVirtualMachine()
+	env := vm.NewEnvironment()
+	RegisterBuiltins(env)
+	posts := 0
+	vm.SetScheduler(func(fn func()) error {
+		posts++
+		fn()
+		return nil
+	})
+
+	l := lexer.New(`
+Promise.all([
+  sleepAsync(1).then(function() { return 1; }),
+  Promise.resolve(2),
+  3,
+]).then(function(values) {
+  return Promise.allSettled([
+    Promise.race([sleepAsync(1).then(function() { return values[0]; }), Promise.resolve(9)]),
+    Promise.reject(new Error("bad")),
+  ]);
+});
+`)
+	p := parser.New(l, "promise_combinator_scheduler_test.gs")
+	program := p.ParseProgram()
+	if len(l.Errors()) > 0 || len(program.Errors) > 0 {
+		t.Fatalf("parse errors: %v %v", l.Errors(), program.Errors)
+	}
+	result := Eval(program, env)
+	promise, ok := result.(*object.Promise)
+	if !ok {
+		t.Fatalf("want promise, got %T", result)
+	}
+	settled := promise.Wait()
+	arr, ok := settled.(*object.Array)
+	if !ok {
+		t.Fatalf("want array, got %T", settled)
+	}
+	if len(arr.Elements) != 2 {
+		t.Fatalf("want 2 settled entries, got %d", len(arr.Elements))
+	}
+	if posts < 3 {
+		t.Fatalf("promise combinators should post async completions through scheduler, got %d posts", posts)
+	}
+}
+
 func TestEval_BuiltinsDocs_ExtendedGlobalMathObjectArrayStringNumber(t *testing.T) {
 	input := `
 function assert(cond, label) {

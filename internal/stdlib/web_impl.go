@@ -15,14 +15,42 @@ import (
 	"time"
 
 	"github.com/issueye/goscript/internal/ast"
+	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
+	stdruntime "runtime"
 )
+
+// numCPUs returns the logical CPU count, used as the default isolated pool
+// size. Kept here (rather than importing runtime.Session) so the web layer
+// stays free of the stdlib<->runtime import cycle.
+func numCPUs() int { return stdruntime.NumCPU() }
 
 type webApp struct {
 	mu          sync.RWMutex
 	handlerMu   sync.Mutex
 	routes      []webRoute
 	concurrency string
+	vm          *object.VirtualMachine
+
+	// isolated-mode state (serial mode leaves these zero). Populated lazily on
+	// the first app.listen() in isolated mode.
+	isolatedMu       sync.Mutex
+	isoPool          *webIsolatedPool // built once at listen time
+	isoBase          webIsolatedTemplate
+	isoBooted        bool
+	isolatedPoolSize int // from createApp({poolSize:N}); defaults to NumCPU
+}
+
+// webIsolatedTemplate captures everything needed to spin up a fresh per-request
+// VM: the app's bootstrap source (re-run to register routes) and the host
+// wiring (workers, root dir, check-types). Captured from the main VM at
+// listen() time.
+type webIsolatedTemplate struct {
+	bootstrapSrc string
+	rootDir      string
+	workers      int
+	checkTypes   bool
+	nativeResolv func(env *object.Environment, specifier string) (object.Object, bool, error)
 }
 
 type webRoute struct {
@@ -67,14 +95,96 @@ func webCreateApp(env *object.Environment, pos ast.Position, args ...object.Obje
 	if errObj != nil {
 		return errObj
 	}
-	app := &webApp{concurrency: concurrency}
+	app := &webApp{concurrency: concurrency, vm: env.VM()}
+	if concurrency == "serial" {
+		app.vm.SetScheduler(func(fn func()) error {
+			app.handlerMu.Lock()
+			defer app.handlerMu.Unlock()
+			fn()
+			return nil
+		})
+	}
+	if concurrency == "isolated" {
+		app.isolatedPoolSize = parseIsolatedPoolSize(pos, args)
+		// Register this app as the serving app for its VM so a per-request
+		// VM (which re-ran the bootstrap) can be located by ServeHTTP.
+		registerIsolatedApp(env.VM(), app)
+	}
 	return webAppObject(app)
 }
 
-func parseWebConcurrency(pos ast.Position, args []object.Object) (string, *object.Error) {
-	const serial = "serial"
+// parseIsolatedPoolSize reads the optional { poolSize: N } from createApp
+// options. Returns 0 when unset (caller falls back to NumCPU).
+func parseIsolatedPoolSize(pos ast.Position, args []object.Object) int {
 	if len(args) == 0 || args[0] == object.UNDEFINED || args[0] == object.NULL {
-		return serial, nil
+		return 0
+	}
+	opts, ok := args[0].(*object.Hash)
+	if !ok {
+		return 0
+	}
+	value, ok := hashValue(opts, "poolSize")
+	if !ok || value == object.UNDEFINED || value == object.NULL {
+		return 0
+	}
+	n, ok := value.(*object.Number)
+	if !ok || n.Value < 1 {
+		return 0
+	}
+	return int(n.Value)
+}
+
+// isolatedAppRegistry maps a VM to the isolated webApp created inside it. Each
+// per-request VM re-runs the app bootstrap, producing its own webApp; the
+// registry lets the isolated ServeHTTP path find the right app for the VM it
+// checked out. One app per VM is the intended isolated-mode contract.
+var isolatedAppRegistry sync.Map // map[*object.VirtualMachine]*webApp
+
+func registerIsolatedApp(vm *object.VirtualMachine, app *webApp) {
+	isolatedAppRegistry.Store(vm, app)
+}
+
+func lookupIsolatedApp(vm *object.VirtualMachine) (*webApp, bool) {
+	v, ok := isolatedAppRegistry.Load(vm)
+	if !ok {
+		return nil, false
+	}
+	return v.(*webApp), true
+}
+
+func unregisterIsolatedApp(vm *object.VirtualMachine) {
+	isolatedAppRegistry.Delete(vm)
+}
+
+// replayingVMs marks VMs currently replaying an isolated bootstrap. webListen
+// consults this to turn app.listen() into a no-op inside per-request VMs (the
+// real server is already running on the main VM). Per-VM granularity avoids a
+// process-wide flag that would serialize bootstrap across warm sessions.
+var replayingVMs sync.Map // map[*object.VirtualMachine]struct{}
+
+func markVMReplaying(vm *object.VirtualMachine, on bool) {
+	if on {
+		replayingVMs.Store(vm, struct{}{})
+	} else {
+		replayingVMs.Delete(vm)
+	}
+}
+
+func vmIsReplaying(vm *object.VirtualMachine) bool {
+	_, ok := replayingVMs.Load(vm)
+	return ok
+}
+
+func parseWebConcurrency(pos ast.Position, args []object.Object) (string, *object.Error) {
+	const (
+		serial   = "serial"
+		isolated = "isolated"
+	)
+	// Default is isolated: each request runs in its own VM with full state
+	// isolation and true multi-core parallelism. serial is available as an
+	// opt-in for apps that rely on shared closure/module state across requests.
+	if len(args) == 0 || args[0] == object.UNDEFINED || args[0] == object.NULL {
+		return isolated, nil
 	}
 	opts, ok := args[0].(*object.Hash)
 	if !ok {
@@ -82,17 +192,17 @@ func parseWebConcurrency(pos ast.Position, args []object.Object) (string, *objec
 	}
 	value, ok := hashValue(opts, "concurrency")
 	if !ok || value == object.UNDEFINED || value == object.NULL {
-		return serial, nil
+		return isolated, nil
 	}
 	mode, ok := value.(*object.String)
 	if !ok {
 		return "", object.NewError(pos, "web.createApp: concurrency must be a string")
 	}
 	switch mode.Value {
-	case "", serial:
+	case "", isolated:
+		return isolated, nil
+	case serial:
 		return serial, nil
-	case "isolated":
-		return "", object.NewError(pos, "web.createApp: isolated concurrency is not implemented yet")
 	default:
 		return "", object.NewError(pos, "web.createApp: unsupported concurrency mode %q", mode.Value)
 	}
@@ -270,6 +380,18 @@ func webListen(env *object.Environment, pos ast.Position, args ...object.Object)
 	if errObj != nil {
 		return errObj
 	}
+	// If this VM is currently replaying an isolated bootstrap, do not start a
+	// second server. Return a stub server object so the script's
+	// `let server = app.listen(...)` keeps working.
+	if vmIsReplaying(env.VM()) {
+		stub := &object.Hash{Pairs: make(map[object.HashKey]object.HashPair)}
+		setHashMember(stub, "port", &object.Number{Value: 0})
+		setHashMember(stub, "address", &object.String{Value: "<replay>"})
+		setHashMember(stub, "close", &object.Builtin{Name: "web.server.close", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+			return object.UNDEFINED
+		}})
+		return stub
+	}
 	var port int
 	if len(args) >= 1 {
 		n, ok := args[0].(*object.Number)
@@ -278,6 +400,17 @@ func webListen(env *object.Environment, pos ast.Position, args ...object.Object)
 		}
 		port = int(n.Value)
 	}
+
+	// In isolated mode, capture the bootstrap source and build the warm pool of
+	// per-request sessions before starting the server. The real http.Server is
+	// started once, here in the main VM; each request is dispatched to a
+	// checked-out session in serveIsolated.
+	if app.concurrency == "isolated" {
+		if err := app.initIsolated(env); err != nil {
+			return object.NewError(pos, "web.listen: %v", err)
+		}
+	}
+
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
 		return object.NewError(pos, "web.listen: %v", err)
@@ -294,12 +427,45 @@ func webListen(env *object.Environment, pos ast.Position, args ...object.Object)
 	setHashMember(result, "port", &object.Number{Value: float64(actualPort)})
 	setHashMember(result, "address", &object.String{Value: listener.Addr().String()})
 	setHashMember(result, "close", &object.Builtin{Name: "web.server.close", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
+		if app.isoPool != nil {
+			app.isoPool.close()
+		}
 		if err := server.Close(); err != nil {
 			return object.NewError(pos, "web.server.close: %v", err)
 		}
 		return object.UNDEFINED
 	}})
 	return result
+}
+
+// initIsolated captures the bootstrap source from the VM and pre-warms a pool
+// of per-request sessions. Called once at listen() time on the main VM.
+func (app *webApp) initIsolated(env *object.Environment) error {
+	app.isolatedMu.Lock()
+	defer app.isolatedMu.Unlock()
+	if app.isoBooted {
+		return nil
+	}
+	src := env.VM().BootstrapSource()
+	if src == "" {
+		return fmt.Errorf("isolated mode requires a bootstrap source; set it via runtime.Session.SetBootstrapSource before evaluating the entry")
+	}
+	poolSize := app.isolatedPoolSize
+	if poolSize < 1 {
+		// Default to NumCPU so concurrent requests can spread across cores.
+		poolSize = numCPUs()
+	}
+	tmpl := webIsolatedTemplate{
+		bootstrapSrc: src,
+		rootDir:      module.FindProjectRoot(""),
+		workers:      poolSize,
+		checkTypes:   env.VM().TypeCheck(),
+	}
+	app.isoBase = tmpl
+	app.isoPool = newWebIsolatedPool(poolSize, tmpl)
+	app.isoPool.warm(poolSize)
+	app.isoBooted = true
+	return nil
 }
 
 func (app *webApp) addRoute(method, path string, handlers []object.Object) {
@@ -314,6 +480,10 @@ func (app *webApp) addRoute(method, path string, handlers []object.Object) {
 }
 
 func (app *webApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if app.concurrency == "isolated" {
+		app.serveIsolated(w, r)
+		return
+	}
 	bodyBytes, _ := io.ReadAll(r.Body)
 	_ = r.Body.Close()
 	ctx := &webContext{req: r, writer: w, body: string(bodyBytes)}
@@ -325,8 +495,9 @@ func (app *webApp) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.handlerMu.Lock()
-	defer app.handlerMu.Unlock()
-	app.runRoutes(routes, ctx, 0)
+	result := app.runRoutes(routes, ctx, 0)
+	app.handlerMu.Unlock()
+	app.waitWebPromise(result)
 }
 
 func (app *webApp) concurrencyMode() string {
@@ -344,7 +515,7 @@ func (app *webApp) snapshotRoutes() []webRoute {
 	return routes
 }
 
-func (app *webApp) runRoutes(routes []webRoute, ctx *webContext, index int) {
+func (app *webApp) runRoutes(routes []webRoute, ctx *webContext, index int) object.Object {
 	for i := index; i < len(routes); i++ {
 		route := routes[i]
 		params, ok := matchWebRoute(route, ctx.req)
@@ -360,16 +531,22 @@ func (app *webApp) runRoutes(routes []webRoute, ctx *webContext, index int) {
 		calledNext := false
 		next := &object.Builtin{Name: "web.next", Fn: func(env *object.Environment, pos ast.Position, args ...object.Object) object.Object {
 			calledNext = true
-			app.runRoutes(routes, ctx, i+1)
-			return object.UNDEFINED
+			return app.runRoutes(routes, ctx, i+1)
 		}}
-		callWebHandlers(route.handlers, ctx, next)
+		result := callWebHandlers(route.handlers, ctx, next)
 		if route.method != "USE" || !calledNext {
-			return
+			return result
 		}
-		return
+		return result
 	}
 	http.NotFound(ctx.writer, ctx.req)
+	return object.UNDEFINED
+}
+
+func (app *webApp) waitWebPromise(result object.Object) {
+	if promise, ok := result.(*object.Promise); ok {
+		promise.Wait()
+	}
 }
 
 func matchWebRoute(route webRoute, r *http.Request) (map[string]string, bool) {

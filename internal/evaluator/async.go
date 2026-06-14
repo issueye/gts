@@ -105,34 +105,44 @@ func builtinPromiseAll(env *object.Environment, pos ast.Position, args ...object
 	results := make([]object.Object, len(arr.Elements))
 	remaining := len(arr.Elements)
 	var mu sync.Mutex
+	vm := env.VM()
 	for i, elem := range arr.Elements {
 		idx := i
-		go func(el object.Object) {
-			if pr, ok := el.(*object.Promise); ok {
+		if pr, ok := elem.(*object.Promise); ok {
+			vm.AsyncAdd(1)
+			vm.Go(func() {
 				val := pr.Wait()
-				if pr.State() == object.PROMISE_REJECTED {
-					if p.State() == object.PROMISE_PENDING {
-						p.Reject(val)
+				state := pr.State()
+				if err := vm.Post(func() {
+					defer vm.AsyncDone()
+					if p.State() != object.PROMISE_PENDING {
+						return
 					}
-					return
+					if state == object.PROMISE_REJECTED {
+						p.Reject(val)
+						return
+					}
+					mu.Lock()
+					defer mu.Unlock()
+					results[idx] = val
+					remaining--
+					if remaining == 0 {
+						p.Resolve(env.ObjectManager().NewArray(results))
+					}
+				}); err != nil {
+					vm.AsyncDone()
+					p.Reject(object.NewError(pos, "Promise.all scheduler error: %v", err))
 				}
-				mu.Lock()
-				results[idx] = val
-				remaining--
-				if remaining == 0 {
-					p.Resolve(env.ObjectManager().NewArray(results))
-				}
-				mu.Unlock()
-			} else {
-				mu.Lock()
-				results[idx] = el
-				remaining--
-				if remaining == 0 {
-					p.Resolve(env.ObjectManager().NewArray(results))
-				}
-				mu.Unlock()
-			}
-		}(elem)
+			})
+			continue
+		}
+		mu.Lock()
+		results[idx] = elem
+		remaining--
+		if remaining == 0 {
+			p.Resolve(env.ObjectManager().NewArray(results))
+		}
+		mu.Unlock()
 	}
 	return p
 }
@@ -148,32 +158,32 @@ func builtinPromiseRace(env *object.Environment, pos ast.Position, args ...objec
 		p.Reject(object.NewError(pos, "Promise.race requires an array"))
 		return p
 	}
+	vm := env.VM()
 	for _, elem := range arr.Elements {
 		if pr, ok := elem.(*object.Promise); ok {
-			if pr.State() != object.PROMISE_PENDING {
+			vm.AsyncAdd(1)
+			vm.Go(func() {
 				val := pr.Wait()
-				if pr.State() == object.PROMISE_REJECTED {
-					p.Reject(val)
-				} else {
+				state := pr.State()
+				if err := vm.Post(func() {
+					defer vm.AsyncDone()
+					if p.State() != object.PROMISE_PENDING {
+						return
+					}
+					if state == object.PROMISE_REJECTED {
+						p.Reject(val)
+						return
+					}
 					p.Resolve(val)
+				}); err != nil {
+					vm.AsyncDone()
+					p.Reject(object.NewError(pos, "Promise.race scheduler error: %v", err))
 				}
-				return p
-			}
+			})
 			continue
 		}
 		p.Resolve(elem)
 		return p
-	}
-	for _, elem := range arr.Elements {
-		go func(el object.Object) {
-			pr := el.(*object.Promise)
-			val := pr.Wait()
-			if pr.State() == object.PROMISE_REJECTED {
-				p.Reject(val)
-				return
-			}
-			p.Resolve(val)
-		}(elem)
 	}
 	return p
 }
@@ -196,26 +206,44 @@ func builtinPromiseAllSettled(env *object.Environment, pos ast.Position, args ..
 	results := make([]object.Object, len(arr.Elements))
 	remaining := len(arr.Elements)
 	var mu sync.Mutex
+	vm := env.VM()
 	for i, elem := range arr.Elements {
 		idx := i
-		go func(el object.Object) {
-			result := settledResult(env, "fulfilled", "value", el)
-			if pr, ok := el.(*object.Promise); ok {
+		if pr, ok := elem.(*object.Promise); ok {
+			vm.AsyncAdd(1)
+			vm.Go(func() {
 				val := pr.Wait()
-				if pr.State() == object.PROMISE_REJECTED {
-					result = settledResult(env, "rejected", "reason", val)
-				} else {
-					result = settledResult(env, "fulfilled", "value", val)
+				state := pr.State()
+				if err := vm.Post(func() {
+					defer vm.AsyncDone()
+					status := "fulfilled"
+					field := "value"
+					if state == object.PROMISE_REJECTED {
+						status = "rejected"
+						field = "reason"
+					}
+					result := settledResult(env, status, field, val)
+					mu.Lock()
+					defer mu.Unlock()
+					results[idx] = result
+					remaining--
+					if remaining == 0 {
+						p.Resolve(env.ObjectManager().NewArray(results))
+					}
+				}); err != nil {
+					vm.AsyncDone()
+					p.Reject(object.NewError(pos, "Promise.allSettled scheduler error: %v", err))
 				}
-			}
-			mu.Lock()
-			results[idx] = result
-			remaining--
-			if remaining == 0 {
-				p.Resolve(env.ObjectManager().NewArray(results))
-			}
-			mu.Unlock()
-		}(elem)
+			})
+			continue
+		}
+		mu.Lock()
+		results[idx] = settledResult(env, "fulfilled", "value", elem)
+		remaining--
+		if remaining == 0 {
+			p.Resolve(env.ObjectManager().NewArray(results))
+		}
+		mu.Unlock()
 	}
 	return p
 }
@@ -245,10 +273,12 @@ func builtinSetTimeout(env *object.Environment, pos ast.Position, args ...object
 	vm := env.VM()
 	vm.AsyncAdd(1)
 	timer := time.AfterFunc(time.Duration(delay.Value)*time.Millisecond, func() {
-		vm.Go(func() {
+		if err := vm.Post(func() {
 			defer done.Do(vm.AsyncDone)
 			callTimerFunction(fn, callArgs)
-		})
+		}); err != nil {
+			done.Do(vm.AsyncDone)
+		}
 	})
 	id := &object.TimerId{ID: vm.NextTimerID()}
 	env.ObjectManager().Register(id)
@@ -284,9 +314,19 @@ func builtinSetInterval(env *object.Environment, pos ast.Position, args ...objec
 		for {
 			select {
 			case <-ticker.C:
-				vm.Go(func() {
+				callbackDone := make(chan struct{})
+				if err := vm.Post(func() {
+					defer close(callbackDone)
 					callTimerFunction(fn, callArgs)
-				})
+				}); err != nil {
+					return
+				}
+				select {
+				case <-callbackDone:
+				case <-stop:
+					<-callbackDone
+					return
+				}
 			case <-stop:
 				return
 			}
@@ -318,10 +358,13 @@ func builtinQueueMicrotask(env *object.Environment, pos ast.Position, args ...ob
 	}
 	vm := env.VM()
 	vm.AsyncAdd(1)
-	vm.Go(func() {
+	if err := vm.Post(func() {
 		defer vm.AsyncDone()
 		callTimerFunction(fn, nil)
-	})
+	}); err != nil {
+		vm.AsyncDone()
+		return object.NewError(pos, "queueMicrotask scheduler error: %v", err)
+	}
 	return object.UNDEFINED
 }
 

@@ -5,18 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/issueye/goscript/internal/async"
-	"github.com/issueye/goscript/internal/evaluator"
-	"github.com/issueye/goscript/internal/lexer"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
-	"github.com/issueye/goscript/internal/parser"
 	"github.com/issueye/goscript/internal/proj"
+	"github.com/issueye/goscript/internal/runtime"
 	"github.com/issueye/goscript/internal/stdlib"
 )
 
@@ -30,13 +27,15 @@ type Options struct {
 }
 
 // Runtime is an embeddable GoScript execution environment for Go programs.
+//
+// Internally a Runtime wraps a runtime.Session, which owns the VM, async pool,
+// module cache, and resolver. Host-specific concerns (host-registered modules,
+// host method CallContext binding) live here; the Session owns the generic
+// loader. This keeps the SDK API stable while sharing the loader with the CLI
+// and @std/web isolated mode.
 type Runtime struct {
-	opts     Options
-	vm       *object.VirtualMachine
-	pool     *async.Pool
-	cache    *module.Cache
-	resolver *module.Resolver
-	rootDir  string
+	opts Options
+	sess *runtime.Session
 
 	modulesMu sync.RWMutex
 	modules   map[string]Module
@@ -44,19 +43,39 @@ type Runtime struct {
 
 // NewRuntime creates a runtime. Call Close when the host is done with it.
 func NewRuntime(opts Options) *Runtime {
-	if opts.Workers < 1 {
-		opts.Workers = runtime.NumCPU()
-	}
-	vm := object.NewVirtualMachine()
-	vm.SetTypeCheck(opts.CheckTypes)
-	pool := async.NewPool(opts.Workers)
-	vm.SetSpawner(pool.Go)
-	return &Runtime{
+	r := &Runtime{
 		opts:    opts,
-		vm:      vm,
-		pool:    pool,
 		modules: make(map[string]Module),
 	}
+	r.sess = runtime.NewSession(runtime.Options{
+		Workers:    opts.Workers,
+		Timeout:    opts.Timeout,
+		CheckTypes: opts.CheckTypes,
+		WorkingDir: opts.WorkingDir,
+		Argv:       opts.Argv,
+		// Host modules are layered in via this resolver, ahead of the global
+		// native registry. The closure captures `r` so host methods receive the
+		// correct *Runtime in their CallContext.
+		NativeResolver: r.resolveHostModule,
+	})
+	return r
+}
+
+// resolveHostModule is the Session's NativeResolver hook. It consults the
+// runtime's host-registered modules; returning (nil, false, nil) falls through
+// to the global native registry inside the Session.
+func (r *Runtime) resolveHostModule(env *object.Environment, specifier string) (object.Object, bool, error) {
+	r.modulesMu.RLock()
+	mod, ok := r.modules[specifier]
+	r.modulesMu.RUnlock()
+	if !ok {
+		return nil, false, nil
+	}
+	exports, err := moduleExports(r, mod, env)
+	if err != nil {
+		return nil, true, err
+	}
+	return exports, true, nil
 }
 
 // Close waits for outstanding async work and releases runtime-owned resources.
@@ -64,43 +83,42 @@ func (r *Runtime) Close() error {
 	if r == nil {
 		return nil
 	}
-	if err := r.drain(); err != nil {
-		return err
+	var err error
+	if r.sess != nil {
+		err = r.sess.Drain()
+		r.sess.Close()
 	}
-	if r.vm != nil {
-		stdlib.StopTerminalSessionsForVM(r.vm)
-	}
-	return nil
+	return err
 }
+
+// VM returns the runtime's virtual machine. Exposed for advanced hosts that
+// need to install low-level hooks (spawner, scheduler, evaluator).
+func (r *Runtime) VM() *object.VirtualMachine {
+	if r == nil || r.sess == nil {
+		return nil
+	}
+	return r.sess.VM()
+}
+
+// Session returns the underlying runtime.Session. Exposed so hosts that need
+// the loader directly (e.g. to build per-request sessions for @std/web) can
+// reach it.
+func (r *Runtime) Session() *runtime.Session { return r.sess }
 
 // RunSource evaluates source code with a synthetic file name.
 func (r *Runtime) RunSource(source, file string) (Value, error) {
 	if file == "" {
 		file = "<embedded>"
 	}
-	baseDir := r.opts.WorkingDir
-	if baseDir == "" {
-		if strings.HasPrefix(file, "<") {
-			baseDir, _ = os.Getwd()
-		} else {
-			baseDir = filepath.Dir(file)
-		}
-	}
-	return r.withTimeout("script execution", func() (Value, error) {
-		restore, err := enterWorkingDir(r.opts.WorkingDir)
+	return r.withTimeout(func() (Value, error) {
+		env := r.sess.NewEnvironment()
+		baseDir := r.baseDirFor(file)
+		r.sess.Configure(env, baseDir)
+		result, err := r.sess.EvalSource(source, file, env)
 		if err != nil {
 			return nil, err
 		}
-		defer restore()
-		r.configure(baseDir)
-		env := r.vm.NewEnvironment()
-		module.SetupExports(env)
-		r.configureModuleLoaders(env, baseDir)
-		result, err := r.evalSource(source, file, env)
-		if err != nil {
-			return nil, err
-		}
-		if err := r.drain(); err != nil {
+		if err := r.sess.Drain(); err != nil {
 			return nil, err
 		}
 		return result, nil
@@ -118,18 +136,11 @@ func (r *Runtime) RunFile(path string, autoMain bool) (Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	return r.withTimeout("script execution", func() (Value, error) {
-		restore, err := enterWorkingDir(r.opts.WorkingDir)
-		if err != nil {
-			return nil, err
-		}
-		defer restore()
-		baseDir := filepath.Dir(absPath)
-		r.configure(baseDir)
-		env := r.vm.NewEnvironment()
-		module.SetupExports(env)
-		r.configureModuleLoaders(env, baseDir)
-		result, err := r.evalSource(string(source), absPath, env)
+	return r.withTimeout(func() (Value, error) {
+		env := r.sess.NewEnvironment()
+		r.sess.Configure(env, filepath.Dir(absPath))
+		r.sess.SetBootstrapSource(string(source))
+		result, err := r.sess.EvalSource(string(source), absPath, env)
 		if err != nil {
 			return nil, err
 		}
@@ -139,7 +150,7 @@ func (r *Runtime) RunFile(path string, autoMain bool) (Value, error) {
 				return nil, err
 			}
 		}
-		if err := r.drain(); err != nil {
+		if err := r.sess.Drain(); err != nil {
 			return nil, err
 		}
 		return result, nil
@@ -173,18 +184,10 @@ func (r *Runtime) CallExport(path, exportName string, args ...Value) (Value, err
 	if err != nil {
 		return nil, err
 	}
-	return r.withTimeout("script execution", func() (Value, error) {
-		restore, err := enterWorkingDir(r.opts.WorkingDir)
-		if err != nil {
-			return nil, err
-		}
-		defer restore()
-		baseDir := filepath.Dir(absPath)
-		r.configure(baseDir)
-		env := r.vm.NewEnvironment()
-		module.SetupExports(env)
-		r.configureModuleLoaders(env, baseDir)
-		if _, err := r.evalSource(string(source), absPath, env); err != nil {
+	return r.withTimeout(func() (Value, error) {
+		env := r.sess.NewEnvironment()
+		r.sess.Configure(env, filepath.Dir(absPath))
+		if _, err := r.sess.EvalSource(string(source), absPath, env); err != nil {
 			return nil, err
 		}
 		fn, err := exportedValue(module.GetExports(env), exportName)
@@ -195,170 +198,27 @@ func (r *Runtime) CallExport(path, exportName string, args ...Value) (Value, err
 		if err != nil {
 			return nil, err
 		}
-		if err := r.drain(); err != nil {
+		if err := r.sess.Drain(); err != nil {
 			return nil, err
 		}
 		return result, nil
 	})
 }
 
-func (r *Runtime) configure(baseDir string) {
-	if r.vm == nil {
-		r.vm = object.NewVirtualMachine()
+func (r *Runtime) baseDirFor(file string) string {
+	if r.opts.WorkingDir != "" {
+		return r.opts.WorkingDir
 	}
-	r.vm.SetTypeCheck(r.opts.CheckTypes)
-	if r.pool == nil {
-		r.pool = async.NewPool(r.opts.Workers)
-		r.vm.SetSpawner(r.pool.Go)
-	}
-	argv := append([]string{}, r.opts.Argv...)
-	if len(argv) == 0 {
-		argv = []string{executableArgv0()}
-	}
-	r.vm.SetArgv(argv)
-	r.rootDir = module.FindProjectRoot(baseDir)
-	r.resolver = module.NewResolver(r.rootDir)
-	r.cache = module.NewCacheWithVM(r.vm)
-}
-
-func (r *Runtime) evalSource(source, file string, env *object.Environment) (Value, error) {
-	l := lexer.New(source)
-	p := parser.New(l, file)
-	program := p.ParseProgram()
-	parseErrors := append([]string{}, l.Errors()...)
-	parseErrors = append(parseErrors, program.Errors...)
-	if len(parseErrors) > 0 {
-		return nil, errors.New(strings.Join(parseErrors, "\n"))
-	}
-	result := evaluator.Eval(program, env)
-	if promise, ok := result.(*object.Promise); ok {
-		var err error
-		result, err = r.waitPromise(promise, "top-level promise")
-		if err != nil {
-			return nil, err
+	if strings.HasPrefix(file, "<") {
+		if wd, err := os.Getwd(); err == nil {
+			return wd
 		}
+		return ""
 	}
-	if object.IsError(result) {
-		return nil, errors.New(result.Inspect())
-	}
-	return result, nil
+	return filepath.Dir(file)
 }
 
-func (r *Runtime) configureModuleLoaders(env *object.Environment, baseDir string) {
-	env.ModuleDir = baseDir
-	requireFromEnv := func(loadEnv *object.Environment, specifier string) (object.Object, error) {
-		currentBaseDir := loadEnv.ModuleDir
-		if currentBaseDir == "" {
-			currentBaseDir = baseDir
-		}
-		resolved, err := r.resolver.Resolve(specifier, module.ResolveOptions{ProjectRoot: r.rootDir, BaseDir: currentBaseDir})
-		if err != nil {
-			return nil, err
-		}
-		if resolved.Kind == module.ModuleKindNative {
-			if native, ok, err := r.localNativeModule(specifier, loadEnv); ok || err != nil {
-				return native, err
-			}
-			native, ok := module.GetNative(specifier, loadEnv)
-			if !ok {
-				return nil, fmt.Errorf("native module %s is not registered", specifier)
-			}
-			return native, nil
-		}
-		return r.requireResolved(resolved)
-	}
-	evaluator.RegisterBuiltinsWithCache(env, func(specifier string) (object.Object, error) {
-		return requireFromEnv(env, specifier)
-	})
-	env.VM().SetImportFunc(func(importEnv *object.Environment, specifier string) (object.Object, error) {
-		return requireFromEnv(importEnv, specifier)
-	})
-}
-
-func (r *Runtime) localNativeModule(specifier string, env *object.Environment) (object.Object, bool, error) {
-	r.modulesMu.RLock()
-	mod, ok := r.modules[specifier]
-	r.modulesMu.RUnlock()
-	if !ok {
-		return nil, false, nil
-	}
-	exports, err := moduleExports(r, mod, env)
-	if err != nil {
-		return nil, true, err
-	}
-	return exports, true, nil
-}
-
-func (r *Runtime) requireResolved(resolved module.ResolvedModule) (object.Object, error) {
-	cacheKey := resolved.ID
-	if cacheKey == "" {
-		cacheKey = resolved.Path
-	}
-	if cached := r.cache.Get(cacheKey); cached != nil {
-		return module.GetExports(cached), nil
-	}
-	env := r.cache.GetOrCreate(cacheKey)
-	module.SetupExports(env)
-	r.configureModuleLoaders(env, resolvedModuleDir(resolved))
-	source, err := readResolvedSource(resolved)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := r.evalSource(source, resolved.Path, env); err != nil {
-		return nil, err
-	}
-	return module.GetExports(env), nil
-}
-
-func (r *Runtime) waitPromise(p *object.Promise, label string) (object.Object, error) {
-	if r.opts.Timeout <= 0 {
-		return p.Wait(), nil
-	}
-	done := make(chan object.Object, 1)
-	go func() {
-		done <- p.Wait()
-	}()
-	select {
-	case result := <-done:
-		return result, nil
-	case <-time.After(r.opts.Timeout):
-		return nil, fmt.Errorf("%s timed out after %s", label, r.opts.Timeout)
-	}
-}
-
-func (r *Runtime) drain() error {
-	if r.vm != nil {
-		if err := r.waitGroup("async tasks", r.vm.WaitAsync); err != nil {
-			return err
-		}
-	}
-	if r.pool != nil {
-		if err := r.waitGroup("worker pool", r.pool.Wait); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *Runtime) waitGroup(label string, wait func()) error {
-	if r.opts.Timeout <= 0 {
-		wait()
-		return nil
-	}
-	done := make(chan struct{})
-	go func() {
-		wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		return nil
-	case <-time.After(r.opts.Timeout):
-		return fmt.Errorf("%s timed out after %s", label, r.opts.Timeout)
-	}
-}
-
-func (r *Runtime) withTimeout(label string, fn func() (Value, error)) (Value, error) {
+func (r *Runtime) withTimeout(fn func() (Value, error)) (Value, error) {
 	if r.opts.Timeout <= 0 {
 		return fn()
 	}
@@ -379,30 +239,24 @@ func (r *Runtime) withTimeout(label string, fn func() (Value, error)) (Value, er
 	case result := <-done:
 		return result.value, result.err
 	case <-timer.C:
-		return nil, fmt.Errorf("%s timed out after %s", label, r.opts.Timeout)
+		return nil, fmt.Errorf("script execution timed out after %s", r.opts.Timeout)
 	}
 }
 
-func enterWorkingDir(dir string) (func(), error) {
-	if dir == "" {
-		return func() {}, nil
+// asyncPool is retained for backwards-compatible access from hosts that may
+// reach into it; it mirrors the Session's pool.
+func (r *Runtime) asyncPool() *async.Pool {
+	if r == nil || r.sess == nil {
+		return nil
 	}
-	oldWd, err := os.Getwd()
-	if err != nil {
-		return nil, err
-	}
-	if err := os.Chdir(dir); err != nil {
-		return nil, err
-	}
-	return func() {
-		_ = os.Chdir(oldWd)
-	}, nil
+	return r.sess.Pool()
 }
 
-func executableArgv0() string {
-	exe, err := os.Executable()
-	if err == nil && exe != "" {
-		return exe
-	}
-	return "goscript"
-}
+// ensure stdlib is referenced even if all prior call sites moved to the
+// Session (StopTerminalSessionsForVM is invoked via Session.Close, but keep
+// the import alive for hosts relying on stdlib symbols re-exported elsewhere).
+var _ = stdlib.StopTerminalSessionsForVM
+
+// errRuntimeClosed is a sentinel for closed-runtimes; currently unused but kept
+// to make future Close discipline explicit.
+var errRuntimeClosed = errors.New("runtime is closed")

@@ -51,53 +51,93 @@ func chainPromise(env *object.Environment, pos ast.Position, promise *object.Pro
 	vm := env.VM()
 	vm.AsyncAdd(1)
 	vm.Go(func() {
-		defer vm.AsyncDone()
 		value := promise.Wait()
 		state := promise.State()
-
-		if onFinally != nil && onFinally != object.UNDEFINED {
-			finalResult := applyFunction(onFinally, env, nil, pos)
-			if finalPromise, ok := finalResult.(*object.Promise); ok {
-				finalResult = finalPromise.Wait()
-				if finalPromise.State() == object.PROMISE_REJECTED {
-					next.Reject(finalResult)
-					return
-				}
-			}
-			if object.IsRuntimeError(finalResult) {
-				next.Reject(finalResult)
-				return
-			}
+		if err := vm.Post(func() {
+			defer vm.AsyncDone()
+			settlePromiseContinuation(env, pos, next, value, state, onFulfilled, onRejected, onFinally)
+		}); err != nil {
+			vm.AsyncDone()
+			next.Reject(object.NewError(pos, "Promise continuation scheduler error: %v", err))
 		}
-
-		if state == object.PROMISE_FULFILLED {
-			if onFulfilled == nil || onFulfilled == object.UNDEFINED {
-				next.Resolve(value)
-				return
-			}
-			result := applyFunction(onFulfilled, env, []object.Object{value}, pos)
-			settleChainedPromise(next, result)
-			return
-		}
-
-		if onRejected == nil || onRejected == object.UNDEFINED {
-			next.Reject(value)
-			return
-		}
-		result := applyFunction(onRejected, env, []object.Object{catchablePromiseReason(value)}, pos)
-		settleChainedPromise(next, result)
 	})
 	return next
 }
 
-func settleChainedPromise(next *object.Promise, result object.Object) {
-	if promise, ok := result.(*object.Promise); ok {
-		settled := promise.Wait()
-		if promise.State() == object.PROMISE_REJECTED {
-			next.Reject(settled)
+func settlePromiseContinuation(env *object.Environment, pos ast.Position, next *object.Promise, value object.Object, state object.PromiseState, onFulfilled, onRejected, onFinally object.Object) {
+	if onFinally != nil && onFinally != object.UNDEFINED {
+		finalResult := applyFunction(onFinally, env, nil, pos)
+		if finalPromise, ok := finalResult.(*object.Promise); ok {
+			settleAfterFinallyPromise(env, pos, next, finalPromise, value, state, onFulfilled, onRejected)
 			return
 		}
-		result = settled
+		if object.IsRuntimeError(finalResult) {
+			next.Reject(finalResult)
+			return
+		}
+	}
+	settlePromiseContinuationAfterFinally(env, pos, next, value, state, onFulfilled, onRejected)
+}
+
+func settleAfterFinallyPromise(env *object.Environment, pos ast.Position, next *object.Promise, finalPromise *object.Promise, value object.Object, state object.PromiseState, onFulfilled, onRejected object.Object) {
+	vm := env.VM()
+	vm.AsyncAdd(1)
+	vm.Go(func() {
+		finalResult := finalPromise.Wait()
+		finalState := finalPromise.State()
+		if err := vm.Post(func() {
+			defer vm.AsyncDone()
+			if finalState == object.PROMISE_REJECTED {
+				next.Reject(finalResult)
+				return
+			}
+			settlePromiseContinuationAfterFinally(env, pos, next, value, state, onFulfilled, onRejected)
+		}); err != nil {
+			vm.AsyncDone()
+			next.Reject(object.NewError(pos, "Promise finally scheduler error: %v", err))
+		}
+	})
+}
+
+func settlePromiseContinuationAfterFinally(env *object.Environment, pos ast.Position, next *object.Promise, value object.Object, state object.PromiseState, onFulfilled, onRejected object.Object) {
+	if state == object.PROMISE_FULFILLED {
+		if onFulfilled == nil || onFulfilled == object.UNDEFINED {
+			next.Resolve(value)
+			return
+		}
+		result := applyFunction(onFulfilled, env, []object.Object{value}, pos)
+		settleChainedPromise(env, pos, next, result)
+		return
+	}
+
+	if onRejected == nil || onRejected == object.UNDEFINED {
+		next.Reject(value)
+		return
+	}
+	result := applyFunction(onRejected, env, []object.Object{catchablePromiseReason(value)}, pos)
+	settleChainedPromise(env, pos, next, result)
+}
+
+func settleChainedPromise(env *object.Environment, pos ast.Position, next *object.Promise, result object.Object) {
+	if promise, ok := result.(*object.Promise); ok {
+		vm := env.VM()
+		vm.AsyncAdd(1)
+		vm.Go(func() {
+			settled := promise.Wait()
+			state := promise.State()
+			if err := vm.Post(func() {
+				defer vm.AsyncDone()
+				if state == object.PROMISE_REJECTED {
+					next.Reject(settled)
+					return
+				}
+				next.Resolve(settled)
+			}); err != nil {
+				vm.AsyncDone()
+				next.Reject(object.NewError(pos, "Promise chain scheduler error: %v", err))
+			}
+		})
+		return
 	}
 	if object.IsRuntimeError(result) {
 		next.Reject(result)

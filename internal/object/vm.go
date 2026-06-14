@@ -23,6 +23,12 @@ type VirtualMachine struct {
 	importer        func(env *Environment, path string) (Object, error)
 	evaluator       func(node interface{}, env *Environment) Object
 	argv            atomic.Value // stores []string
+
+	// bootstrapSource is the entry script source this VM is (or was) executing.
+	// @std/web isolated mode reads it at app.listen() time so each per-request
+	// VM can re-run the same app definition to reconstruct its routes. It is set
+	// by hosts (CLI, SDK, the runtime Session) before evaluating the entry.
+	bootstrapSource atomic.Value // stores string
 }
 
 func NewVirtualMachine() *VirtualMachine {
@@ -173,6 +179,27 @@ func (vm *VirtualMachine) Argv() []string {
 		return append([]string{}, argv...)
 	}
 	return nil
+}
+
+// SetBootstrapSource records the entry script source this VM is executing. Used
+// by @std/web isolated mode to replay the app definition in per-request VMs.
+func (vm *VirtualMachine) SetBootstrapSource(source string) {
+	if vm == nil {
+		return
+	}
+	vm.bootstrapSource.Store(source)
+}
+
+// BootstrapSource returns the entry script source previously recorded via
+// SetBootstrapSource, or "" if none was set.
+func (vm *VirtualMachine) BootstrapSource() string {
+	if vm == nil {
+		return ""
+	}
+	if s, ok := vm.bootstrapSource.Load().(string); ok {
+		return s
+	}
+	return ""
 }
 
 func (vm *VirtualMachine) SetSpawner(spawn func(func())) {

@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/issueye/goscript/internal/async"
 	"github.com/issueye/goscript/internal/module"
 	"github.com/issueye/goscript/internal/object"
+	"github.com/issueye/goscript/internal/runtime"
 )
 
 const replHelp = `.help        Show this help
@@ -76,8 +76,9 @@ func (r *runner) runREPL(cfg replConfig) error {
 
 type replSession struct {
 	r   *runner
-	env *object.Environment
-	cwd string
+	sess *runtime.Session
+	env  *object.Environment
+	cwd  string
 }
 
 func (r *runner) newREPLSession() (*replSession, error) {
@@ -85,22 +86,29 @@ func (r *runner) newREPLSession() (*replSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	r.checkoutVM()
-	r.vm.SetArgv([]string{executableArgv0(), "<repl>"})
-	r.pool = async.NewPool(r.opts.workers)
-	r.vm.SetSpawner(r.pool.Go)
-	r.cache = module.NewCacheWithVM(r.vm)
-	r.rootDir = module.FindProjectRoot(cwd)
-	r.resolver = module.NewResolver(r.rootDir)
-	env := r.vm.NewEnvironment()
-	module.SetupExports(env)
-	r.configureModuleLoaders(env, cwd)
-	return &replSession{r: r, env: env, cwd: cwd}, nil
+	// A REPL keeps one long-lived Session so that bindings, required modules,
+	// and async state persist across input lines. The plugin host (if any on a
+	// future REPL-with-plugins path) would wire in here via NativeResolver.
+	r.sess = runtime.NewSession(runtime.Options{
+		Workers: r.opts.workers,
+		Timeout: 0, // REPL never auto-times out; the user controls the session.
+		CheckTypes: r.opts.checkTypes,
+		RootDir: module.FindProjectRoot(cwd),
+	})
+	r.sess.VM().SetArgv([]string{executableArgv0(), "<repl>"})
+	env := r.sess.NewEnvironment()
+	r.sess.Configure(env, cwd)
+	return &replSession{r: r, sess: r.sess, env: env, cwd: cwd}, nil
 }
 
 func (s *replSession) close() {
-	_ = s.r.drainRuntime()
-	s.r.releaseVM()
+	if s.sess == nil {
+		return
+	}
+	_ = s.sess.Drain()
+	s.sess.Close()
+	s.sess = nil
+	s.r.sess = nil
 }
 
 func (s *replSession) handleCommand(line string, out, errOut io.Writer) bool {
@@ -135,12 +143,12 @@ func (s *replSession) load(path string, out, errOut io.Writer) {
 }
 
 func (s *replSession) evalAndPrint(src string, out, errOut io.Writer) {
-	result, err := s.r.evalSource(src, "<repl>", s.env)
+	result, err := s.sess.EvalSource(src, "<repl>", s.env)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
 		return
 	}
-	if err := s.r.drainRuntime(); err != nil {
+	if err := s.sess.Drain(); err != nil {
 		fmt.Fprintln(errOut, err)
 		return
 	}

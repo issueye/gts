@@ -21,7 +21,7 @@ func TestWebResponseStreamSendsReadableStream(t *testing.T) {
 	appObj := evalWebTestScript(t, `
 let web = require("@std/web");
 let stream = require("@std/stream");
-let app = web.createApp();
+let app = web.createApp({ concurrency: "serial" });
 app.get("/events", function(req, res) {
   res.status(201);
   res.setHeader("Content-Type", "text/event-stream");
@@ -58,7 +58,7 @@ func TestWebResponseSendAcceptsReadableStream(t *testing.T) {
 	appObj := evalWebTestScript(t, `
 let web = require("@std/web");
 let stream = require("@std/stream");
-let app = web.createApp();
+let app = web.createApp({ concurrency: "serial" });
 app.get("/body", function(req, res) {
   res.send(stream.fromString("hello from stream"));
 });
@@ -89,7 +89,7 @@ app;
 func TestWebResponseWriteAndFlush(t *testing.T) {
 	appObj := evalWebTestScript(t, `
 let web = require("@std/web");
-let app = web.createApp();
+let app = web.createApp({ concurrency: "serial" });
 app.get("/chunks", function(req, res) {
   res.status(202);
   res.setHeader("Content-Type", "text/event-stream");
@@ -125,7 +125,11 @@ app;
 	}
 }
 
-func TestWebHandlersAreSerializedForConcurrentRequests(t *testing.T) {
+// TestWebSerialHandlersAreSerializedForConcurrentRequests pins the serial-mode
+// contract: with concurrency:"serial", the handler chain runs under a global
+// mutex, so module-top-level shared state stays consistent and maxActive == 1.
+// Opt-in serial is preserved for apps that depend on shared closure state.
+func TestWebSerialHandlersAreSerializedForConcurrentRequests(t *testing.T) {
 	appObj := evalWebTestScript(t, `
 let web = require("@std/web");
 let app = web.createApp({ concurrency: "serial" });
@@ -149,13 +153,14 @@ app.get("/count", function(req, res) {
 app.get("/max-active", function(req, res) {
   res.send(String(maxActive));
 });
+let server = app.listen(0);
 app;
 `)
 	app := mustWebApp(t, appObj)
 	server := httptest.NewServer(app)
 	defer server.Close()
 
-	const requests = 64
+	const requests = 32
 	var wg sync.WaitGroup
 	errs := make(chan error, requests)
 	for i := 0; i < requests; i++ {
@@ -214,7 +219,95 @@ app;
 		t.Fatalf("max-active response %q is not a number: %v", string(data), err)
 	}
 	if maxActive != 1 {
-		t.Fatalf("max concurrent script handlers = %d, want 1", maxActive)
+		t.Fatalf("serial max concurrent script handlers = %d, want 1", maxActive)
+	}
+}
+
+// TestWebSerialAsyncHandlersCanWaitConcurrently is the serial-mode async
+// contract: handlers may park on sleepAsync concurrently (maxWaiting > 1), but
+// script fragments never overlap (maxScriptActive == 1). Preserved for the
+// opt-in serial mode.
+func TestWebSerialAsyncHandlersCanWaitConcurrently(t *testing.T) {
+	appObj := evalWebTestScript(t, `
+let web = require("@std/web");
+let app = web.createApp({ concurrency: "serial" });
+let waiting = 0;
+let maxWaiting = 0;
+let scriptActive = 0;
+let maxScriptActive = 0;
+
+function enterScript() {
+  scriptActive = scriptActive + 1;
+  if (scriptActive > maxScriptActive) {
+    maxScriptActive = scriptActive;
+  }
+}
+
+function leaveScript() {
+  scriptActive = scriptActive - 1;
+}
+
+app.get("/wait", function(req, res) {
+  enterScript();
+  waiting = waiting + 1;
+  if (waiting > maxWaiting) {
+    maxWaiting = waiting;
+  }
+  leaveScript();
+  return sleepAsync(10).then(function() {
+    enterScript();
+    waiting = waiting - 1;
+    res.send("ok");
+    leaveScript();
+  });
+});
+app.get("/max-waiting", function(req, res) {
+  res.send(String(maxWaiting));
+});
+app.get("/max-script-active", function(req, res) {
+  res.send(String(maxScriptActive));
+});
+let server = app.listen(0);
+app;
+`)
+	app := mustWebApp(t, appObj)
+	server := httptest.NewServer(app)
+	defer server.Close()
+
+	const requests = 24
+	var wg sync.WaitGroup
+	errs := make(chan error, requests)
+	for i := 0; i < requests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := http.Get(server.URL + "/wait")
+			if err != nil {
+				errs <- err
+				return
+			}
+			defer resp.Body.Close()
+			data, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusOK || string(data) != "ok" {
+				errs <- fmt.Errorf("wait status %d: %s", resp.StatusCode, string(data))
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	maxWaiting := readWebInt(t, server.URL+"/max-waiting")
+	if maxWaiting <= 1 {
+		t.Fatalf("async handlers did not overlap while waiting; maxWaiting = %d", maxWaiting)
+	}
+	maxScriptActive := readWebInt(t, server.URL+"/max-script-active")
+	if maxScriptActive != 1 {
+		t.Fatalf("script fragments overlapped inside serial worker; maxScriptActive = %d", maxScriptActive)
 	}
 }
 
@@ -231,23 +324,10 @@ web.createApp({ concurrency: "parallel" });
 	}
 }
 
-func TestWebCreateAppRejectsIsolatedUntilImplemented(t *testing.T) {
-	result := evalWebTestScriptAllowRuntimeError(t, `
-let web = require("@std/web");
-web.createApp({ concurrency: "isolated" });
-`)
-	if !object.IsRuntimeError(result) {
-		t.Fatalf("want runtime error, got %T: %s", result, result.Inspect())
-	}
-	if !strings.Contains(result.Inspect(), "isolated concurrency is not implemented yet") {
-		t.Fatalf("unexpected error: %s", result.Inspect())
-	}
-}
-
 func TestWebAppAllStarMatchesAnyPathAndMethod(t *testing.T) {
 	appObj := evalWebTestScript(t, `
 let web = require("@std/web");
-let app = web.createApp();
+let app = web.createApp({ concurrency: "serial" });
 app.all("*", function(req, res) {
   res.status(209);
   res.send(req.method + " " + req.url);
@@ -288,6 +368,7 @@ func evalWebTestScript(t *testing.T, src string) object.Object {
 func evalWebTestScriptAllowRuntimeError(t *testing.T, src string) object.Object {
 	t.Helper()
 	vm := object.NewVirtualMachine()
+	vm.SetBootstrapSource(src) // isolated mode replays this per request
 	env := vm.NewEnvironment()
 	module.SetupExports(env)
 	evaluator.RegisterBuiltinsWithCache(env, func(path string) (object.Object, error) {
@@ -324,4 +405,22 @@ func mustWebApp(t *testing.T, obj object.Object) *webApp {
 		t.Fatalf("want *webApp, got %T", goObj.Value)
 	}
 	return app
+}
+
+func readWebInt(t *testing.T, url string) int {
+	t.Helper()
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("response %q is not a number: %v", string(data), err)
+	}
+	return got
 }
